@@ -169,7 +169,10 @@ fn handle_mouse_scroll(app: &mut App, is_up: bool, _col: u16, _row: u16, _screen
                 filtered_indices,
                 mut scroll_offset,
             } => {
-                let visible_items = 12usize;
+                let popup_area = crate::renderer::centered_rect(78, 75, _screen_area);
+                let visible_items = crate::modals::CommandPaletteGeometry::compute(popup_area)
+                    .list_inner_height()
+                    .max(1);
                 if is_up {
                     selected_index = selected_index.saturating_sub(1);
                     if selected_index < scroll_offset {
@@ -625,16 +628,9 @@ fn handle_left_click_down(app: &mut App, col: u16, row: u16, screen_area: Rect) 
                 items,
                 filtered_indices,
             } => {
-                let list_start_y = popup_area.y + 5;
-                let list_end_y = popup_area.y + popup_area.height.saturating_sub(2);
-                let list_max_x = if popup_area.width >= 70 {
-                    popup_area.x + (popup_area.width * 58 / 100)
-                } else {
-                    popup_area.x + popup_area.width
-                };
-                if row >= list_start_y && row < list_end_y && col <= list_max_x {
-                    let clicked_offset = (row - list_start_y) as usize;
-                    let clicked_idx = scroll_offset + clicked_offset;
+                let geometry = crate::modals::CommandPaletteGeometry::compute(popup_area);
+                if let Some(rel_row) = geometry.row_to_visible_index(col, row) {
+                    let clicked_idx = scroll_offset + rel_row;
                     if clicked_idx < filtered_indices.len()
                         && let Some(&item_idx) = filtered_indices.get(clicked_idx)
                         && let Some(item) = items.get(item_idx)
@@ -661,7 +657,14 @@ fn handle_left_click_down(app: &mut App, col: u16, row: u16, screen_area: Rect) 
                             "none" => None,
                             other => Some(other.to_string()),
                         };
-                        app.apply_reasoning_effort(effort_opt);
+                        if let Err(e) = app.apply_reasoning_effort(effort_opt) {
+                            app.transcript
+                                .push(crate::transcript::TranscriptItem::notice(
+                                    format!("Failed to apply reasoning effort: {e}"),
+                                    crate::transcript::NoticeLevel::Error,
+                                ));
+                            app.sync_virtualizer();
+                        }
                         return;
                     }
                 }

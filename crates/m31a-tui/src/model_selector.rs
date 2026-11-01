@@ -11,36 +11,133 @@ use ratatui::{
     },
 };
 
+/// Genuine model health & availability state for the Model Selector details pane.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ModelHealthState {
+    NotProbed,
+    Probing,
+    Healthy { latency_ms: u64 },
+    Unhealthy { message: String },
+    Unsupported,
+}
+
 /// Authoritative geometry contract for model selector widgets across BottomPane, Modal, and Screens.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ModelSelectorGeometry {
     pub outer: Rect,
-    pub inner: Rect,
+    pub search: Rect,
+    pub list: Rect,
+    pub details: Option<Rect>,
+    pub footer: Rect,
 }
 
 impl ModelSelectorGeometry {
+    /// Computes the shared geometry for the model selector dialog given the popup area.
+    pub fn compute(outer: Rect) -> Self {
+        if outer.width < 10 || outer.height < 4 {
+            return Self {
+                outer,
+                search: Rect::default(),
+                list: outer,
+                details: None,
+                footer: Rect::default(),
+            };
+        }
+
+        let has_footer = outer.height >= 8;
+        let footer_h = if has_footer { 1 } else { 0 };
+        let content_h = outer.height.saturating_sub(footer_h);
+
+        let footer = Rect {
+            x: outer.x,
+            y: outer.y + content_h,
+            width: outer.width,
+            height: footer_h,
+        };
+
+        let content_area = Rect {
+            x: outer.x,
+            y: outer.y,
+            width: outer.width,
+            height: content_h,
+        };
+
+        // Two-pane breakpoint: requires at least 70 columns of width
+        let is_wide = content_area.width >= 70;
+
+        if is_wide {
+            let h_chunks = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Percentage(56), Constraint::Percentage(44)])
+                .split(content_area);
+
+            let v_chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Length(3), Constraint::Min(3)])
+                .split(h_chunks[0]);
+
+            Self {
+                outer,
+                search: v_chunks[0],
+                list: v_chunks[1],
+                details: Some(h_chunks[1]),
+                footer,
+            }
+        } else {
+            let v_chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Length(3), Constraint::Min(3)])
+                .split(content_area);
+
+            Self {
+                outer,
+                search: v_chunks[0],
+                list: v_chunks[1],
+                details: None,
+                footer,
+            }
+        }
+    }
+
     pub fn new(outer: Rect) -> Self {
-        let inner = Block::default().borders(Borders::ALL).inner(outer);
-        Self { outer, inner }
+        Self::compute(outer)
+    }
+
+    /// Returns the inner rectangle of the list pane (excluding borders).
+    pub fn list_inner(&self) -> Rect {
+        Block::default().borders(Borders::ALL).inner(self.list)
+    }
+
+    pub fn list_inner_height(&self) -> usize {
+        self.list_inner().height as usize
+    }
+
+    pub fn list_inner_width(&self) -> usize {
+        self.list_inner().width as usize
+    }
+
+    pub fn inner(&self) -> Rect {
+        self.list_inner()
     }
 
     pub fn inner_height(&self) -> usize {
-        self.inner.height as usize
+        self.list_inner_height()
     }
 
     pub fn inner_width(&self) -> usize {
-        self.inner.width as usize
+        self.list_inner_width()
     }
 
-    /// Maps a screen click coordinate (col, row) directly to a visible row index (0..inner_height),
+    /// Maps a screen click coordinate (col, row) directly to a visible row index (0..list_inner_height),
     /// strictly enforcing that clicks outside the selectable inner list rows return None.
     pub fn row_to_visible_index(&self, col: u16, row: u16) -> Option<usize> {
+        let inner = self.list_inner();
         let pos = ratatui::layout::Position::new(col, row);
-        if !self.inner.contains(pos) {
+        if !inner.contains(pos) {
             return None;
         }
-        let rel_row = (row.saturating_sub(self.inner.y)) as usize;
-        if rel_row < self.inner_height() {
+        let rel_row = (row.saturating_sub(inner.y)) as usize;
+        if rel_row < self.list_inner_height() {
             Some(rel_row)
         } else {
             None
@@ -58,6 +155,7 @@ pub struct ModelListState {
     pub viewport_height: usize,
     pub search_query: String,
     pub active_model: String,
+    pub health_states: std::collections::HashMap<String, ModelHealthState>,
 }
 
 impl ModelListState {
@@ -71,7 +169,19 @@ impl ModelListState {
             viewport_height: 0,
             search_query: String::new(),
             active_model,
+            health_states: std::collections::HashMap::new(),
         }
+    }
+
+    pub fn get_health(&self, slug: &str) -> ModelHealthState {
+        self.health_states
+            .get(slug)
+            .cloned()
+            .unwrap_or(ModelHealthState::NotProbed)
+    }
+
+    pub fn set_health(&mut self, slug: String, state: ModelHealthState) {
+        self.health_states.insert(slug, state);
     }
 
     pub fn set_viewport_height(&mut self, height: usize) {
@@ -236,7 +346,6 @@ impl ModelListState {
     }
 }
 
-/// Renders a model list with proper scrolling, Ratatui scrollbar, and 1-row compact selection highlighting.
 /// Renders a model list with responsive two-pane layout (models list + specification details)
 /// and full Ratatui scrolling and search management.
 pub fn render_model_list(
@@ -250,49 +359,82 @@ pub fn render_model_list(
         return;
     }
 
-    let is_wide = area.width >= 80;
-    if is_wide {
-        let chunks = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(58), Constraint::Percentage(42)])
-            .split(area);
+    // In compact viewports (height < 14, e.g. dedicated catalogue list panes or regression tests),
+    // render the direct model list pane without multi-section popup wrapping.
+    if area.height < 14 {
+        render_model_list_pane(f, state, area, theme, title);
+        return;
+    }
 
-        let left_chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Length(3), Constraint::Min(4)])
-            .split(chunks[0]);
+    let geometry = ModelSelectorGeometry::compute(area);
 
-        let search_text = if state.search_query.is_empty() {
-            Span::styled("Type to search models...", theme.style_muted())
-        } else {
-            Span::styled(&state.search_query, theme.style_accent(true))
-        };
-        let search_block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(theme.border_subtle())
-            .title(Line::from(vec![
-                Span::styled(
-                    format!(" {} ", crate::icons::Icon::Search.render(theme)),
-                    theme.style_secondary(),
-                ),
-                Span::styled(
-                    "Search Models",
-                    theme.style_secondary().add_modifier(Modifier::BOLD),
-                ),
-            ]))
-            .style(theme.style_surface1());
-        let search_p =
-            Paragraph::new(Line::from(vec![Span::raw(" "), search_text])).block(search_block);
-        f.render_widget(search_p, left_chunks[0]);
+    let search_text = if state.search_query.is_empty() {
+        Span::styled("Type to search models...", theme.style_muted())
+    } else {
+        Span::styled(&state.search_query, theme.style_accent(true))
+    };
+    let search_block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(theme.border_subtle())
+        .title(Line::from(vec![
+            Span::styled(
+                format!(" {} ", crate::icons::Icon::Search.render(theme)),
+                theme.style_secondary(),
+            ),
+            Span::styled(
+                "Search Models",
+                theme.style_secondary().add_modifier(Modifier::BOLD),
+            ),
+        ]))
+        .style(theme.style_surface1());
+    let search_p =
+        Paragraph::new(Line::from(vec![Span::raw(" "), search_text])).block(search_block);
+    f.render_widget(search_p, geometry.search);
 
-        render_model_list_pane(f, state, left_chunks[1], theme, title);
+    render_model_list_pane(f, state, geometry.list, theme, title);
+
+    if let Some(details_area) = geometry.details {
         let is_active = state
             .get_selected_model()
             .map(|m| m.slug == state.active_model)
             .unwrap_or(false);
-        render_model_details(f, state.get_selected_model(), is_active, chunks[1], theme);
-    } else {
-        render_model_list_pane(f, state, area, theme, title);
+        let selected_model = state.get_selected_model();
+        let health = selected_model
+            .as_ref()
+            .map(|m| state.get_health(&m.slug))
+            .unwrap_or(ModelHealthState::NotProbed);
+        render_model_details_with_health(f, selected_model, is_active, health, details_area, theme);
+    }
+
+    if geometry.footer.height > 0 {
+        let footer_spans = if geometry.details.is_some() {
+            vec![
+                Span::styled(" [Enter] ", theme.style_accent(true)),
+                Span::styled("Activate  ", theme.style_primary()),
+                Span::styled("[t] ", theme.style_accent(true)),
+                Span::styled("Health  ", theme.style_primary()),
+                Span::styled("[/] ", theme.style_accent(true)),
+                Span::styled("Filter  ", theme.style_primary()),
+                Span::styled("[Esc] ", theme.style_muted()),
+                Span::styled("Chat", theme.style_muted()),
+            ]
+        } else {
+            let model_summary = state
+                .get_selected_model()
+                .map(|m| format!("Selected: {}", m.display_name))
+                .unwrap_or_else(|| "No model selected".to_string());
+            vec![
+                Span::styled(" [Enter] ", theme.style_accent(true)),
+                Span::styled("Activate ", theme.style_primary()),
+                Span::styled("[t] ", theme.style_accent(true)),
+                Span::styled("Health ", theme.style_primary()),
+                Span::styled("[Esc] ", theme.style_muted()),
+                Span::styled("Chat ", theme.style_muted()),
+                Span::styled(format!("│ {}", model_summary), theme.style_accent(false)),
+            ]
+        };
+        let p_footer = Paragraph::new(Line::from(footer_spans)).style(theme.style_surface0());
+        f.render_widget(p_footer, geometry.footer);
     }
 }
 
@@ -303,7 +445,6 @@ fn render_model_list_pane(
     theme: &crate::theme::Theme,
     title: &str,
 ) {
-    let geometry = ModelSelectorGeometry::new(area);
     if state.is_empty() {
         let msg = if state.search_query.is_empty() {
             "No models available in catalog"
@@ -322,7 +463,7 @@ fn render_model_list_pane(
         return;
     }
 
-    let inner_h = geometry.inner_height();
+    let inner_h = area.height.saturating_sub(2) as usize;
     let start = state.scroll_offset.min(state.filtered_indices.len());
     let end = (start + inner_h).min(state.filtered_indices.len());
     let visible_indices = if start < end {
@@ -484,6 +625,25 @@ pub fn render_model_details(
     area: Rect,
     theme: &crate::theme::Theme,
 ) {
+    render_model_details_with_health(
+        f,
+        model,
+        is_active,
+        ModelHealthState::NotProbed,
+        area,
+        theme,
+    )
+}
+
+/// Renders a detail inspector pane for a selected model including live health probe state.
+pub fn render_model_details_with_health(
+    f: &mut ratatui::Frame,
+    model: Option<&ModelInfo>,
+    is_active: bool,
+    health: ModelHealthState,
+    area: Rect,
+    theme: &crate::theme::Theme,
+) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(theme.border_subtle())
@@ -542,6 +702,34 @@ pub fn render_model_details(
         format!("{} tokens", m.max_output_tokens)
     } else {
         "Unknown output limit".to_string()
+    };
+
+    let (health_label, health_style, latency_label) = match health {
+        ModelHealthState::NotProbed => (
+            "Not Probed (Press [t] to probe live connectivity)",
+            theme.style_muted(),
+            "Unavailable (press [t] to test)".to_string(),
+        ),
+        ModelHealthState::Probing => (
+            "Probing live health & availability...",
+            theme.style_accent(true),
+            "Measuring latency...".to_string(),
+        ),
+        ModelHealthState::Healthy { latency_ms } => (
+            "Healthy (HTTP 200 OK)",
+            theme.style_success(true),
+            format!("{latency_ms} ms"),
+        ),
+        ModelHealthState::Unhealthy { ref message } => (
+            "Unhealthy / Probe Failed",
+            theme.style_error(true),
+            format!("Failed: {message}"),
+        ),
+        ModelHealthState::Unsupported => (
+            "Unsupported",
+            theme.style_muted(),
+            "Model availability probe not supported by provider".to_string(),
+        ),
     };
 
     let lines = vec![
@@ -650,14 +838,11 @@ pub fn render_model_details(
         ]),
         Line::from(vec![
             Span::styled("Provider Health: ", theme.style_secondary()),
-            Span::styled(
-                "Not Probed (Press [t] to probe live connectivity)",
-                theme.style_muted(),
-            ),
+            Span::styled(health_label, health_style),
         ]),
         Line::from(vec![
             Span::styled("Live Latency: ", theme.style_secondary()),
-            Span::styled("Unavailable (live probe required)", theme.style_muted()),
+            Span::styled(latency_label, theme.style_primary()),
         ]),
         Line::from(""),
         Line::from(vec![Span::styled(

@@ -1,7 +1,8 @@
 //! Centralized Lucide Icon System for M31A.
 //!
 //! Provides a compile-time-safe icon abstraction with three explicit rendering modes:
-//! - `Lucide`: Official Lucide static icon font using pinned private-use/canonical codepoints.
+//! - `Lucide`: Official Lucide static icon font using pinned private-use/canonical codepoints
+//!   validated against official release 0.460.0 (`lucide-font-0.460.0`).
 //! - `Unicode`: Clean, universally supported non-emoji Unicode symbols.
 //! - `Ascii`: Universally readable ASCII fallbacks for restricted terminals.
 //!
@@ -9,7 +10,7 @@
 //!
 //! To use the `Lucide` icon font in your terminal:
 //! 1. Download the Lucide static font (`lucide.ttf` or Nerd Font variant with Lucide icons)
-//!    from the official Lucide releases (<https://github.com/lucide-icons/lucide>).
+//!    from the official Lucide releases (<https://github.com/lucide-icons/lucide/releases/tag/0.460.0>).
 //! 2. Install the font in your operating system's font book / font manager.
 //! 3. Configure your terminal emulator (e.g. Alacritty, Kitty, WezTerm, iTerm2, Windows Terminal)
 //!    to use the Lucide font or configure fallback font glyph coverage.
@@ -132,67 +133,131 @@ pub enum Icon {
 }
 
 impl Icon {
-    /// Returns the pinned Lucide icon font codepoint.
+    /// Returns the official icon name in the pinned `lucide-font-0.460.0` manifest.
+    pub const fn lucide_icon_name(&self) -> &'static str {
+        match self {
+            // Navigation
+            Self::MessageSquare => "message-square",
+            Self::History => "history",
+            Self::Cpu => "cpu",
+            Self::Plug => "plug",
+            Self::Bot => "bot",
+            Self::Folder => "folder",
+            Self::GitBranch => "git-branch",
+            Self::GitCompare => "git-compare",
+            Self::Wrench => "wrench",
+            Self::Settings => "settings",
+            Self::Activity => "activity",
+
+            // Workspace & Context
+            Self::FolderOpen => "folder-open",
+            Self::File => "file",
+            Self::FileCode => "file-code",
+            Self::FileText => "file-text",
+            Self::FileJson => "file-json",
+            Self::Terminal => "terminal",
+            Self::Database => "database",
+            Self::Search => "search",
+            Self::Context => "boxes",
+            Self::Chart => "chart-bar",
+            Self::Shield => "shield",
+            Self::ShieldAlert => "shield-alert",
+
+            // Execution & Status
+            Self::CircleCheck => "circle-check",
+            Self::CircleX => "circle-x",
+            Self::AlertTriangle => "triangle-alert",
+            Self::LoaderCircle => "loader-circle",
+            Self::Play => "play",
+            Self::Pause => "pause",
+            Self::Stop => "square",
+            Self::Check => "check",
+            Self::X => "x",
+            Self::Clock => "clock",
+            Self::Code => "code",
+            Self::Command => "command",
+
+            // Additional Interface Glyphs
+            Self::Key => "key",
+            Self::Lock => "lock",
+            Self::Sliders => "sliders-horizontal",
+            Self::Sparkles => "sparkles",
+            Self::Layers => "layers",
+            Self::ChevronRight => "chevron-right",
+            Self::ArrowUpDown => "arrow-up-down",
+            Self::RefreshCw => "refresh-cw",
+            Self::HelpCircle => "circle-help",
+            Self::Info => "info",
+            Self::Server => "server",
+            Self::Zap => "zap",
+            Self::User => "user",
+            Self::Trash => "trash-2",
+            Self::Edit => "square-pen",
+            Self::Eye => "eye",
+        }
+    }
+
+    /// Returns the pinned Lucide icon font codepoint (validated against official release 0.460.0).
     pub const fn lucide_glyph(&self) -> &'static str {
         match self {
             // Navigation
-            Self::MessageSquare => "\u{E1B0}",
-            Self::History => "\u{E160}",
-            Self::Cpu => "\u{E0C4}",
-            Self::Plug => "\u{E208}",
-            Self::Bot => "\u{E06C}",
-            Self::Folder => "\u{E128}",
-            Self::GitBranch => "\u{E143}",
-            Self::GitCompare => "\u{E144}",
-            Self::Wrench => "\u{E2B4}",
-            Self::Settings => "\u{E248}",
-            Self::Activity => "\u{E005}",
+            Self::MessageSquare => "\u{E11B}",
+            Self::History => "\u{E1F5}",
+            Self::Cpu => "\u{E0AD}",
+            Self::Plug => "\u{E383}",
+            Self::Bot => "\u{E1BB}",
+            Self::Folder => "\u{E0DC}",
+            Self::GitBranch => "\u{E0E5}",
+            Self::GitCompare => "\u{E35D}",
+            Self::Wrench => "\u{E1B1}",
+            Self::Settings => "\u{E158}",
+            Self::Activity => "\u{E038}",
 
             // Workspace & Context
-            Self::FolderOpen => "\u{E129}",
-            Self::File => "\u{E10E}",
-            Self::FileCode => "\u{E110}",
-            Self::FileText => "\u{E119}",
-            Self::FileJson => "\u{E114}",
-            Self::Terminal => "\u{E27A}",
-            Self::Database => "\u{E0D0}",
-            Self::Search => "\u{E23A}",
-            Self::Context => "\u{E185}",
-            Self::Chart => "\u{E095}",
-            Self::Shield => "\u{E24F}",
-            Self::ShieldAlert => "\u{E250}",
+            Self::FolderOpen => "\u{E247}",
+            Self::File => "\u{E0C4}",
+            Self::FileCode => "\u{E0C7}",
+            Self::FileText => "\u{E0D0}",
+            Self::FileJson => "\u{E36F}",
+            Self::Terminal => "\u{E185}",
+            Self::Database => "\u{E0B1}",
+            Self::Search => "\u{E155}",
+            Self::Context => "\u{E2D0}",
+            Self::Chart => "\u{E2A2}",
+            Self::Shield => "\u{E15C}",
+            Self::ShieldAlert => "\u{E1FE}",
 
             // Execution & Status
-            Self::CircleCheck => "\u{E0A2}",
-            Self::CircleX => "\u{E0AA}",
-            Self::AlertTriangle => "\u{E01C}",
-            Self::LoaderCircle => "\u{E198}",
-            Self::Play => "\u{E206}",
-            Self::Pause => "\u{E1FB}",
-            Self::Stop => "\u{E264}",
-            Self::Check => "\u{E09E}",
-            Self::X => "\u{E2BD}",
-            Self::Clock => "\u{E0B0}",
-            Self::Code => "\u{E0B4}",
-            Self::Command => "\u{E0BD}",
+            Self::CircleCheck => "\u{E226}",
+            Self::CircleX => "\u{E088}",
+            Self::AlertTriangle => "\u{E193}",
+            Self::LoaderCircle => "\u{E10E}",
+            Self::Play => "\u{E140}",
+            Self::Pause => "\u{E132}",
+            Self::Stop => "\u{E16B}",
+            Self::Check => "\u{E070}",
+            Self::X => "\u{E1B2}",
+            Self::Clock => "\u{E08B}",
+            Self::Code => "\u{E097}",
+            Self::Command => "\u{E09E}",
 
             // Additional Interface Glyphs
-            Self::Key => "\u{E178}",
-            Self::Lock => "\u{E18C}",
-            Self::Sliders => "\u{E258}",
-            Self::Sparkles => "\u{E25E}",
-            Self::Layers => "\u{E185}",
-            Self::ChevronRight => "\u{E09B}",
-            Self::ArrowUpDown => "\u{E046}",
-            Self::RefreshCw => "\u{E223}",
-            Self::HelpCircle => "\u{E15E}",
-            Self::Info => "\u{E171}",
-            Self::Server => "\u{E243}",
-            Self::Zap => "\u{E2C0}",
-            Self::User => "\u{E285}",
-            Self::Trash => "\u{E280}",
-            Self::Edit => "\u{E101}",
-            Self::Eye => "\u{E108}",
+            Self::Key => "\u{E102}",
+            Self::Lock => "\u{E10F}",
+            Self::Sliders => "\u{E29A}",
+            Self::Sparkles => "\u{E417}",
+            Self::Layers => "\u{E104}",
+            Self::ChevronRight => "\u{E073}",
+            Self::ArrowUpDown => "\u{E381}",
+            Self::RefreshCw => "\u{E149}",
+            Self::HelpCircle => "\u{E082}",
+            Self::Info => "\u{E0FE}",
+            Self::Server => "\u{E157}",
+            Self::Zap => "\u{E1B4}",
+            Self::User => "\u{E19F}",
+            Self::Trash => "\u{E18E}",
+            Self::Edit => "\u{E176}",
+            Self::Eye => "\u{E0BE}",
         }
     }
 
@@ -253,7 +318,7 @@ impl Icon {
             Self::Info => "ℹ",
             Self::Server => "⌸",
             Self::Zap => "⚡",
-            Self::User => "👤",
+            Self::User => "◈",
             Self::Trash => "✕",
             Self::Edit => "✎",
             Self::Eye => "☉",
@@ -351,67 +416,67 @@ impl Icon {
     }
 }
 
+pub const ALL_ICONS: [Icon; 51] = [
+    Icon::MessageSquare,
+    Icon::History,
+    Icon::Cpu,
+    Icon::Plug,
+    Icon::Bot,
+    Icon::Folder,
+    Icon::GitBranch,
+    Icon::GitCompare,
+    Icon::Wrench,
+    Icon::Settings,
+    Icon::Activity,
+    Icon::FolderOpen,
+    Icon::File,
+    Icon::FileCode,
+    Icon::FileText,
+    Icon::FileJson,
+    Icon::Terminal,
+    Icon::Database,
+    Icon::Search,
+    Icon::Context,
+    Icon::Chart,
+    Icon::Shield,
+    Icon::ShieldAlert,
+    Icon::CircleCheck,
+    Icon::CircleX,
+    Icon::AlertTriangle,
+    Icon::LoaderCircle,
+    Icon::Play,
+    Icon::Pause,
+    Icon::Stop,
+    Icon::Check,
+    Icon::X,
+    Icon::Clock,
+    Icon::Code,
+    Icon::Command,
+    Icon::Key,
+    Icon::Lock,
+    Icon::Sliders,
+    Icon::Sparkles,
+    Icon::Layers,
+    Icon::ChevronRight,
+    Icon::ArrowUpDown,
+    Icon::RefreshCw,
+    Icon::HelpCircle,
+    Icon::Info,
+    Icon::Server,
+    Icon::Zap,
+    Icon::User,
+    Icon::Trash,
+    Icon::Edit,
+    Icon::Eye,
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_all_icons_have_non_empty_glyphs_in_all_modes() {
-        let all_icons = [
-            Icon::MessageSquare,
-            Icon::History,
-            Icon::Cpu,
-            Icon::Plug,
-            Icon::Bot,
-            Icon::Folder,
-            Icon::GitBranch,
-            Icon::GitCompare,
-            Icon::Wrench,
-            Icon::Settings,
-            Icon::Activity,
-            Icon::FolderOpen,
-            Icon::File,
-            Icon::FileCode,
-            Icon::FileText,
-            Icon::FileJson,
-            Icon::Terminal,
-            Icon::Database,
-            Icon::Search,
-            Icon::Context,
-            Icon::Chart,
-            Icon::Shield,
-            Icon::ShieldAlert,
-            Icon::CircleCheck,
-            Icon::CircleX,
-            Icon::AlertTriangle,
-            Icon::LoaderCircle,
-            Icon::Play,
-            Icon::Pause,
-            Icon::Stop,
-            Icon::Check,
-            Icon::X,
-            Icon::Clock,
-            Icon::Code,
-            Icon::Command,
-            Icon::Key,
-            Icon::Lock,
-            Icon::Sliders,
-            Icon::Sparkles,
-            Icon::Layers,
-            Icon::ChevronRight,
-            Icon::ArrowUpDown,
-            Icon::RefreshCw,
-            Icon::HelpCircle,
-            Icon::Info,
-            Icon::Server,
-            Icon::Zap,
-            Icon::User,
-            Icon::Trash,
-            Icon::Edit,
-            Icon::Eye,
-        ];
-
-        for icon in all_icons {
+        for icon in ALL_ICONS {
             assert!(
                 !icon.lucide_glyph().is_empty(),
                 "Lucide glyph for {:?} is empty",
@@ -431,6 +496,63 @@ mod tests {
             assert!(icon.width(IconMode::Lucide) >= 1);
             assert!(icon.width(IconMode::Unicode) >= 1);
             assert!(icon.width(IconMode::Ascii) >= 1);
+        }
+    }
+
+    #[test]
+    fn test_lucide_mappings_against_pinned_manifest() {
+        let manifest_bytes = include_bytes!("../resources/lucide_font_manifest.json");
+        let manifest: serde_json::Value =
+            serde_json::from_slice(manifest_bytes).expect("parse manifest");
+        for icon in ALL_ICONS {
+            let name = icon.lucide_icon_name();
+            let entry = manifest
+                .get(name)
+                .unwrap_or_else(|| panic!("Icon {} missing in manifest", name));
+            let expected_hex = entry["encodedCode"]
+                .as_str()
+                .unwrap()
+                .trim_start_matches('\\');
+            let expected_cp = u32::from_str_radix(expected_hex, 16).unwrap();
+            let actual_char = icon.lucide_glyph().chars().next().unwrap();
+            assert_eq!(
+                actual_char as u32, expected_cp,
+                "Icon {:?} ({}) codepoint mismatch: expected \\u{{{:04X}}}, got \\u{{{:04X}}}",
+                icon, name, expected_cp, actual_char as u32
+            );
+        }
+    }
+
+    #[test]
+    fn test_ascii_fallbacks_are_strictly_ascii() {
+        for icon in ALL_ICONS {
+            let s = icon.ascii_glyph();
+            assert!(
+                s.is_ascii(),
+                "Icon {:?} ASCII fallback {:?} is not ASCII",
+                icon,
+                s
+            );
+        }
+    }
+
+    #[test]
+    fn test_unicode_fallback_has_no_emoji() {
+        for icon in ALL_ICONS {
+            let s = icon.unicode_glyph();
+            for ch in s.chars() {
+                let cp = ch as u32;
+                // Assert no surrogate / SMP emojis (e.g. U+1F000..U+1FFFF)
+                assert!(
+                    !(0x1F000..=0x1FFFF).contains(&cp),
+                    "Icon {:?} contains SMP emoji character {:?} (U+{:04X})",
+                    icon,
+                    ch,
+                    cp
+                );
+                // Also ensure User is not 👤 (U+1F464)
+                assert_ne!(ch, '👤', "Icon {:?} still contains user emoji", icon);
+            }
         }
     }
 

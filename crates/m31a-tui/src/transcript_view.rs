@@ -743,7 +743,7 @@ impl TranscriptVirtualizer {
                             Some(false) => ("✖", Color::Red),
                             None => {
                                 if tool.in_progress {
-                                    ("⏳", Color::Yellow)
+                                    ("◷", Color::Yellow)
                                 } else {
                                     ("✔", Color::Green)
                                 }

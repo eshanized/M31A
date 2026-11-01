@@ -9,6 +9,7 @@ use m31a_elicitation::QuestionItem;
 use m31a_provider::models::ModelInfo;
 use m31a_storage::db::ThreadRecord;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::widgets::{Block, Borders};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CommandPaletteItem {
@@ -18,6 +19,102 @@ pub struct CommandPaletteItem {
     pub category: String,
     pub shortcut: Option<String>,
     pub icon: crate::icons::Icon,
+}
+
+/// Authoritative geometry contract for the command palette modal across renderer, mouse, and keyboard.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CommandPaletteGeometry {
+    pub outer: Rect,
+    pub search: Rect,
+    pub list: Rect,
+    pub details: Option<Rect>,
+    pub footer: Rect,
+}
+
+impl CommandPaletteGeometry {
+    pub fn compute(outer: Rect) -> Self {
+        if outer.width < 10 || outer.height < 4 {
+            return Self {
+                outer,
+                search: Rect::default(),
+                list: outer,
+                details: None,
+                footer: Rect::default(),
+            };
+        }
+
+        let inner = Block::default().borders(Borders::ALL).inner(outer);
+        if inner.width < 8 || inner.height < 3 {
+            return Self {
+                outer,
+                search: Rect::default(),
+                list: inner,
+                details: None,
+                footer: Rect::default(),
+            };
+        }
+
+        let vert_chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(3), // Search bar
+                Constraint::Min(3),    // Body area
+                Constraint::Length(1), // Footer
+            ])
+            .split(inner);
+
+        let search = vert_chunks[0];
+        let body = vert_chunks[1];
+        let footer = vert_chunks[2];
+
+        // Two-pane breakpoint: requires at least 70 columns of width in the body
+        let is_wide = body.width >= 70;
+        let (list, details) = if is_wide {
+            let h_chunks = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Percentage(58), Constraint::Percentage(42)])
+                .split(body);
+            (h_chunks[0], Some(h_chunks[1]))
+        } else {
+            (body, None)
+        };
+
+        Self {
+            outer,
+            search,
+            list,
+            details,
+            footer,
+        }
+    }
+
+    pub fn list_inner(&self) -> Rect {
+        Block::default().borders(Borders::ALL).inner(self.list)
+    }
+
+    pub fn list_inner_height(&self) -> usize {
+        self.list_inner().height as usize
+    }
+
+    pub fn list_inner_width(&self) -> usize {
+        self.list_inner().width as usize
+    }
+
+    /// Maps a screen click coordinate (col, row) directly to a visible row index (0..list_inner_height),
+    /// strictly enforcing that clicks outside the selectable inner list rows return None.
+    pub fn row_to_visible_index(&self, col: u16, row: u16) -> Option<usize> {
+        let inner = self.list_inner();
+        let pos = ratatui::layout::Position::new(col, row);
+        if !inner.contains(pos) {
+            return None;
+        }
+        let rel_row = (row.saturating_sub(inner.y)) as usize;
+        if rel_row < self.list_inner_height() {
+            Some(rel_row)
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -236,7 +333,7 @@ pub struct PersonaItem {
     pub id: String,
     pub name: String,
     pub description: String,
-    pub icon: &'static str,
+    pub icon: crate::icons::Icon,
     pub prompt_directive: &'static str,
 }
 
@@ -860,13 +957,36 @@ impl SetupStep {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConnectivityStatus {
     NotTested,
-    Testing,
+    Validating,
+    TestingConnection,
+    CheckingModel,
     Connected,
     Failed,
 }
 
+/// Structured outcome of genuine provider verification probe.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConnectivityDetails {
+    pub endpoint_verified: bool,
+    pub model_verified: bool,
+    pub model_check_unsupported: bool,
+    pub latency_ms: Option<u64>,
+    pub message: String,
+}
+
+/// Candidate configuration prepared by the Setup Wizard before transactional commit.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SetupConfiguration {
+    pub provider_type: m31a_provider::ProviderType,
+    pub api_base: String,
+    pub api_key: Option<String>,
+    pub model: String,
+    pub sandbox: m31a_core::SandboxPolicy,
+    pub approval: m31a_core::ApprovalPolicy,
+}
+
 /// Dedicated state for interactive multi-step `/setup` onboarding wizard.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct SetupWizardState {
     pub step: SetupStep,
     pub existing_config_detected: bool,
@@ -895,10 +1015,49 @@ pub struct SetupWizardState {
 
     // Step 6: Connectivity
     pub connectivity_status: ConnectivityStatus,
+    pub connectivity_details: Option<ConnectivityDetails>,
     pub connectivity_error: Option<String>,
+    pub connectivity_generation: u64,
+    pub skipped_verification: bool,
 
     // Step 7 & 8: Review & Save
     pub save_error: Option<String>,
+}
+
+impl std::fmt::Debug for SetupWizardState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SetupWizardState")
+            .field("step", &self.step)
+            .field("existing_config_detected", &self.existing_config_detected)
+            .field("selected_provider_idx", &self.selected_provider_idx)
+            .field("providers", &self.providers)
+            .field("custom_endpoint", &self.custom_endpoint)
+            .field("editing_endpoint", &self.editing_endpoint)
+            .field(
+                "api_key_input",
+                if self.api_key_input.is_empty() {
+                    &"<empty>"
+                } else {
+                    &"[REDACTED]"
+                },
+            )
+            .field("has_existing_key", &self.has_existing_key)
+            .field("preserve_existing_key", &self.preserve_existing_key)
+            .field("models_count", &self.models_for_provider.len())
+            .field("selected_model_idx", &self.selected_model_idx)
+            .field("custom_model_name", &self.custom_model_name)
+            .field("editing_custom_model", &self.editing_custom_model)
+            .field("sandbox_policy", &self.sandbox_policy)
+            .field("approval_policy", &self.approval_policy)
+            .field("security_field_idx", &self.security_field_idx)
+            .field("connectivity_status", &self.connectivity_status)
+            .field("connectivity_details", &self.connectivity_details)
+            .field("connectivity_error", &self.connectivity_error)
+            .field("connectivity_generation", &self.connectivity_generation)
+            .field("skipped_verification", &self.skipped_verification)
+            .field("save_error", &self.save_error)
+            .finish()
+    }
 }
 
 impl SetupWizardState {
@@ -959,12 +1118,45 @@ impl SetupWizardState {
             approval_policy: current_config.approval,
             security_field_idx: 0,
             connectivity_status: ConnectivityStatus::NotTested,
+            connectivity_details: None,
             connectivity_error: None,
+            connectivity_generation: 1,
+            skipped_verification: false,
             save_error: None,
         };
 
         wizard.update_models_for_provider(available_models);
         wizard
+    }
+
+    pub fn invalidate_connectivity(&mut self) {
+        self.connectivity_generation += 1;
+        self.connectivity_status = ConnectivityStatus::NotTested;
+        self.connectivity_details = None;
+        self.connectivity_error = None;
+        self.skipped_verification = false;
+    }
+
+    pub fn build_candidate_configuration(
+        &self,
+        current_config: &m31a_core::Config,
+    ) -> SetupConfiguration {
+        let api_key = if !self.api_key_input.trim().is_empty() {
+            Some(self.api_key_input.trim().to_string())
+        } else if self.preserve_existing_key {
+            current_config.api_key.clone()
+        } else {
+            None
+        };
+
+        SetupConfiguration {
+            provider_type: self.current_provider(),
+            api_base: self.effective_endpoint(),
+            api_key,
+            model: self.effective_model(),
+            sandbox: self.sandbox_policy,
+            approval: self.approval_policy,
+        }
     }
 
     pub fn current_provider(&self) -> m31a_provider::ProviderType {
@@ -1030,144 +1222,67 @@ impl SetupWizardState {
         catalog_models: &[m31a_provider::models::ModelInfo],
     ) {
         let provider = self.current_provider();
-        let filtered: Vec<m31a_provider::models::ModelInfo> = match provider {
-            m31a_provider::ProviderType::Nim => {
-                let mut list: Vec<_> = catalog_models
-                    .iter()
-                    .filter(|m| {
-                        m.originator.to_lowercase().contains("nvidia")
-                            || m.slug.contains("meta/")
-                            || m.slug.contains("deepseek-ai/")
-                    })
-                    .cloned()
-                    .collect();
-                if list.is_empty() {
-                    list = m31a_provider::models::get_nvidia_model_catalog();
-                }
-                list
-            }
-            m31a_provider::ProviderType::OpenAi => vec![
-                m31a_provider::models::ModelInfo {
-                    slug: "gpt-4o".to_string(),
-                    display_name: "GPT-4o (Omni)".to_string(),
-                    description: "OpenAI flagship omni-modal reasoning model".to_string(),
-                    context_window: 128_000,
-                    max_output_tokens: 16_384,
-                    supports_tools: true,
-                    supports_thinking: false,
-                    supports_vision: true,
-                    originator: "OpenAI".to_string(),
-                    ..Default::default()
-                },
-                m31a_provider::models::ModelInfo {
-                    slug: "gpt-4o-mini".to_string(),
-                    display_name: "GPT-4o Mini".to_string(),
-                    description: "Fast, cost-efficient small model for everyday coding".to_string(),
-                    context_window: 128_000,
-                    max_output_tokens: 16_384,
-                    supports_tools: true,
-                    supports_thinking: false,
-                    supports_vision: true,
-                    originator: "OpenAI".to_string(),
-                    ..Default::default()
-                },
-                m31a_provider::models::ModelInfo {
-                    slug: "o1".to_string(),
-                    display_name: "OpenAI o1".to_string(),
-                    description: "Advanced reasoning model with chain-of-thought tokens"
-                        .to_string(),
-                    context_window: 200_000,
-                    max_output_tokens: 100_000,
-                    supports_tools: true,
-                    supports_thinking: true,
-                    supports_vision: true,
-                    originator: "OpenAI".to_string(),
-                    ..Default::default()
-                },
-                m31a_provider::models::ModelInfo {
-                    slug: "o3-mini".to_string(),
-                    display_name: "OpenAI o3-mini".to_string(),
-                    description: "Cost-efficient reasoning model optimized for code and math"
-                        .to_string(),
-                    context_window: 200_000,
-                    max_output_tokens: 100_000,
-                    supports_tools: true,
-                    supports_thinking: true,
-                    supports_vision: false,
-                    originator: "OpenAI".to_string(),
-                    ..Default::default()
-                },
-            ],
-            m31a_provider::ProviderType::Anthropic => vec![
-                m31a_provider::models::ModelInfo {
-                    slug: "claude-3-5-sonnet-20241022".to_string(),
-                    display_name: "Claude 3.5 Sonnet".to_string(),
-                    description: "Anthropic frontier intelligence and coding capabilities"
-                        .to_string(),
-                    context_window: 200_000,
-                    max_output_tokens: 8_192,
-                    supports_tools: true,
-                    supports_thinking: false,
-                    supports_vision: true,
-                    originator: "Anthropic".to_string(),
-                    ..Default::default()
-                },
-                m31a_provider::models::ModelInfo {
-                    slug: "claude-3-5-haiku-20241022".to_string(),
-                    display_name: "Claude 3.5 Haiku".to_string(),
-                    description: "High speed, ultra-low latency model for rapid agent turns"
-                        .to_string(),
-                    context_window: 200_000,
-                    max_output_tokens: 8_192,
-                    supports_tools: true,
-                    supports_thinking: false,
-                    supports_vision: true,
-                    originator: "Anthropic".to_string(),
-                    ..Default::default()
-                },
-            ],
-            m31a_provider::ProviderType::DeepSeek => vec![
-                m31a_provider::models::ModelInfo {
-                    slug: "deepseek-chat".to_string(),
-                    display_name: "DeepSeek V3".to_string(),
-                    description: "Frontier MoE conversational and coding model".to_string(),
-                    context_window: 64_000,
-                    max_output_tokens: 8_000,
-                    supports_tools: true,
-                    supports_thinking: false,
-                    supports_vision: false,
-                    originator: "DeepSeek".to_string(),
-                    ..Default::default()
-                },
-                m31a_provider::models::ModelInfo {
-                    slug: "deepseek-reasoner".to_string(),
-                    display_name: "DeepSeek R1".to_string(),
-                    description: "Open-weights reasoning model with explicit CoT thinking tokens"
-                        .to_string(),
-                    context_window: 64_000,
-                    max_output_tokens: 8_000,
-                    supports_tools: true,
-                    supports_thinking: true,
-                    supports_vision: false,
-                    originator: "DeepSeek".to_string(),
-                    ..Default::default()
-                },
-            ],
-            _ => vec![m31a_provider::models::ModelInfo {
-                slug: provider.default_model().to_string(),
-                display_name: format!("{} Default", provider.display_name()),
-                description: format!("Default model for {}", provider.display_name()),
-                context_window: 128_000,
-                max_output_tokens: 8_192,
-                supports_tools: true,
-                supports_thinking: false,
-                supports_vision: false,
-                originator: provider.display_name().to_string(),
-                ..Default::default()
-            }],
+
+        // 1. Check if the catalog contains canonical models matching this provider
+        let catalog = if catalog_models.is_empty() {
+            m31a_provider::models::get_nvidia_model_catalog()
+        } else {
+            catalog_models.to_vec()
         };
 
-        self.models_for_provider = filtered;
+        let mut matched: Vec<m31a_provider::models::ModelInfo> = match provider {
+            m31a_provider::ProviderType::Nim => catalog
+                .iter()
+                .filter(|m| {
+                    m.originator.to_lowercase().contains("nvidia")
+                        || m.slug.contains("meta/")
+                        || m.slug.contains("deepseek-ai/")
+                        || m.slug.contains("mistralai/")
+                        || m.slug.contains("qwen/")
+                })
+                .cloned()
+                .collect(),
+            _ => {
+                let provider_name = provider.display_name().to_lowercase();
+                catalog
+                    .iter()
+                    .filter(|m| {
+                        m.originator.to_lowercase() == provider_name
+                            || m.originator.to_lowercase().contains(&provider_name)
+                            || m.slug
+                                .to_lowercase()
+                                .starts_with(&format!("{}/", provider_name))
+                    })
+                    .cloned()
+                    .collect()
+            }
+        };
+
+        // 2. If provider has no canonical models in the catalogue, do NOT fabricate fake
+        // specifications or limits. Provide an honest fallback with unverified (0) limits
+        // and allow custom model entry.
+        if matched.is_empty() {
+            let default_slug = provider.default_model();
+            if !default_slug.is_empty() {
+                matched.push(m31a_provider::models::ModelInfo {
+                    slug: default_slug.to_string(),
+                    display_name: format!("{} (Provider Default)", default_slug),
+                    description: format!(
+                        "Default model for {}. Local catalog metadata not available.",
+                        provider.display_name()
+                    ),
+                    context_window: 0, // 0 signifies unknown / unverified
+                    max_output_tokens: 0,
+                    supports_tools: false,
+                    supports_thinking: false,
+                    supports_vision: false,
+                    originator: provider.display_name().to_string(),
+                    ..Default::default()
+                });
+            }
+        }
+
+        self.models_for_provider = matched;
         self.selected_model_idx = 0;
     }
 }
@@ -1280,7 +1395,7 @@ impl ModalState {
             ModalState::ProcessesModal { .. } => (80, 75),
             ModalState::ProcessViewer { .. } => (85, 80),
             ModalState::HelpModal { .. } => (75, 75),
-            ModalState::CommandPalette { .. } => (70, 70),
+            ModalState::CommandPalette { .. } => (78, 75),
             ModalState::ExperimentalFeatures { .. } => (75, 70),
             ModalState::SettingsModal { .. } => (76, 75),
             ModalState::WorktreeSelector { .. } => (84, 75),
@@ -1303,6 +1418,9 @@ impl ModalState {
     pub fn calculate_rect(&self, area: Rect) -> Rect {
         if matches!(self, ModalState::ApprovalDialog { .. }) {
             return approval_popup_rect(area);
+        }
+        if matches!(self, ModalState::ModelPicker { .. }) {
+            return crate::renderer::model_picker_popup_rect(area);
         }
         let (percent_x, percent_y) = self.dimensions();
         let popup_layout = Layout::default()
@@ -1502,42 +1620,42 @@ impl ModalState {
                 id: "balanced".to_string(),
                 name: "Balanced Engineer (Default)".to_string(),
                 description: "Pragmatic balance between speed, planning, clean implementation, and testing.".to_string(),
-                icon: "≎",
+                icon: crate::icons::Icon::Sliders,
                 prompt_directive: "Approach tasks pragmatically: balance architectural foresight, clean implementations, and focused verifications.",
             },
             PersonaItem {
                 id: "architect".to_string(),
                 name: "Software Architect".to_string(),
                 description: "Deep modular abstractions, clean interface boundaries, and visual mermaid system diagrams.".to_string(),
-                icon: "⊞",
+                icon: crate::icons::Icon::Layers,
                 prompt_directive: "Adopt an Architectural perspective: prioritize high modularity, explicit domain boundaries, clean contracts, and mermaid architecture diagrams before mutating code.",
             },
             PersonaItem {
                 id: "security".to_string(),
                 name: "Security Auditor".to_string(),
                 description: "Paranoia-level vulnerability checks, boundary validation, least-privilege armor, and OWASP defenses.".to_string(),
-                icon: "◈",
+                icon: crate::icons::Icon::Shield,
                 prompt_directive: "Act as a Senior Security Auditor: evaluate every boundary for command injection, path traversal, auth leaks, least-privilege violations, and defensive error handling.",
             },
             PersonaItem {
                 id: "perf".to_string(),
                 name: "Performance Optimizer".to_string(),
                 description: "Zero-cost abstractions, minimal heap allocations, fast hot paths, and algorithmic profiling.".to_string(),
-                icon: "⚡",
+                icon: crate::icons::Icon::Zap,
                 prompt_directive: "Focus intensely on performance: eliminate redundant allocations, streamline hot execution loops, minimize algorithmic complexity, and profile critical latency paths.",
             },
             PersonaItem {
                 id: "tdd".to_string(),
                 name: "Test-Driven Engineer".to_string(),
                 description: "Strict Red-Green-Refactor discipline: write failing unit/integration tests before writing production code.".to_string(),
-                icon: "✓",
+                icon: crate::icons::Icon::Check,
                 prompt_directive: "Follow rigorous Test-Driven Development (TDD): first specify requirements with thorough test assertions, run the suite to confirm failure, then write minimal clean code to make it pass.",
             },
             PersonaItem {
                 id: "minimalist".to_string(),
                 name: "Minimalist Coder".to_string(),
                 description: "Lean, concise code avoiding extraneous abstractions, scaffolding, and bloated dependencies.".to_string(),
-                icon: "—",
+                icon: crate::icons::Icon::Code,
                 prompt_directive: "Embody radical minimalism: write the simplest, cleanest code that satisfies the requirements without over-engineering, unnecessary abstractions, or new dependencies.",
             },
         ]

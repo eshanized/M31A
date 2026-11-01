@@ -563,13 +563,25 @@ pub fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
 
 // ===== Modal Renderers =====
 
+pub fn model_picker_popup_rect(area: Rect) -> Rect {
+    let percent_x = if area.width < 90 {
+        92
+    } else if area.width < 120 {
+        88
+    } else {
+        80
+    };
+    let percent_y = if area.height < 30 { 85 } else { 75 };
+    centered_rect(percent_x, percent_y, area)
+}
+
 fn render_model_picker(
     f: &mut Frame,
     state: &crate::model_selector::ModelListState,
     area: Rect,
     t: &Theme,
 ) {
-    let popup_area = centered_rect(72, 70, area);
+    let popup_area = model_picker_popup_rect(area);
     f.render_widget(Clear, popup_area);
 
     crate::model_selector::render_model_list(f, state, popup_area, t, "Select Model");
@@ -736,7 +748,10 @@ fn render_decline_feedback_modal(
         .borders(Borders::ALL)
         .border_type(t.border.modal)
         .title(Line::from(vec![Span::styled(
-            " ❌ Decline with Feedback ",
+            format!(
+                " {} Decline with Feedback ",
+                crate::icons::Icon::CircleX.render(t)
+            ),
             t.style_error(true),
         )]))
         .border_style(t.style_error(false))
@@ -1828,26 +1843,17 @@ fn render_command_palette(
         ]))
         .style(t.style_surface1());
 
-    let inner = main_block.inner(popup_area);
     f.render_widget(main_block, popup_area);
 
-    if inner.width < 10 || inner.height < 4 {
+    let geometry = crate::modals::CommandPaletteGeometry::compute(popup_area);
+    if geometry.list_inner_width() < 5 || geometry.list_inner_height() < 1 {
         return;
     }
 
-    // Layout: Search bar (length 3), Body (min 3), Footer (length 1)
-    let vert_chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(3),
-            Constraint::Min(3),
-            Constraint::Length(1),
-        ])
-        .split(inner);
-
-    let search_area = vert_chunks[0];
-    let body_area = vert_chunks[1];
-    let footer_area = vert_chunks[2];
+    let search_area = geometry.search;
+    let list_area = geometry.list;
+    let details_area = geometry.details;
+    let footer_area = geometry.footer;
 
     // 1. Search Bar
     let search_icon = crate::icons::Icon::Search.render(t);
@@ -1873,20 +1879,8 @@ fn render_command_palette(
     };
     f.render_widget(Paragraph::new(search_text).block(search_block), search_area);
 
-    // 2. Body Area (Two-pane on wide, single-pane on narrow)
-    let is_wide = body_area.width >= 70;
-    let (list_area, details_area) = if is_wide {
-        let h_chunks = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(58), Constraint::Percentage(42)])
-            .split(body_area);
-        (h_chunks[0], Some(h_chunks[1]))
-    } else {
-        (body_area, None)
-    };
-
     // Render list
-    let list_inner_h = list_area.height.saturating_sub(2) as usize;
+    let list_inner_h = geometry.list_inner_height();
     if filtered_indices.is_empty() {
         let no_res_block = Block::default()
             .borders(Borders::ALL)
@@ -2540,33 +2534,99 @@ fn render_setup_wizard(
                         t.style_muted(),
                     )));
                 }
-                crate::modals::ConnectivityStatus::Testing => {
+                crate::modals::ConnectivityStatus::Validating => {
                     lines.push(Line::from(vec![Span::styled(
                         format!(
-                            "  {} Testing connection to provider endpoint...",
+                            "  {} Validating provider credentials and configuration...",
                             crate::icons::Icon::LoaderCircle.render(t)
                         ),
                         t.style_accent(true),
                     )]));
                     lines.push(Line::from(""));
                     lines.push(Line::from(Span::styled(
-                        "  Please wait; sending probe request in background...",
+                        "  Checking local schemas and endpoint parameters...",
+                        t.style_muted(),
+                    )));
+                }
+                crate::modals::ConnectivityStatus::TestingConnection => {
+                    lines.push(Line::from(vec![Span::styled(
+                        format!(
+                            "  {} Connecting to provider endpoint...",
+                            crate::icons::Icon::LoaderCircle.render(t)
+                        ),
+                        t.style_accent(true),
+                    )]));
+                    lines.push(Line::from(""));
+                    lines.push(Line::from(Span::styled(
+                        "  Verifying network reachability and endpoint authentication...",
+                        t.style_muted(),
+                    )));
+                }
+                crate::modals::ConnectivityStatus::CheckingModel => {
+                    lines.push(Line::from(vec![Span::styled(
+                        format!(
+                            "  {} Verifying model availability for `{}`...",
+                            crate::icons::Icon::LoaderCircle.render(t),
+                            state.effective_model()
+                        ),
+                        t.style_accent(true),
+                    )]));
+                    lines.push(Line::from(""));
+                    lines.push(Line::from(Span::styled(
+                        "  Confirming model catalog registration and inference capability...",
                         t.style_muted(),
                     )));
                 }
                 crate::modals::ConnectivityStatus::Connected => {
                     lines.push(Line::from(vec![Span::styled(
                         format!(
-                            "  {} Connection verified successfully!",
+                            "  {} Provider endpoint verified successfully!",
                             crate::icons::Icon::CircleCheck.render(t)
                         ),
                         t.style_success(true),
                     )]));
                     lines.push(Line::from(""));
-                    lines.push(Line::from(Span::styled(
-                        "  Provider endpoint responded and confirmed availability.",
-                        t.style_secondary(),
-                    )));
+
+                    if let Some(ref details) = state.connectivity_details {
+                        let lat_str = details
+                            .latency_ms
+                            .map(|ms| format!(" ({ms} ms)"))
+                            .unwrap_or_default();
+                        lines.push(Line::from(vec![
+                            Span::styled("  • Provider connectivity: ", t.style_muted()),
+                            Span::styled(format!("Verified{}", lat_str), t.style_success(false)),
+                        ]));
+
+                        if details.model_verified {
+                            lines.push(Line::from(vec![
+                                Span::styled("  • Model availability:    ", t.style_muted()),
+                                Span::styled("Confirmed", t.style_success(false)),
+                            ]));
+                        } else if details.model_check_unsupported {
+                            lines.push(Line::from(vec![
+                                Span::styled("  • Model availability:    ", t.style_muted()),
+                                Span::styled(
+                                    "Not independently verified (Provider does not expose model catalog probe)",
+                                    t.style_muted(),
+                                ),
+                            ]));
+                        } else {
+                            lines.push(Line::from(vec![
+                                Span::styled("  • Model availability:    ", t.style_muted()),
+                                Span::styled(
+                                    "Unconfirmed (Check timed out or was inconclusive)",
+                                    t.style_warning(false),
+                                ),
+                            ]));
+                        }
+                    } else {
+                        lines.push(Line::from(Span::styled(
+                            "  Provider connectivity established.",
+                            t.style_secondary(),
+                        )));
+                    }
+
+                    lines.push(Line::from(""));
                     lines.push(Line::from(Span::styled(
                         "  Press [Enter] to proceed to configuration review.",
                         t.style_accent(true),
@@ -2580,7 +2640,7 @@ fn render_setup_wizard(
                     lines.push(Line::from(vec![
                         Span::styled(
                             format!(
-                                "  {} Connection probe failed: ",
+                                "  {} Verification failed: ",
                                 crate::icons::Icon::CircleX.render(t)
                             ),
                             t.style_error(true),
@@ -2588,7 +2648,27 @@ fn render_setup_wizard(
                         Span::styled(err, t.style_error(false)),
                     ]));
                     lines.push(Line::from(""));
-                    lines.push(Line::from(Span::styled("  Press [r] to retry, [Esc] to adjust settings, or [s] to skip and continue anyway.", t.style_muted())));
+                    if let Some(ref details) = state.connectivity_details
+                        && details.endpoint_verified
+                    {
+                        lines.push(Line::from(vec![
+                            Span::styled("  • Endpoint Reachability: ", t.style_muted()),
+                            Span::styled("Verified", t.style_success(false)),
+                        ]));
+                        lines.push(Line::from(vec![
+                            Span::styled("  • Model Availability:    ", t.style_muted()),
+                            Span::styled("Failed", t.style_error(false)),
+                        ]));
+                        lines.push(Line::from(""));
+                    }
+                    lines.push(Line::from(Span::styled(
+                        "  Press [r] to retry, [Esc] to adjust settings, or [s] to skip and continue anyway.",
+                        t.style_muted(),
+                    )));
+                    lines.push(Line::from(Span::styled(
+                        "  (Note: Enter is disabled on failure to prevent accidental unverified progression)",
+                        t.style_muted(),
+                    )));
                 }
             }
             f.render_widget(Paragraph::new(lines), content_area);
@@ -2640,6 +2720,37 @@ fn render_setup_wizard(
                 Line::from(vec![
                     Span::styled("  • Approval Policy: ", t.style_muted()),
                     Span::styled(format!("{:?}", state.approval_policy), t.style_primary()),
+                ]),
+                Line::from(vec![
+                    Span::styled("  • Connectivity:    ", t.style_muted()),
+                    if state.skipped_verification {
+                        Span::styled("[Verification Skipped by User]", t.style_warning(true))
+                    } else if state.connectivity_status
+                        == crate::modals::ConnectivityStatus::Connected
+                    {
+                        if let Some(ref details) = state.connectivity_details {
+                            if details.model_verified {
+                                Span::styled(
+                                    "[Verified: Provider & Model OK]",
+                                    t.style_success(true),
+                                )
+                            } else if details.model_check_unsupported {
+                                Span::styled(
+                                    "[Verified: Endpoint OK (Model Not Independently Verified)]",
+                                    t.style_success(false),
+                                )
+                            } else {
+                                Span::styled("[Verified: Endpoint OK]", t.style_success(false))
+                            }
+                        } else {
+                            Span::styled("[Verified]", t.style_success(true))
+                        }
+                    } else if state.connectivity_status == crate::modals::ConnectivityStatus::Failed
+                    {
+                        Span::styled("[Verification Failed]", t.style_error(true))
+                    } else {
+                        Span::styled("[Not Tested]", t.style_warning(false))
+                    },
                 ]),
                 Line::from(""),
             ];
@@ -2716,7 +2827,13 @@ fn render_setup_wizard(
             "↑↓: Switch Setting  │  ←→/Space: Change Option  │  Enter: Next  │  Esc: Back"
         }
         crate::modals::SetupStep::Connectivity => {
-            "Enter/t: Probe Connection  │  r: Retry  │  s: Skip  │  Esc: Back"
+            if state.connectivity_status == crate::modals::ConnectivityStatus::Connected {
+                "Enter: Proceed to Review  │  r: Retest  │  Esc: Back"
+            } else if state.connectivity_status == crate::modals::ConnectivityStatus::Failed {
+                "r: Retry  │  s: Skip Verification  │  Esc: Back (Enter disabled on failure)"
+            } else {
+                "Enter/t: Probe Connection  │  r: Retry  │  s: Skip Verification  │  Esc: Back"
+            }
         }
         crate::modals::SetupStep::Review => "Enter: Confirm & Save  │  Esc: Back",
         crate::modals::SetupStep::Complete => "Enter/Esc: Return to Chat",
@@ -4380,7 +4497,7 @@ fn render_persona_modal(
         items.push(ListItem::new(vec![
             Line::from(vec![
                 Span::styled(marker, row_style),
-                Span::styled(format!("{} ", p.icon), Style::default()),
+                Span::styled(format!("{} ", p.icon.render(t)), Style::default()),
                 Span::styled(&p.name, row_style.add_modifier(Modifier::BOLD)),
             ]),
             Line::from(vec![

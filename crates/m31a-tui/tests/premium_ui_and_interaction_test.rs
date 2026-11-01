@@ -360,7 +360,7 @@ async fn test_reasoning_effort_dialog_and_application() {
     assert_eq!(app.config.reasoning_effort.as_deref(), Some("high"));
 
     // 3. Apply via helper (simulating Enter in dialog)
-    app.apply_reasoning_effort(Some("low".to_string()));
+    app.apply_reasoning_effort(Some("low".to_string())).unwrap();
     assert_eq!(app.config.reasoning_effort.as_deref(), Some("low"));
     assert_eq!(app.nim_client.reasoning_effort(), Some("low"));
     assert_eq!(app.bottom_pane.reasoning_effort.as_deref(), Some("low"));

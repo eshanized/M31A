@@ -101,6 +101,10 @@ impl GuardianReviewer {
         }
     }
 
+    pub fn model(&self) -> &str {
+        &self.model
+    }
+
     pub fn audit_trail(&self) -> &crate::audit_trail::GuardianAuditTrail {
         &self.audit_trail
     }

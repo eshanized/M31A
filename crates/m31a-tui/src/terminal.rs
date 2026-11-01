@@ -344,6 +344,22 @@ pub fn handle_modal_key_event(app: &mut App, modal: ModalState, key: crossterm::
                 state.set_search_query(q);
                 app.push_modal(ModalState::ModelPicker { state });
             }
+            KeyCode::Char('t') | KeyCode::Char('T')
+                if state.search_query.is_empty()
+                    || key.modifiers.contains(KeyModifiers::CONTROL) =>
+            {
+                if let Some(m) = state.get_selected_model() {
+                    let slug = m.slug.clone();
+                    if state.get_health(&slug) != crate::model_selector::ModelHealthState::Probing {
+                        state.set_health(
+                            slug.clone(),
+                            crate::model_selector::ModelHealthState::Probing,
+                        );
+                        app.probe_model_health_async(&slug);
+                    }
+                }
+                app.push_modal(ModalState::ModelPicker { state });
+            }
             KeyCode::Char(c)
                 if !key.modifiers.contains(KeyModifiers::CONTROL)
                     && !key.modifiers.contains(KeyModifiers::ALT) =>
@@ -1009,7 +1025,12 @@ pub fn handle_modal_key_event(app: &mut App, modal: ModalState, key: crossterm::
             mut filtered_indices,
             mut scroll_offset,
         } => {
-            let visible_items = 12usize;
+            let term_area =
+                ratatui::layout::Rect::new(0, 0, app.terminal_width, app.terminal_height);
+            let popup_area = crate::renderer::centered_rect(78, 75, term_area);
+            let visible_items = crate::modals::CommandPaletteGeometry::compute(popup_area)
+                .list_inner_height()
+                .max(1);
             match key.code {
                 KeyCode::Esc => {
                     // closed (already popped)
@@ -1995,7 +2016,14 @@ pub fn handle_modal_key_event(app: &mut App, modal: ModalState, key: crossterm::
             }
             KeyCode::Enter => {
                 let effort_opt = state.selected_value();
-                app.apply_reasoning_effort(effort_opt);
+                if let Err(e) = app.apply_reasoning_effort(effort_opt) {
+                    app.transcript
+                        .push(crate::transcript::TranscriptItem::notice(
+                            format!("Failed to apply reasoning effort: {e}"),
+                            crate::transcript::NoticeLevel::Error,
+                        ));
+                    app.sync_virtualizer();
+                }
             }
             _ => {
                 app.push_modal(ModalState::ReasoningEffort { state });
@@ -2024,6 +2052,7 @@ pub fn handle_modal_key_event(app: &mut App, modal: ModalState, key: crossterm::
                         if state.selected_provider_idx > 0 {
                             state.selected_provider_idx -= 1;
                             state.update_models_for_provider(&app.available_models);
+                            state.invalidate_connectivity();
                         }
                         app.push_modal(ModalState::SetupWizard { state });
                     }
@@ -2031,6 +2060,7 @@ pub fn handle_modal_key_event(app: &mut App, modal: ModalState, key: crossterm::
                         if state.selected_provider_idx + 1 < state.providers.len() {
                             state.selected_provider_idx += 1;
                             state.update_models_for_provider(&app.available_models);
+                            state.invalidate_connectivity();
                         }
                         app.push_modal(ModalState::SetupWizard { state });
                     }
@@ -2040,10 +2070,12 @@ pub fn handle_modal_key_event(app: &mut App, modal: ModalState, key: crossterm::
                     }
                     KeyCode::Backspace if state.editing_endpoint => {
                         state.custom_endpoint.pop();
+                        state.invalidate_connectivity();
                         app.push_modal(ModalState::SetupWizard { state });
                     }
                     KeyCode::Char(c) if state.editing_endpoint => {
                         state.custom_endpoint.push(c);
+                        state.invalidate_connectivity();
                         app.push_modal(ModalState::SetupWizard { state });
                     }
                     KeyCode::Enter => {
@@ -2062,12 +2094,14 @@ pub fn handle_modal_key_event(app: &mut App, modal: ModalState, key: crossterm::
                     KeyCode::Tab => {
                         if state.has_existing_key {
                             state.preserve_existing_key = !state.preserve_existing_key;
+                            state.invalidate_connectivity();
                         }
                         app.push_modal(ModalState::SetupWizard { state });
                     }
                     KeyCode::Backspace => {
                         if !state.preserve_existing_key || !state.has_existing_key {
                             state.api_key_input.pop();
+                            state.invalidate_connectivity();
                         }
                         app.push_modal(ModalState::SetupWizard { state });
                     }
@@ -2077,6 +2111,7 @@ pub fn handle_modal_key_event(app: &mut App, modal: ModalState, key: crossterm::
                             state.api_key_input.clear();
                         }
                         state.api_key_input.push(c);
+                        state.invalidate_connectivity();
                         app.push_modal(ModalState::SetupWizard { state });
                     }
                     KeyCode::Enter => {
@@ -2099,21 +2134,25 @@ pub fn handle_modal_key_event(app: &mut App, modal: ModalState, key: crossterm::
                     KeyCode::Up if !state.editing_custom_model => {
                         if state.selected_model_idx > 0 {
                             state.selected_model_idx -= 1;
+                            state.invalidate_connectivity();
                         }
                         app.push_modal(ModalState::SetupWizard { state });
                     }
                     KeyCode::Down if !state.editing_custom_model => {
                         if state.selected_model_idx + 1 < state.models_for_provider.len() {
                             state.selected_model_idx += 1;
+                            state.invalidate_connectivity();
                         }
                         app.push_modal(ModalState::SetupWizard { state });
                     }
                     KeyCode::Backspace if state.editing_custom_model => {
                         state.custom_model_name.pop();
+                        state.invalidate_connectivity();
                         app.push_modal(ModalState::SetupWizard { state });
                     }
                     KeyCode::Char(c) if state.editing_custom_model => {
                         state.custom_model_name.push(c);
+                        state.invalidate_connectivity();
                         app.push_modal(ModalState::SetupWizard { state });
                     }
                     KeyCode::Enter => {
@@ -2163,53 +2202,7 @@ pub fn handle_modal_key_event(app: &mut App, modal: ModalState, key: crossterm::
                     }
                     KeyCode::Enter => {
                         state.next_step();
-                        state.connectivity_status = crate::modals::ConnectivityStatus::Testing;
-                        state.connectivity_error = None;
-
-                        let event_tx = app.event_tx.clone();
-                        let provider_type = state.current_provider();
-                        let endpoint = state.effective_endpoint();
-                        let api_key = if !state.api_key_input.trim().is_empty() {
-                            Some(state.api_key_input.trim().to_string())
-                        } else if state.preserve_existing_key {
-                            app.config.api_key.clone()
-                        } else {
-                            None
-                        };
-                        let model_name = state.effective_model();
-
-                        std::thread::spawn(move || {
-                            let provider_config = m31a_provider::ProviderConfig {
-                                provider_type,
-                                api_key,
-                                api_base: if endpoint.is_empty() {
-                                    None
-                                } else {
-                                    Some(endpoint)
-                                },
-                                model: model_name,
-                                extra: std::collections::HashMap::new(),
-                            };
-
-                            let result =
-                                match m31a_provider::validate_provider_config(&provider_config) {
-                                    Ok(_) => match m31a_provider::ProviderBuilder::build_client(
-                                        provider_config,
-                                    ) {
-                                        Ok(_) => (true, None),
-                                        Err(e) => (false, Some(format!("Client build error: {e}"))),
-                                    },
-                                    Err(e) => (false, Some(format!("Validation failed: {e}"))),
-                                };
-
-                            let _ = event_tx.blocking_send(
-                                crate::app::TuiEvent::SetupConnectivityResult {
-                                    success: result.0,
-                                    error: result.1,
-                                },
-                            );
-                        });
-
+                        app.verify_setup_connectivity_async(&mut state);
                         app.push_modal(ModalState::SetupWizard { state });
                     }
                     _ => {
@@ -2221,58 +2214,27 @@ pub fn handle_modal_key_event(app: &mut App, modal: ModalState, key: crossterm::
                         state.previous_step();
                         app.push_modal(ModalState::SetupWizard { state });
                     }
-                    KeyCode::Char('r') | KeyCode::Char('R') => {
-                        state.connectivity_status = crate::modals::ConnectivityStatus::Testing;
-                        state.connectivity_error = None;
-
-                        let event_tx = app.event_tx.clone();
-                        let provider_type = state.current_provider();
-                        let endpoint = state.effective_endpoint();
-                        let api_key = if !state.api_key_input.trim().is_empty() {
-                            Some(state.api_key_input.trim().to_string())
-                        } else if state.preserve_existing_key {
-                            app.config.api_key.clone()
-                        } else {
-                            None
-                        };
-                        let model_name = state.effective_model();
-
-                        std::thread::spawn(move || {
-                            let provider_config = m31a_provider::ProviderConfig {
-                                provider_type,
-                                api_key,
-                                api_base: if endpoint.is_empty() {
-                                    None
-                                } else {
-                                    Some(endpoint)
-                                },
-                                model: model_name,
-                                extra: std::collections::HashMap::new(),
-                            };
-
-                            let result =
-                                match m31a_provider::validate_provider_config(&provider_config) {
-                                    Ok(_) => match m31a_provider::ProviderBuilder::build_client(
-                                        provider_config,
-                                    ) {
-                                        Ok(_) => (true, None),
-                                        Err(e) => (false, Some(format!("Client build error: {e}"))),
-                                    },
-                                    Err(e) => (false, Some(format!("Validation failed: {e}"))),
-                                };
-
-                            let _ = event_tx.blocking_send(
-                                crate::app::TuiEvent::SetupConnectivityResult {
-                                    success: result.0,
-                                    error: result.1,
-                                },
-                            );
-                        });
-
+                    KeyCode::Char('r')
+                    | KeyCode::Char('R')
+                    | KeyCode::Char('t')
+                    | KeyCode::Char('T') => {
+                        app.verify_setup_connectivity_async(&mut state);
+                        app.push_modal(ModalState::SetupWizard { state });
+                    }
+                    KeyCode::Char('s') | KeyCode::Char('S') => {
+                        state.skipped_verification = true;
+                        state.next_step();
                         app.push_modal(ModalState::SetupWizard { state });
                     }
                     KeyCode::Enter => {
-                        state.next_step();
+                        if state.connectivity_status == crate::modals::ConnectivityStatus::Connected
+                        {
+                            state.next_step();
+                        } else if state.connectivity_status
+                            == crate::modals::ConnectivityStatus::NotTested
+                        {
+                            app.verify_setup_connectivity_async(&mut state);
+                        }
                         app.push_modal(ModalState::SetupWizard { state });
                     }
                     _ => {
@@ -2825,39 +2787,80 @@ pub fn handle_composer_key_event(app: &mut App, key: crossterm::event::KeyEvent)
     }
 }
 
-fn filter_palette_items(query: &str, items: &[crate::modals::CommandPaletteItem]) -> Vec<usize> {
-    if query.trim().is_empty() {
+pub fn filter_palette_items(
+    query: &str,
+    items: &[crate::modals::CommandPaletteItem],
+) -> Vec<usize> {
+    let q = query.trim();
+    if q.is_empty() {
         return (0..items.len()).collect();
     }
-    let q = query.to_lowercase();
-    let mut scored: Vec<(usize, i32)> = items
+    let q_lower = q.to_lowercase();
+
+    let mut scored: Vec<(usize, i64)> = items
         .iter()
         .enumerate()
         .filter_map(|(idx, item)| {
-            let title = item.title.to_lowercase();
-            let desc = item.description.to_lowercase();
-            let cat = item.category.to_lowercase();
-            let short = item.shortcut.as_deref().unwrap_or("").to_lowercase();
+            let title = &item.title;
+            let desc = &item.description;
+            let cat = &item.category;
+            let short = item.shortcut.as_deref().unwrap_or("");
 
-            let mut score = 0;
-            if title.starts_with(&q) {
-                score += 100;
-            } else if title.contains(&q) {
-                score += 50;
-            } else if desc.contains(&q) {
-                score += 30;
-            } else if cat.contains(&q) {
-                score += 20;
-            } else if short.contains(&q) {
-                score += 15;
-            } else {
-                return None;
+            let title_lower = title.to_lowercase();
+            let cat_lower = cat.to_lowercase();
+            let short_lower = short.to_lowercase();
+
+            let mut best_score: Option<i64> = None;
+
+            // 1. Title matching (highest weight)
+            if let Some(fuzzy_s) = m31a_fuzzy::matcher::fuzzy_match(q, title) {
+                let mut s = fuzzy_s;
+                if title_lower == q_lower {
+                    s += 10_000;
+                } else if title_lower.starts_with(&q_lower) {
+                    s += 5_000;
+                } else if title_lower.contains(&q_lower) {
+                    s += 1_000;
+                }
+                best_score = Some(best_score.map_or(s, |curr| curr.max(s)));
             }
-            Some((idx, score))
+
+            // 2. Shortcut matching
+            if !short.is_empty()
+                && let Some(fuzzy_s) = m31a_fuzzy::matcher::fuzzy_match(q, short)
+            {
+                let mut s = fuzzy_s + 500;
+                if short_lower == q_lower {
+                    s += 8_000;
+                } else if short_lower.starts_with(&q_lower) {
+                    s += 4_000;
+                }
+                best_score = Some(best_score.map_or(s, |curr| curr.max(s)));
+            }
+
+            // 3. Category matching
+            if let Some(fuzzy_s) = m31a_fuzzy::matcher::fuzzy_match(q, cat) {
+                let mut s = fuzzy_s + 200;
+                if cat_lower == q_lower {
+                    s += 4_000;
+                } else if cat_lower.starts_with(&q_lower) {
+                    s += 2_000;
+                }
+                best_score = Some(best_score.map_or(s, |curr| curr.max(s)));
+            }
+
+            // 4. Description matching
+            if let Some(fuzzy_s) = m31a_fuzzy::matcher::fuzzy_match(q, desc) {
+                let s = fuzzy_s;
+                best_score = Some(best_score.map_or(s, |curr| curr.max(s)));
+            }
+
+            best_score.map(|s| (idx, s))
         })
         .collect();
 
-    scored.sort_by_key(|a| std::cmp::Reverse(a.1));
+    // Deterministic ranking: highest score first; tie-break on original index to preserve stability
+    scored.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
     scored.into_iter().map(|(idx, _)| idx).collect()
 }
 

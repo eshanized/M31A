@@ -60,16 +60,16 @@ impl PanelTab {
         }
     }
 
-    pub fn icon(&self) -> &'static str {
+    pub fn icon(&self) -> crate::icons::Icon {
         match self {
-            PanelTab::Files => "▸",
-            PanelTab::Git => "⎇",
-            PanelTab::Diff => "±",
-            PanelTab::Terminal => "❯_",
-            PanelTab::Context => "§",
-            PanelTab::Activity => "◷",
-            PanelTab::Subagents => "◇",
-            PanelTab::Diagnostics => "~",
+            PanelTab::Files => crate::icons::Icon::Folder,
+            PanelTab::Git => crate::icons::Icon::GitBranch,
+            PanelTab::Diff => crate::icons::Icon::GitCompare,
+            PanelTab::Terminal => crate::icons::Icon::Terminal,
+            PanelTab::Context => crate::icons::Icon::Context,
+            PanelTab::Activity => crate::icons::Icon::Activity,
+            PanelTab::Subagents => crate::icons::Icon::Bot,
+            PanelTab::Diagnostics => crate::icons::Icon::AlertTriangle,
         }
     }
 }
@@ -139,7 +139,8 @@ fn render_tab_bar(f: &mut Frame, app: &App, area: Rect, t: &Theme) {
                 .bg(t.color(ColorRole::Surface0))
         };
 
-        spans.push(Span::styled(format!(" {} ", title), style));
+        let icon_str = tab.icon().render(t);
+        spans.push(Span::styled(format!(" {} {} ", icon_str, title), style));
         spans.push(Span::raw(" "));
     }
 
@@ -248,7 +249,10 @@ fn render_git_tab(f: &mut Frame, app: &App, area: Rect, t: &Theme) {
     };
 
     lines.push(Line::from(vec![
-        Span::styled(" ", t.style_accent(true)),
+        Span::styled(
+            format!("{} ", crate::icons::Icon::GitBranch.render(t)),
+            t.style_accent(true),
+        ),
         Span::styled(branch_str, t.style_primary().add_modifier(Modifier::BOLD)),
     ]));
     lines.push(Line::raw(""));
@@ -264,7 +268,10 @@ fn render_git_tab(f: &mut Frame, app: &App, area: Rect, t: &Theme) {
             let change_lines: Vec<&str> = stdout_str.lines().collect();
             if change_lines.is_empty() {
                 lines.push(Line::from(Span::styled(
-                    "  ✔ Working directory clean",
+                    format!(
+                        "  {} Working directory clean",
+                        crate::icons::Icon::CircleCheck.render(t)
+                    ),
                     t.style_success(false),
                 )));
             } else {
@@ -398,7 +405,10 @@ fn render_diff_tab(f: &mut Frame, app: &App, area: Rect, t: &Theme) {
 fn render_terminal_tab(f: &mut Frame, app: &App, area: Rect, t: &Theme) {
     let mut lines = Vec::new();
     lines.push(Line::from(vec![Span::styled(
-        "⚡ Background Tasks & Processes",
+        format!(
+            "{} Background Tasks & Processes",
+            crate::icons::Icon::Zap.render(t)
+        ),
         t.style_secondary().add_modifier(Modifier::BOLD),
     )]));
     lines.push(Line::raw(""));
@@ -516,7 +526,11 @@ fn render_activity_tab(f: &mut Frame, app: &App, area: Rect, t: &Theme) {
             .take(area.height.saturating_sub(6) as usize)
         {
             let dur_ms = work.duration.as_millis();
-            let status_icon = if !work.is_error { "✔" } else { "✖" };
+            let status_icon = if !work.is_error {
+                crate::icons::Icon::CircleCheck.render(t)
+            } else {
+                crate::icons::Icon::CircleX.render(t)
+            };
             let status_style = if !work.is_error {
                 t.style_success(false)
             } else {
@@ -560,7 +574,10 @@ fn render_activity_tab(f: &mut Frame, app: &App, area: Rect, t: &Theme) {
 fn render_subagents_tab(f: &mut Frame, app: &App, area: Rect, t: &Theme) {
     let mut lines = Vec::new();
     lines.push(Line::from(vec![Span::styled(
-        "◇ Subagents & Swarm Hierarchy",
+        format!(
+            "{} Subagents & Swarm Hierarchy",
+            crate::icons::Icon::Bot.render(t)
+        ),
         t.style_secondary().add_modifier(Modifier::BOLD),
     )]));
     lines.push(Line::raw(""));

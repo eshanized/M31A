@@ -120,8 +120,14 @@ pub enum TuiEvent {
         lines: Vec<m31a_proc::ProcessLine>,
     },
     SetupConnectivityResult {
-        success: bool,
+        generation: u64,
+        status: crate::modals::ConnectivityStatus,
+        details: Option<crate::modals::ConnectivityDetails>,
         error: Option<String>,
+    },
+    ModelHealthResult {
+        model: String,
+        state: crate::model_selector::ModelHealthState,
     },
 }
 
@@ -865,64 +871,115 @@ impl App {
         !self.modal_stack.is_empty()
     }
 
-    /// Applies a reasoning effort override across config, active client, and bottom pane.
-    pub fn apply_reasoning_effort(&mut self, new_effort: Option<String>) {
-        self.config.reasoning_effort = new_effort.clone();
+    /// Applies a reasoning effort override across config, active client, and bottom pane transactionally.
+    pub fn apply_reasoning_effort(&mut self, new_effort: Option<String>) -> anyhow::Result<()> {
+        let normalized = match new_effort.as_deref() {
+            None | Some("none") | Some("") => None,
+            Some("low") => Some("low".to_string()),
+            Some("medium") => Some("medium".to_string()),
+            Some("high") => Some("high".to_string()),
+            Some(other) => anyhow::bail!(
+                "Invalid reasoning effort '{other}'. Valid options: low, medium, high, none"
+            ),
+        };
+
+        let mut candidate_config = self.config.clone();
+        candidate_config.reasoning_effort = normalized.clone();
+        candidate_config
+            .save()
+            .map_err(|e| anyhow::anyhow!("Failed to persist reasoning effort: {e}"))?;
+
+        self.config = candidate_config;
         self.nim_client = self
             .nim_client
             .clone()
-            .with_reasoning_effort(new_effort.clone());
-        self.bottom_pane.reasoning_effort = new_effort.clone();
-        if let Err(e) = self.config.save() {
-            tracing::warn!("Failed to persist reasoning effort: {e}");
-        }
+            .with_reasoning_effort(normalized.clone());
+        self.bottom_pane.reasoning_effort = normalized.clone();
 
-        let label = new_effort.as_deref().unwrap_or("none (default)");
+        let label = normalized.as_deref().unwrap_or("none (default)");
         self.transcript.push(TranscriptItem::notice(
             format!("Reasoning effort override set to: `{label}` (Usage: `/effort [low|medium|high|none]`)"),
             NoticeLevel::Success,
         ));
         self.sync_virtualizer();
+        if self.auto_scroll {
+            self.scroll_to_bottom();
+        }
+        Ok(())
     }
 
-    /// Persists configuration adjustments made inside the Setup Wizard.
-    pub fn persist_setup_wizard_config(
+    /// Transactionally applies a setup configuration candidate to disk and the live runtime.
+    pub fn apply_setup_configuration(
         &mut self,
-        wizard: &crate::modals::SetupWizardState,
+        candidate: crate::modals::SetupConfiguration,
     ) -> anyhow::Result<()> {
-        let provider = wizard.current_provider();
-        self.config.model_provider = Some(provider.to_string());
-        self.config.api_base = wizard.effective_endpoint();
-        if !wizard.api_key_input.trim().is_empty() {
-            self.config.api_key = Some(wizard.api_key_input.trim().to_string());
-        }
-        let target_model = wizard.effective_model();
-        self.config.model = target_model.clone();
-        self.config.sandbox = wizard.sandbox_policy;
-        self.config.approval = wizard.approval_policy;
-
-        self.config.save()?;
-
-        self.active_model = target_model.clone();
-
+        // 1. Validate provider configuration
         let provider_config = m31a_provider::ProviderConfig {
-            provider_type: provider,
-            api_key: self.config.api_key.clone(),
-            api_base: if self.config.api_base.is_empty() {
+            provider_type: candidate.provider_type,
+            api_key: candidate.api_key.clone(),
+            api_base: if candidate.api_base.trim().is_empty() {
                 None
             } else {
-                Some(self.config.api_base.clone())
+                Some(candidate.api_base.clone())
             },
-            model: self.active_model.clone(),
+            model: candidate.model.clone(),
             extra: std::collections::HashMap::new(),
         };
 
-        if let Ok(client) = m31a_provider::ProviderBuilder::build_client(provider_config) {
-            self.nim_client = client.with_reasoning_effort(self.config.reasoning_effort.clone());
-        }
+        m31a_provider::validate_provider_config(&provider_config)
+            .map_err(|e| anyhow::anyhow!("Invalid provider configuration: {e}"))?;
 
-        self.bottom_pane.active_model = self.active_model.clone();
-        self.bottom_pane.sandbox_policy = format!("{:?}", self.config.sandbox);
+        // 2. Build candidate client and apply current reasoning effort
+        let mut candidate_client = m31a_provider::ProviderBuilder::build_client(provider_config)
+            .map_err(|e| anyhow::anyhow!("Failed to build provider client: {e}"))?;
+        candidate_client =
+            candidate_client.with_reasoning_effort(self.config.reasoning_effort.clone());
+
+        // 3. Prepare replacement runtime components without mutating live application
+        let new_engine_runtime = Arc::new(
+            m31a_agent_engine::agents::EngineAgentRuntime::new(
+                candidate_client.clone(),
+                self.tools.clone(),
+                self.storage.clone(),
+                self.exec_policy.clone(),
+                self.cwd.clone(),
+                Some(self.hooks.clone()),
+                self.config.model_context_window,
+                self.config.agents.max_depth as u32,
+            )
+            .with_trust_store(self.trust_store.clone()),
+        );
+        let new_guardian = Arc::new(GuardianReviewer::new(&candidate.model));
+
+        // 4. Persistence phase: serialize candidate configuration clone atomically
+        let mut candidate_config = self.config.clone();
+        candidate_config.model_provider = Some(candidate.provider_type.to_string());
+        candidate_config.api_base = candidate.api_base.clone();
+        if let Some(ref key) = candidate.api_key {
+            candidate_config.api_key = Some(key.clone());
+        }
+        candidate_config.model = candidate.model.clone();
+        candidate_config.sandbox = candidate.sandbox;
+        candidate_config.approval = candidate.approval;
+
+        candidate_config
+            .save()
+            .map_err(|e| anyhow::anyhow!("Failed to persist setup configuration: {e}"))?;
+
+        // 5. Commit phase: single atomic transition to in-memory state
+        self.config = candidate_config;
+        self.active_model = candidate.model.clone();
+        self.bottom_pane.active_model = candidate.model.clone();
+        self.bottom_pane.sandbox_policy = format!("{:?}", candidate.sandbox);
+        self.nim_client = candidate_client;
+        self.tools.set_agent_runtime(new_engine_runtime.clone());
+        self.engine_runtime = new_engine_runtime.clone();
+        self.agent_runtime = new_engine_runtime;
+        self.guardian = new_guardian;
+        if let Some(ref mut ms) = self.models_screen_state {
+            ms.set_active_model(candidate.model.clone());
+        }
+        self.refresh_system_prompt();
 
         self.transcript.push(TranscriptItem::notice(
             format!(
@@ -932,7 +989,276 @@ impl App {
             NoticeLevel::Success,
         ));
         self.sync_virtualizer();
+        if self.auto_scroll {
+            self.scroll_to_bottom();
+        }
         Ok(())
+    }
+
+    /// Persists configuration adjustments made inside the Setup Wizard transactionally.
+    pub fn persist_setup_wizard_config(
+        &mut self,
+        wizard: &crate::modals::SetupWizardState,
+    ) -> anyhow::Result<()> {
+        let candidate = wizard.build_candidate_configuration(&self.config);
+        self.apply_setup_configuration(candidate)
+    }
+
+    /// Launches an asynchronous verification of provider connectivity and model availability.
+    pub fn verify_setup_connectivity_async(&self, wizard: &mut crate::modals::SetupWizardState) {
+        match wizard.connectivity_status {
+            crate::modals::ConnectivityStatus::Validating
+            | crate::modals::ConnectivityStatus::TestingConnection
+            | crate::modals::ConnectivityStatus::CheckingModel => {
+                return;
+            }
+            _ => {}
+        }
+
+        wizard.connectivity_generation = wizard.connectivity_generation.wrapping_add(1);
+        let generation = wizard.connectivity_generation;
+        wizard.connectivity_status = crate::modals::ConnectivityStatus::Validating;
+        wizard.connectivity_details = None;
+        wizard.connectivity_error = None;
+        wizard.skipped_verification = false;
+
+        let candidate = wizard.build_candidate_configuration(&self.config);
+        let event_tx = self.event_tx.clone();
+
+        let task = async move {
+            let provider_config = m31a_provider::ProviderConfig {
+                provider_type: candidate.provider_type,
+                api_key: candidate.api_key.clone(),
+                api_base: if candidate.api_base.trim().is_empty() {
+                    None
+                } else {
+                    Some(candidate.api_base.clone())
+                },
+                model: candidate.model.clone(),
+                extra: std::collections::HashMap::new(),
+            };
+
+            if let Err(e) = m31a_provider::validate_provider_config(&provider_config) {
+                let _ = event_tx
+                    .send(TuiEvent::SetupConnectivityResult {
+                        generation,
+                        status: crate::modals::ConnectivityStatus::Failed,
+                        details: None,
+                        error: Some(format!("Invalid configuration: {e}")),
+                    })
+                    .await;
+                return;
+            }
+
+            let client = match m31a_provider::ProviderBuilder::build_client(provider_config) {
+                Ok(c) => c,
+                Err(e) => {
+                    let _ = event_tx
+                        .send(TuiEvent::SetupConnectivityResult {
+                            generation,
+                            status: crate::modals::ConnectivityStatus::Failed,
+                            details: None,
+                            error: Some(format!("Client construction failed: {e}")),
+                        })
+                        .await;
+                    return;
+                }
+            };
+
+            let _ = event_tx
+                .send(TuiEvent::SetupConnectivityResult {
+                    generation,
+                    status: crate::modals::ConnectivityStatus::TestingConnection,
+                    details: None,
+                    error: None,
+                })
+                .await;
+
+            let start_time = std::time::Instant::now();
+            let conn_res =
+                tokio::time::timeout(std::time::Duration::from_secs(8), client.check_connection())
+                    .await;
+
+            match conn_res {
+                Err(_) => {
+                    let _ = event_tx
+                        .send(TuiEvent::SetupConnectivityResult {
+                            generation,
+                            status: crate::modals::ConnectivityStatus::Failed,
+                            details: None,
+                            error: Some("Connection check timed out after 8s".to_string()),
+                        })
+                        .await;
+                    return;
+                }
+                Ok(Err(e)) => {
+                    let _ = event_tx
+                        .send(TuiEvent::SetupConnectivityResult {
+                            generation,
+                            status: crate::modals::ConnectivityStatus::Failed,
+                            details: None,
+                            error: Some(format!("Endpoint connection failed: {e}")),
+                        })
+                        .await;
+                    return;
+                }
+                Ok(Ok(())) => {}
+            }
+
+            let latency_ms = start_time.elapsed().as_millis() as u64;
+
+            let _ = event_tx
+                .send(TuiEvent::SetupConnectivityResult {
+                    generation,
+                    status: crate::modals::ConnectivityStatus::CheckingModel,
+                    details: None,
+                    error: None,
+                })
+                .await;
+
+            let model_res = tokio::time::timeout(
+                std::time::Duration::from_secs(8),
+                client.test_model_availability(),
+            )
+            .await;
+
+            match model_res {
+                Err(_) => {
+                    let _ = event_tx
+                        .send(TuiEvent::SetupConnectivityResult {
+                            generation,
+                            status: crate::modals::ConnectivityStatus::Connected,
+                            details: Some(crate::modals::ConnectivityDetails {
+                                endpoint_verified: true,
+                                model_verified: false,
+                                model_check_unsupported: false,
+                                latency_ms: Some(latency_ms),
+                                message: "Endpoint connected, but model availability check timed out (8s)".to_string(),
+                            }),
+                            error: Some("Model availability check timed out".to_string()),
+                        })
+                        .await;
+                }
+                Ok(Ok(())) => {
+                    let _ = event_tx
+                        .send(TuiEvent::SetupConnectivityResult {
+                            generation,
+                            status: crate::modals::ConnectivityStatus::Connected,
+                            details: Some(crate::modals::ConnectivityDetails {
+                                endpoint_verified: true,
+                                model_verified: true,
+                                model_check_unsupported: false,
+                                latency_ms: Some(latency_ms),
+                                message: format!(
+                                    "Connection and model `{}` verified successfully",
+                                    candidate.model
+                                ),
+                            }),
+                            error: None,
+                        })
+                        .await;
+                }
+                Ok(Err(e)) => {
+                    let err_str = e.to_string();
+                    if err_str.contains("not supported") || err_str.contains("unsupported") {
+                        let _ = event_tx
+                            .send(TuiEvent::SetupConnectivityResult {
+                                generation,
+                                status: crate::modals::ConnectivityStatus::Connected,
+                                details: Some(crate::modals::ConnectivityDetails {
+                                    endpoint_verified: true,
+                                    model_verified: false,
+                                    model_check_unsupported: true,
+                                    latency_ms: Some(latency_ms),
+                                    message: format!(
+                                        "Endpoint verified ({latency_ms}ms). Model availability not independently verified."
+                                    ),
+                                }),
+                                error: None,
+                            })
+                            .await;
+                    } else {
+                        let _ = event_tx
+                            .send(TuiEvent::SetupConnectivityResult {
+                                generation,
+                                status: crate::modals::ConnectivityStatus::Failed,
+                                details: Some(crate::modals::ConnectivityDetails {
+                                    endpoint_verified: true,
+                                    model_verified: false,
+                                    model_check_unsupported: false,
+                                    latency_ms: Some(latency_ms),
+                                    message: format!("Model availability check failed: {err_str}"),
+                                }),
+                                error: Some(format!("Model check failed: {err_str}")),
+                            })
+                            .await;
+                    }
+                }
+            }
+        };
+
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn(task);
+        } else {
+            std::thread::spawn(move || {
+                if let Ok(rt) = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                {
+                    rt.block_on(task);
+                }
+            });
+        }
+    }
+
+    /// Asynchronously probes the health and availability of a specific model slug.
+    pub fn probe_model_health_async(&self, slug: &str) {
+        let client = self.nim_client.with_model(slug);
+        let event_tx = self.event_tx.clone();
+        let model = slug.to_string();
+
+        let task = async move {
+            let start = std::time::Instant::now();
+            let result = tokio::time::timeout(
+                std::time::Duration::from_secs(8),
+                client.test_model_availability(),
+            )
+            .await;
+
+            let latency_ms = start.elapsed().as_millis() as u64;
+
+            let state = match result {
+                Ok(Ok(())) => crate::model_selector::ModelHealthState::Healthy { latency_ms },
+                Ok(Err(e)) => {
+                    let err_msg = e.to_string();
+                    if err_msg.contains("not supported") || err_msg.contains("unsupported") {
+                        crate::model_selector::ModelHealthState::Unsupported
+                    } else {
+                        crate::model_selector::ModelHealthState::Unhealthy { message: err_msg }
+                    }
+                }
+                Err(_) => crate::model_selector::ModelHealthState::Unhealthy {
+                    message: "Probe timed out (8s)".to_string(),
+                },
+            };
+
+            let _ = event_tx
+                .send(TuiEvent::ModelHealthResult { model, state })
+                .await;
+        };
+
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn(task);
+        } else {
+            std::thread::spawn(move || {
+                if let Ok(rt) = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                {
+                    rt.block_on(task);
+                }
+            });
+        }
     }
 
     /// Applies an approval action exactly as labeled by the one approval surface.
@@ -2296,19 +2622,11 @@ impl App {
             "/effort" | "/reasoning-effort" => {
                 if parts.len() > 1 {
                     let val = parts[1].to_lowercase();
-                    match val.as_str() {
-                        "none" | "default" | "reset" | "off" => {
-                            self.apply_reasoning_effort(None);
-                        }
-                        "low" => {
-                            self.apply_reasoning_effort(Some("low".to_string()));
-                        }
-                        "medium" | "med" => {
-                            self.apply_reasoning_effort(Some("medium".to_string()));
-                        }
-                        "high" => {
-                            self.apply_reasoning_effort(Some("high".to_string()));
-                        }
+                    let res = match val.as_str() {
+                        "none" | "default" | "reset" | "off" => self.apply_reasoning_effort(None),
+                        "low" => self.apply_reasoning_effort(Some("low".to_string())),
+                        "medium" | "med" => self.apply_reasoning_effort(Some("medium".to_string())),
+                        "high" => self.apply_reasoning_effort(Some("high".to_string())),
                         other => {
                             self.transcript.push(TranscriptItem::notice(
                                 format!(
@@ -2317,7 +2635,15 @@ impl App {
                                 NoticeLevel::Warning,
                             ));
                             self.sync_virtualizer();
+                            return;
                         }
+                    };
+                    if let Err(e) = res {
+                        self.transcript.push(TranscriptItem::notice(
+                            format!("Failed to apply reasoning effort: {e}"),
+                            NoticeLevel::Error,
+                        ));
+                        self.sync_virtualizer();
                     }
                 } else {
                     self.push_modal(ModalState::reasoning_effort(
@@ -2832,7 +3158,7 @@ impl App {
                 let client = self.nim_client.clone();
                 let tx = self.event_tx.clone();
                 self.transcript.push(TranscriptItem::notice(
-                    "⚡ Engaging continuous background Vibe Auto-Healing loop...".to_string(),
+                    "Engaging continuous background Vibe Auto-Healing loop...".to_string(),
                     NoticeLevel::Info,
                 ));
                 self.sync_virtualizer();
@@ -2846,20 +3172,20 @@ impl App {
                             match evt {
                                 m31a_agent_engine::vibe_loop::VibeEvent::WorkspaceClean { duration_ms } => {
                                     let _ = tx.send(TuiEvent::Notice(
-                                        format!("⚡ [VIBE CLEAN] Workspace builds cleanly ({}ms)", duration_ms),
+                                        format!("[VIBE CLEAN] Workspace builds cleanly ({}ms)", duration_ms),
                                         NoticeLevel::Success,
                                     )).await;
                                 }
                                 m31a_agent_engine::vibe_loop::VibeEvent::SelfHealingSuccess { duration_ms, files_healed } => {
                                     let names: Vec<String> = files_healed.iter().filter_map(|p| p.file_name().map(|n| n.to_string_lossy().to_string())).collect();
                                     let _ = tx.send(TuiEvent::Notice(
-                                        format!("✨ [VIBE HEALED] Auto-repaired compiler errors in {}ms! Patched: {}", duration_ms, names.join(", ")),
+                                        format!("[VIBE HEALED] Auto-repaired compiler errors in {}ms! Patched: {}", duration_ms, names.join(", ")),
                                         NoticeLevel::Success,
                                     )).await;
                                 }
                                 m31a_agent_engine::vibe_loop::VibeEvent::ErrorsDetected { error_count, .. } => {
                                     let _ = tx.send(TuiEvent::Notice(
-                                        format!("⚡ [VIBE DETECTED] {} build error(s). Background healing engaged...", error_count),
+                                        format!("[VIBE DETECTED] {} build error(s). Background healing engaged...", error_count),
                                         NoticeLevel::Warning,
                                     )).await;
                                 }
@@ -4591,7 +4917,7 @@ impl App {
         }
     }
 
-    fn handle_tui_event(&mut self, event: TuiEvent) {
+    pub fn handle_tui_event(&mut self, event: TuiEvent) {
         match event {
             TuiEvent::Correlated { correlation, event } => {
                 if correlation.session_epoch != self.session_epoch {
@@ -4992,14 +5318,32 @@ impl App {
             TuiEvent::ProviderStatus(msg) => {
                 self.provider_status_message = Some(msg);
             }
-            TuiEvent::SetupConnectivityResult { success, error } => {
+            TuiEvent::SetupConnectivityResult {
+                generation,
+                status,
+                details,
+                error,
+            } => {
                 if let Some(ModalState::SetupWizard { state }) = self.current_modal_mut() {
-                    state.connectivity_status = if success {
-                        crate::modals::ConnectivityStatus::Connected
+                    if state.connectivity_generation == generation {
+                        state.connectivity_status = status;
+                        state.connectivity_details = details;
+                        state.connectivity_error = error;
                     } else {
-                        crate::modals::ConnectivityStatus::Failed
-                    };
-                    state.connectivity_error = error;
+                        tracing::debug!(
+                            "Ignoring stale setup connectivity result for generation {} (current: {})",
+                            generation,
+                            state.connectivity_generation
+                        );
+                    }
+                }
+            }
+            TuiEvent::ModelHealthResult { model, state } => {
+                if let Some(ModalState::ModelPicker {
+                    state: picker_state,
+                }) = self.current_modal_mut()
+                {
+                    picker_state.set_health(model, state);
                 }
             }
         }

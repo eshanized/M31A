@@ -50,20 +50,26 @@ pub use interrupts::{DeferredInterrupt, DeferredInterruptQueue, ToolActivityStat
 pub use keybindings::{CANONICAL_KEYBINDINGS, KeyAction, Keybinding, canonical_keybindings};
 pub use mermaid::{MermaidError, render as render_mermaid};
 pub use modals::{
-    CommandPaletteItem, ConnectivityStatus, ModalStack, ModalState, PendingApproval,
-    ReasoningEffortOption, ReasoningEffortState, ScrubTurnItem, SelectPickerItem,
-    SelectPickerState, SetupStep, SetupWizardState,
+    CommandPaletteGeometry, CommandPaletteItem, ConnectivityDetails, ConnectivityStatus,
+    ModalStack, ModalState, PendingApproval, ReasoningEffortOption, ReasoningEffortState,
+    ScrubTurnItem, SelectPickerItem, SelectPickerState, SetupConfiguration, SetupStep,
+    SetupWizardState,
 };
-pub use model_selector::{ModelListState, ModelSelectorGeometry, render_model_list};
+pub use model_selector::{
+    ModelHealthState, ModelListState, ModelSelectorGeometry, render_model_details,
+    render_model_details_with_health, render_model_list,
+};
 pub use mouse::{MouseSelection, handle_mouse_event};
 pub use panel::PanelTab;
+pub use renderer::{centered_rect, model_picker_popup_rect};
 pub use resume_picker::ResumePickerState;
 pub use screens::Screen;
 pub use scrollable_diff::{ScrollViewState, ScrollableDiff};
 pub use stash::{PromptStash, PromptStashEntry};
 pub use subcell::{SubcellCanvas, octant_glyph, smootherstep, tab_pulse_factor};
 pub use terminal::{
-    execute_palette_action, handle_key_event, handle_screen_key_event, run_tui_app,
+    execute_palette_action, filter_palette_items, handle_key_event, handle_screen_key_event,
+    run_tui_app,
 };
 pub use terminal_detection::{MultiplexerKind, TerminalCapabilities, TerminalInfo, TerminalKind};
 pub use theme::{ColorRole, Theme, ThemeColors, ThemeVariant, init_theme, theme};
