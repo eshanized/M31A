@@ -215,9 +215,19 @@ fn render_header(f: &mut Frame, app: &App, area: Rect, t: &Theme) {
             t.style_secondary().add_modifier(Modifier::BOLD),
         ),
         Span::styled(" │ ", t.style_muted()),
-        Span::styled(format!("📁 {}", project_name), t.style_primary()),
+        Span::styled(
+            format!("{} {}", crate::icons::Icon::Folder.render(t), project_name),
+            t.style_primary(),
+        ),
         Span::styled(" │ ", t.style_muted()),
-        Span::styled(format!("💬 #{}", session_short), t.style_muted()),
+        Span::styled(
+            format!(
+                "{} #{}",
+                crate::icons::Icon::MessageSquare.render(t),
+                session_short
+            ),
+            t.style_muted(),
+        ),
         Span::styled(" │ ", t.style_muted()),
         Span::styled(format!("● {}", badge_text), status_style),
     ]);
@@ -427,10 +437,20 @@ fn render_modal(f: &mut Frame, modal: &ModalState, app: &App, area: Rect, t: &Th
         ModalState::CommandPalette {
             query,
             selected_index,
+            scroll_offset,
             items,
             filtered_indices,
         } => {
-            render_command_palette(f, query, *selected_index, items, filtered_indices, area, t);
+            render_command_palette(
+                f,
+                query,
+                *selected_index,
+                *scroll_offset,
+                items,
+                filtered_indices,
+                area,
+                t,
+            );
         }
         ModalState::SettingsModal {
             active_tab,
@@ -512,6 +532,12 @@ fn render_modal(f: &mut Frame, modal: &ModalState, app: &App, area: Rect, t: &Th
         ModalState::SelectPicker(picker) => {
             render_select_picker_modal(f, picker, area, t);
         }
+        ModalState::SetupWizard { state } => {
+            render_setup_wizard(f, state, area, t);
+        }
+        ModalState::ReasoningEffort { state } => {
+            render_reasoning_effort(f, state, area, t);
+        }
     }
 }
 
@@ -570,7 +596,13 @@ fn render_approval_dialog(
         .borders(Borders::ALL)
         .border_type(t.border.modal)
         .title(Line::from(vec![
-            Span::styled(" 🛡️ Approval Required ", t.style_error(true)),
+            Span::styled(
+                format!(
+                    " {} Approval Required ",
+                    crate::icons::Icon::ShieldAlert.render(t)
+                ),
+                t.style_error(true),
+            ),
             Span::styled(" [Single-Keystroke Actions] ", t.style_muted()),
         ]))
         .border_style(t.style_error(false))
@@ -770,8 +802,10 @@ fn render_quick_diff_preview(
     let lines = crate::diff_render::DiffRenderer::render_lines(&parsed, t);
 
     let title = format!(
-        " 🔍 Quick Diff Preview  +{} −{}  [Esc: Return to Approval]  [y: Allow]  [n: Decline] ",
-        stats.additions, stats.deletions
+        " {} Quick Diff Preview  +{} −{}  [Esc: Return to Approval]  [y: Allow]  [n: Decline] ",
+        crate::icons::Icon::Search.render(t),
+        stats.additions,
+        stats.deletions
     );
 
     let block = Block::default()
@@ -1763,61 +1797,1037 @@ fn render_process_viewer(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_command_palette(
     f: &mut Frame,
     query: &str,
     selected_index: usize,
+    scroll_offset: usize,
     items: &[crate::modals::CommandPaletteItem],
     filtered_indices: &[usize],
     area: Rect,
     t: &Theme,
 ) {
-    let popup_area = centered_rect(70, 70, area);
+    let popup_area = centered_rect(78, 75, area);
     f.render_widget(Clear, popup_area);
+
+    let main_block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(t.border.modal)
+        .border_style(t.border_focus())
+        .title(Line::from(vec![
+            Span::styled(
+                format!(" {} ", crate::icons::Icon::Command.render(t)),
+                t.style_secondary().add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "Command Palette",
+                t.style_secondary().add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("  [ESC to close]", t.style_muted()),
+        ]))
+        .style(t.style_surface1());
+
+    let inner = main_block.inner(popup_area);
+    f.render_widget(main_block, popup_area);
+
+    if inner.width < 10 || inner.height < 4 {
+        return;
+    }
+
+    // Layout: Search bar (length 3), Body (min 3), Footer (length 1)
+    let vert_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Min(3),
+            Constraint::Length(1),
+        ])
+        .split(inner);
+
+    let search_area = vert_chunks[0];
+    let body_area = vert_chunks[1];
+    let footer_area = vert_chunks[2];
+
+    // 1. Search Bar
+    let search_icon = crate::icons::Icon::Search.render(t);
+    let search_block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(t.border_subtle())
+        .style(t.style_surface0());
+
+    let search_text = if query.is_empty() {
+        Line::from(vec![
+            Span::styled(format!(" {} ", search_icon), t.style_muted()),
+            Span::styled(
+                "Type to search commands or press ↑↓ to navigate...",
+                t.style_muted(),
+            ),
+        ])
+    } else {
+        Line::from(vec![
+            Span::styled(format!(" {} ", search_icon), t.style_accent(true)),
+            Span::styled(query, t.style_primary().add_modifier(Modifier::BOLD)),
+            Span::styled("█", t.style_accent(false)),
+        ])
+    };
+    f.render_widget(Paragraph::new(search_text).block(search_block), search_area);
+
+    // 2. Body Area (Two-pane on wide, single-pane on narrow)
+    let is_wide = body_area.width >= 70;
+    let (list_area, details_area) = if is_wide {
+        let h_chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(58), Constraint::Percentage(42)])
+            .split(body_area);
+        (h_chunks[0], Some(h_chunks[1]))
+    } else {
+        (body_area, None)
+    };
+
+    // Render list
+    let list_inner_h = list_area.height.saturating_sub(2) as usize;
+    if filtered_indices.is_empty() {
+        let no_res_block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(t.border_subtle());
+        let msg = Paragraph::new(vec![
+            Line::from(""),
+            Line::from(vec![
+                Span::styled(
+                    format!("  {} ", crate::icons::Icon::AlertTriangle.render(t)),
+                    t.style_warning(false),
+                ),
+                Span::styled(
+                    format!("No matching commands for \"{}\"", query),
+                    t.style_muted(),
+                ),
+            ]),
+            Line::from(""),
+            Line::from(Span::styled(
+                "  Try a different keyword or press Esc to return.",
+                t.style_muted(),
+            )),
+        ])
+        .block(no_res_block);
+        f.render_widget(msg, list_area);
+    } else {
+        let start = scroll_offset.min(filtered_indices.len());
+        let end = (start + list_inner_h).min(filtered_indices.len());
+        let visible_slice = if start < end {
+            &filtered_indices[start..end]
+        } else {
+            &[]
+        };
+
+        let list_items: Vec<ListItem> = visible_slice
+            .iter()
+            .enumerate()
+            .filter_map(|(rel_idx, &item_idx)| {
+                let item = items.get(item_idx)?;
+                let actual_idx = scroll_offset + rel_idx;
+                let is_sel = actual_idx == selected_index;
+                let row_style = if is_sel {
+                    t.style_selected()
+                } else {
+                    t.style_primary()
+                };
+
+                let sel_marker = if is_sel { "▸ " } else { "  " };
+                let icon_glyph = item.icon.render(t);
+
+                let mut spans = vec![
+                    Span::styled(sel_marker, row_style),
+                    Span::styled(
+                        format!("{} ", icon_glyph),
+                        if is_sel {
+                            row_style
+                        } else {
+                            t.style_accent(false)
+                        },
+                    ),
+                    Span::styled(
+                        &item.title,
+                        row_style.add_modifier(if is_sel {
+                            Modifier::BOLD
+                        } else {
+                            Modifier::empty()
+                        }),
+                    ),
+                ];
+
+                if let Some(ref sc) = item.shortcut {
+                    spans.push(Span::raw(" "));
+                    spans.push(Span::styled(
+                        format!("[{}]", sc),
+                        if is_sel { row_style } else { t.style_muted() },
+                    ));
+                }
+
+                Some(ListItem::new(Line::from(spans)))
+            })
+            .collect();
+
+        let count_str = format!(" [{}/{}] ", selected_index + 1, filtered_indices.len());
+        let list_block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(t.border_subtle())
+            .title(Line::from(vec![
+                Span::styled(
+                    " Commands ",
+                    t.style_secondary().add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(count_str, t.style_muted()),
+            ]));
+
+        let list = List::new(list_items).block(list_block);
+        f.render_widget(list, list_area);
+
+        // Scrollbar if needed
+        if filtered_indices.len() > list_inner_h && list_inner_h > 0 {
+            use ratatui::widgets::{Scrollbar, ScrollbarOrientation, ScrollbarState};
+            let mut scrollbar_state =
+                ScrollbarState::new(filtered_indices.len().saturating_sub(list_inner_h))
+                    .position(scroll_offset);
+            let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                .begin_symbol(Some("▲"))
+                .end_symbol(Some("▼"))
+                .track_symbol(Some("│"))
+                .thumb_symbol("█")
+                .style(t.style_muted());
+            f.render_stateful_widget(
+                scrollbar,
+                list_area.inner(ratatui::layout::Margin {
+                    vertical: 1,
+                    horizontal: 0,
+                }),
+                &mut scrollbar_state,
+            );
+        }
+    }
+
+    // Render details pane
+    if let Some(d_area) = details_area {
+        let details_block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(t.border_subtle())
+            .title(Line::from(vec![Span::styled(
+                " Command Details ",
+                t.style_secondary().add_modifier(Modifier::BOLD),
+            )]))
+            .style(t.style_surface1());
+
+        let selected_item = filtered_indices
+            .get(selected_index)
+            .and_then(|&idx| items.get(idx));
+
+        let details_content = if let Some(item) = selected_item {
+            vec![
+                Line::from(vec![
+                    Span::styled(format!("{} ", item.icon.render(t)), t.style_accent(true)),
+                    Span::styled(&item.title, t.style_primary().add_modifier(Modifier::BOLD)),
+                ]),
+                Line::from(""),
+                Line::from(Span::styled(&item.description, t.style_secondary())),
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled("Category: ", t.style_muted()),
+                    Span::styled(&item.category, t.style_accent(false)),
+                ]),
+                Line::from(vec![
+                    Span::styled("Shortcut: ", t.style_muted()),
+                    Span::styled(
+                        item.shortcut.as_deref().unwrap_or("None"),
+                        t.style_primary(),
+                    ),
+                ]),
+                Line::from(vec![
+                    Span::styled("Action ID: ", t.style_muted()),
+                    Span::styled(&item.id, t.style_muted()),
+                ]),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "Press Enter to execute this action",
+                    t.style_success(true),
+                )),
+            ]
+        } else {
+            vec![Line::from(Span::styled(
+                "No command selected.",
+                t.style_muted(),
+            ))]
+        };
+
+        f.render_widget(Paragraph::new(details_content).block(details_block), d_area);
+    }
+
+    // 3. Footer
+    let footer_text = Line::from(vec![
+        Span::styled("↑↓", t.style_accent(true)),
+        Span::styled(" Navigate  ", t.style_muted()),
+        Span::styled("Enter", t.style_accent(true)),
+        Span::styled(" Execute  ", t.style_muted()),
+        Span::styled("Esc", t.style_accent(true)),
+        Span::styled(" Close  ", t.style_muted()),
+        Span::styled("Type", t.style_accent(true)),
+        Span::styled(" to filter", t.style_muted()),
+    ]);
+    f.render_widget(Paragraph::new(footer_text), footer_area);
+}
+
+fn render_setup_wizard(
+    f: &mut Frame,
+    state: &crate::modals::SetupWizardState,
+    area: Rect,
+    t: &Theme,
+) {
+    let popup_area = centered_rect(78, 80, area);
+    f.render_widget(Clear, popup_area);
+
+    let title_line = Line::from(vec![
+        Span::styled(
+            format!(" {} ", crate::icons::Icon::Wrench.render(t)),
+            t.style_secondary(),
+        ),
+        Span::styled(
+            "M31A Setup Wizard",
+            t.style_secondary().add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!(
+                " [Step {}/8: {}]",
+                (state.step as usize) + 1,
+                state.step.title()
+            ),
+            t.style_accent(true),
+        ),
+    ]);
 
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(t.border.modal)
-        .title(Line::from(vec![
-            Span::styled(
-                " Command Palette ",
-                t.style_secondary().add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(format!("  {} ", query), t.style_accent(true)),
-            Span::styled("↑↓ Enter=Run Esc=Close", t.style_muted()),
-        ]))
         .border_style(t.border_focus())
+        .title(title_line)
         .style(t.style_surface1());
 
-    let items: Vec<ListItem> = filtered_indices
+    let inner = block.inner(popup_area);
+    f.render_widget(block, popup_area);
+
+    if inner.width < 10 || inner.height < 6 {
+        return;
+    }
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Min(4),
+            Constraint::Length(2),
+        ])
+        .split(inner);
+
+    let step_idx = state.step as usize;
+    let step_spans: Vec<Span> = crate::modals::SetupStep::ALL
         .iter()
         .enumerate()
-        .filter_map(|(display_idx, &item_idx)| {
-            let item = items.get(item_idx)?;
-            let is_sel = display_idx == selected_index;
-            let row_style = if is_sel {
+        .flat_map(|(i, s)| {
+            let is_current = i == step_idx;
+            let is_done = i < step_idx;
+            let style = if is_current {
+                t.style_selected().add_modifier(Modifier::BOLD)
+            } else if is_done {
+                t.style_success(false)
+            } else {
+                t.style_muted()
+            };
+            let symbol = if is_done {
+                "✓"
+            } else if is_current {
+                "●"
+            } else {
+                "○"
+            };
+            vec![
+                Span::styled(
+                    format!(
+                        " {} {} ",
+                        symbol,
+                        s.title().split_whitespace().next().unwrap_or("")
+                    ),
+                    style,
+                ),
+                if i + 1 < crate::modals::SetupStep::ALL.len() {
+                    Span::styled("›", t.style_muted())
+                } else {
+                    Span::raw("")
+                },
+            ]
+        })
+        .collect();
+    let step_block = Block::default()
+        .borders(Borders::BOTTOM)
+        .border_style(t.border_subtle());
+    f.render_widget(
+        Paragraph::new(Line::from(step_spans)).block(step_block),
+        chunks[0],
+    );
+
+    let content_area = chunks[1];
+    match state.step {
+        crate::modals::SetupStep::Welcome => {
+            let mut lines = vec![
+                Line::from(""),
+                Line::from(vec![Span::styled(
+                    "  Welcome to the M31A Autonomous Software Engineering Runtime!",
+                    t.style_primary().add_modifier(Modifier::BOLD),
+                )]),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "  This interactive setup wizard will guide you through configuring:",
+                    t.style_secondary(),
+                )),
+                Line::from(Span::styled(
+                    "    1. AI Model Provider (NVIDIA NIM, OpenAI, Anthropic, Gemini, Local Ollama, etc.)",
+                    t.style_primary(),
+                )),
+                Line::from(Span::styled(
+                    "    2. API Credentials & Authentication (securely masked)",
+                    t.style_primary(),
+                )),
+                Line::from(Span::styled(
+                    "    3. Default Model Selection from the canonical catalog",
+                    t.style_primary(),
+                )),
+                Line::from(Span::styled(
+                    "    4. Execution Security (Container Sandbox & Human Approval policies)",
+                    t.style_primary(),
+                )),
+                Line::from(Span::styled(
+                    "    5. Live Provider Connectivity Verification",
+                    t.style_primary(),
+                )),
+                Line::from(""),
+            ];
+            if state.existing_config_detected {
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        format!(
+                            "  {} Existing configuration detected.",
+                            crate::icons::Icon::Info.render(t)
+                        ),
+                        t.style_warning(true),
+                    ),
+                    Span::styled(
+                        " Running setup will update your configuration file safely.",
+                        t.style_secondary(),
+                    ),
+                ]));
+            } else {
+                lines.push(Line::from(vec![
+                    Span::styled(format!("  {} First-time initialization.", crate::icons::Icon::Sparkles.render(t)), t.style_success(true)),
+                    Span::styled(" A clean configuration file will be created in your standard config directory.", t.style_secondary()),
+                ]));
+            }
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                "  Press [Enter] to begin, or [Esc] to cancel.",
+                t.style_accent(true),
+            )));
+            f.render_widget(Paragraph::new(lines), content_area);
+        }
+        crate::modals::SetupStep::Provider => {
+            let mut lines = vec![
+                Line::from(Span::styled(
+                    "  Select the AI model provider to connect to M31A:",
+                    t.style_secondary().add_modifier(Modifier::BOLD),
+                )),
+                Line::from(""),
+            ];
+            for (idx, p) in state.providers.iter().enumerate() {
+                let is_sel = idx == state.selected_provider_idx;
+                let marker = if is_sel { "▸ " } else { "  " };
+                let style = if is_sel {
+                    t.style_selected().add_modifier(Modifier::BOLD)
+                } else {
+                    t.style_primary()
+                };
+                lines.push(Line::from(vec![
+                    Span::styled(format!("  {}{:<22}", marker, p.display_name()), style),
+                    Span::styled(
+                        format!("Default: {}", p.default_api_base()),
+                        if is_sel { style } else { t.style_muted() },
+                    ),
+                ]));
+            }
+            lines.push(Line::from(""));
+            let endpoint_style = if state.editing_endpoint {
                 t.style_selected()
+            } else {
+                t.style_primary()
+            };
+            lines.push(Line::from(vec![
+                Span::styled("  Endpoint URL: ", t.style_secondary()),
+                Span::styled(&state.custom_endpoint, endpoint_style),
+                if state.editing_endpoint {
+                    Span::styled("█", t.style_accent(false))
+                } else {
+                    Span::raw("")
+                },
+                Span::styled("  [Tab: Edit endpoint]", t.style_muted()),
+            ]));
+            f.render_widget(Paragraph::new(lines), content_area);
+        }
+        crate::modals::SetupStep::Credentials => {
+            let is_local = state.current_provider().is_local();
+            let mut lines = vec![
+                Line::from(Span::styled(
+                    format!(
+                        "  Authentication credentials for {}:",
+                        state.current_provider().display_name()
+                    ),
+                    t.style_secondary().add_modifier(Modifier::BOLD),
+                )),
+                Line::from(""),
+            ];
+            if is_local {
+                lines.push(Line::from(Span::styled(
+                    "  Local providers (Ollama / LM Studio) typically do not require an API key.",
+                    t.style_success(false),
+                )));
+                lines.push(Line::from(""));
+            }
+            if state.has_existing_key {
+                let p_style = if state.preserve_existing_key {
+                    t.style_selected().add_modifier(Modifier::BOLD)
+                } else {
+                    t.style_primary()
+                };
+                let n_style = if !state.preserve_existing_key {
+                    t.style_selected().add_modifier(Modifier::BOLD)
+                } else {
+                    t.style_primary()
+                };
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        if state.preserve_existing_key {
+                            "  ▸ "
+                        } else {
+                            "    "
+                        },
+                        p_style,
+                    ),
+                    Span::styled("Preserve existing configured API Key (●●●●●●●●)", p_style),
+                ]));
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        if !state.preserve_existing_key {
+                            "  ▸ "
+                        } else {
+                            "    "
+                        },
+                        n_style,
+                    ),
+                    Span::styled("Enter new API Key", n_style),
+                ]));
+                lines.push(Line::from(""));
+            }
+            if !state.has_existing_key || !state.preserve_existing_key {
+                let masked_input: String = "●".repeat(state.api_key_input.chars().count());
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        "  API Key: ",
+                        t.style_secondary().add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        if masked_input.is_empty() {
+                            "Paste or type API key here...".to_string()
+                        } else {
+                            masked_input
+                        },
+                        if state.api_key_input.is_empty() {
+                            t.style_muted()
+                        } else {
+                            t.style_selected()
+                        },
+                    ),
+                    Span::styled("█", t.style_accent(false)),
+                ]));
+                lines.push(Line::from(""));
+                lines.push(Line::from(Span::styled(
+                    "  [Key values are securely masked and never written to transcripts or logs]",
+                    t.style_muted(),
+                )));
+            }
+            f.render_widget(Paragraph::new(lines), content_area);
+        }
+        crate::modals::SetupStep::Model => {
+            let mut lines = vec![
+                Line::from(Span::styled(
+                    format!(
+                        "  Select the default model for {}:",
+                        state.current_provider().display_name()
+                    ),
+                    t.style_secondary().add_modifier(Modifier::BOLD),
+                )),
+                Line::from(""),
+            ];
+            for (idx, m) in state.models_for_provider.iter().enumerate() {
+                let is_sel = idx == state.selected_model_idx && !state.editing_custom_model;
+                let marker = if is_sel { "▸ " } else { "  " };
+                let style = if is_sel {
+                    t.style_selected().add_modifier(Modifier::BOLD)
+                } else {
+                    t.style_primary()
+                };
+                lines.push(Line::from(vec![
+                    Span::styled(format!("  {}{:<28}", marker, m.display_name), style),
+                    Span::styled(
+                        format!("({:<36}) [{}k]", m.slug, m.context_window / 1024),
+                        if is_sel { style } else { t.style_muted() },
+                    ),
+                ]));
+            }
+            lines.push(Line::from(""));
+            let custom_style = if state.editing_custom_model {
+                t.style_selected().add_modifier(Modifier::BOLD)
+            } else {
+                t.style_primary()
+            };
+            lines.push(Line::from(vec![
+                Span::styled(
+                    if state.editing_custom_model {
+                        "  ▸ "
+                    } else {
+                        "    "
+                    },
+                    custom_style,
+                ),
+                Span::styled("Custom Model Slug: ", t.style_secondary()),
+                Span::styled(&state.custom_model_name, custom_style),
+                if state.editing_custom_model {
+                    Span::styled("█", t.style_accent(false))
+                } else {
+                    Span::raw("")
+                },
+                Span::styled("  [Tab: Toggle custom model]", t.style_muted()),
+            ]));
+            f.render_widget(Paragraph::new(lines), content_area);
+        }
+        crate::modals::SetupStep::Security => {
+            let sb_sel = state.security_field_idx == 0;
+            let ap_sel = state.security_field_idx == 1;
+
+            let lines = vec![
+                Line::from(Span::styled(
+                    "  Configure execution security boundaries & governance:",
+                    t.style_secondary().add_modifier(Modifier::BOLD),
+                )),
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled(
+                        if sb_sel { "  ▸ " } else { "    " },
+                        if sb_sel {
+                            t.style_selected()
+                        } else {
+                            t.style_muted()
+                        },
+                    ),
+                    Span::styled(
+                        "Sandbox Policy:   ",
+                        if sb_sel {
+                            t.style_selected().add_modifier(Modifier::BOLD)
+                        } else {
+                            t.style_secondary()
+                        },
+                    ),
+                    Span::styled(
+                        format!("{:?}", state.sandbox_policy),
+                        if sb_sel {
+                            t.style_selected().add_modifier(Modifier::BOLD)
+                        } else {
+                            t.style_primary()
+                        },
+                    ),
+                    Span::styled("  (Use ←/→ or Space to change)", t.style_muted()),
+                ]),
+                Line::from(Span::styled(
+                    "      • Isolated (Recommended): Bubblewrap container restricts disk/network access",
+                    t.style_muted(),
+                )),
+                Line::from(Span::styled(
+                    "      • DangerouslyDisabled: Direct uncontained host execution",
+                    t.style_muted(),
+                )),
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled(
+                        if ap_sel { "  ▸ " } else { "    " },
+                        if ap_sel {
+                            t.style_selected()
+                        } else {
+                            t.style_muted()
+                        },
+                    ),
+                    Span::styled(
+                        "Approval Policy:  ",
+                        if ap_sel {
+                            t.style_selected().add_modifier(Modifier::BOLD)
+                        } else {
+                            t.style_secondary()
+                        },
+                    ),
+                    Span::styled(
+                        format!("{:?}", state.approval_policy),
+                        if ap_sel {
+                            t.style_selected().add_modifier(Modifier::BOLD)
+                        } else {
+                            t.style_primary()
+                        },
+                    ),
+                    Span::styled("  (Use ←/→ or Space to change)", t.style_muted()),
+                ]),
+                Line::from(Span::styled(
+                    "      • OnRequest (Recommended): Prompt before executing mutating shell commands or file edits",
+                    t.style_muted(),
+                )),
+                Line::from(Span::styled(
+                    "      • ApproveForMe: Autonomous execution mode; tools run without blocking for confirmation",
+                    t.style_muted(),
+                )),
+                Line::from(Span::styled(
+                    "      • Never: Strict read-only mode; reject all mutation tool executions",
+                    t.style_muted(),
+                )),
+            ];
+            f.render_widget(Paragraph::new(lines), content_area);
+        }
+        crate::modals::SetupStep::Connectivity => {
+            let mut lines = vec![
+                Line::from(Span::styled(
+                    "  Provider Connectivity Verification:",
+                    t.style_secondary().add_modifier(Modifier::BOLD),
+                )),
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled("  Endpoint: ", t.style_muted()),
+                    Span::styled(state.effective_endpoint(), t.style_primary()),
+                ]),
+                Line::from(vec![
+                    Span::styled("  Model:    ", t.style_muted()),
+                    Span::styled(state.effective_model(), t.style_primary()),
+                ]),
+                Line::from(""),
+            ];
+
+            match state.connectivity_status {
+                crate::modals::ConnectivityStatus::NotTested => {
+                    lines.push(Line::from(vec![
+                        Span::styled(
+                            format!(
+                                "  {} Status: Ready to test.",
+                                crate::icons::Icon::Info.render(t)
+                            ),
+                            t.style_muted(),
+                        ),
+                        Span::styled(
+                            " Press [Enter] or [t] to probe live connection.",
+                            t.style_primary(),
+                        ),
+                    ]));
+                    lines.push(Line::from(""));
+                    lines.push(Line::from(Span::styled(
+                        "  (Or press [s] to skip connectivity test and proceed to review)",
+                        t.style_muted(),
+                    )));
+                }
+                crate::modals::ConnectivityStatus::Testing => {
+                    lines.push(Line::from(vec![Span::styled(
+                        format!(
+                            "  {} Testing connection to provider endpoint...",
+                            crate::icons::Icon::LoaderCircle.render(t)
+                        ),
+                        t.style_accent(true),
+                    )]));
+                    lines.push(Line::from(""));
+                    lines.push(Line::from(Span::styled(
+                        "  Please wait; sending probe request in background...",
+                        t.style_muted(),
+                    )));
+                }
+                crate::modals::ConnectivityStatus::Connected => {
+                    lines.push(Line::from(vec![Span::styled(
+                        format!(
+                            "  {} Connection verified successfully!",
+                            crate::icons::Icon::CircleCheck.render(t)
+                        ),
+                        t.style_success(true),
+                    )]));
+                    lines.push(Line::from(""));
+                    lines.push(Line::from(Span::styled(
+                        "  Provider endpoint responded and confirmed availability.",
+                        t.style_secondary(),
+                    )));
+                    lines.push(Line::from(Span::styled(
+                        "  Press [Enter] to proceed to configuration review.",
+                        t.style_accent(true),
+                    )));
+                }
+                crate::modals::ConnectivityStatus::Failed => {
+                    let err = state
+                        .connectivity_error
+                        .as_deref()
+                        .unwrap_or("Network or authentication error");
+                    lines.push(Line::from(vec![
+                        Span::styled(
+                            format!(
+                                "  {} Connection probe failed: ",
+                                crate::icons::Icon::CircleX.render(t)
+                            ),
+                            t.style_error(true),
+                        ),
+                        Span::styled(err, t.style_error(false)),
+                    ]));
+                    lines.push(Line::from(""));
+                    lines.push(Line::from(Span::styled("  Press [r] to retry, [Esc] to adjust settings, or [s] to skip and continue anyway.", t.style_muted())));
+                }
+            }
+            f.render_widget(Paragraph::new(lines), content_area);
+        }
+        crate::modals::SetupStep::Review => {
+            let mut lines = vec![
+                Line::from(Span::styled(
+                    "  Review Configuration Summary before saving:",
+                    t.style_secondary().add_modifier(Modifier::BOLD),
+                )),
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled("  • Provider:        ", t.style_muted()),
+                    Span::styled(
+                        state.current_provider().display_name(),
+                        t.style_primary().add_modifier(Modifier::BOLD),
+                    ),
+                ]),
+                Line::from(vec![
+                    Span::styled("  • API Base URL:    ", t.style_muted()),
+                    Span::styled(state.effective_endpoint(), t.style_primary()),
+                ]),
+                Line::from(vec![
+                    Span::styled("  • API Key:         ", t.style_muted()),
+                    Span::styled(
+                        if state.preserve_existing_key {
+                            "[Existing Key Preserved]"
+                        } else if !state.api_key_input.is_empty() {
+                            "[New Key Configured (Masked)]"
+                        } else if state.current_provider().is_local() {
+                            "[None Required - Local]"
+                        } else {
+                            "[Missing]"
+                        },
+                        t.style_success(false),
+                    ),
+                ]),
+                Line::from(vec![
+                    Span::styled("  • Default Model:   ", t.style_muted()),
+                    Span::styled(
+                        state.effective_model(),
+                        t.style_primary().add_modifier(Modifier::BOLD),
+                    ),
+                ]),
+                Line::from(vec![
+                    Span::styled("  • Sandbox Policy:  ", t.style_muted()),
+                    Span::styled(format!("{:?}", state.sandbox_policy), t.style_primary()),
+                ]),
+                Line::from(vec![
+                    Span::styled("  • Approval Policy: ", t.style_muted()),
+                    Span::styled(format!("{:?}", state.approval_policy), t.style_primary()),
+                ]),
+                Line::from(""),
+            ];
+
+            if let Some(ref err) = state.save_error {
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        format!("  {} Save Failed: ", crate::icons::Icon::CircleX.render(t)),
+                        t.style_error(true),
+                    ),
+                    Span::styled(err, t.style_error(false)),
+                ]));
+                lines.push(Line::from(""));
+            }
+
+            lines.push(Line::from(Span::styled(
+                "  Press [Enter] to write configuration to disk, or [Esc] to go back.",
+                t.style_accent(true),
+            )));
+            f.render_widget(Paragraph::new(lines), content_area);
+        }
+        crate::modals::SetupStep::Complete => {
+            let lines = vec![
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled(
+                        format!("  {} ", crate::icons::Icon::CircleCheck.render(t)),
+                        t.style_success(true),
+                    ),
+                    Span::styled(
+                        "M31A Setup Completed Successfully!",
+                        t.style_success(true).add_modifier(Modifier::BOLD),
+                    ),
+                ]),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "  Your configuration has been safely written and applied to the current session.",
+                    t.style_primary(),
+                )),
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled("  Active Model: ", t.style_muted()),
+                    Span::styled(
+                        state.effective_model(),
+                        t.style_primary().add_modifier(Modifier::BOLD),
+                    ),
+                ]),
+                Line::from(vec![
+                    Span::styled("  Provider:     ", t.style_muted()),
+                    Span::styled(state.current_provider().display_name(), t.style_primary()),
+                ]),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "  Press [Enter] or [Esc] to close the wizard and begin development.",
+                    t.style_accent(true),
+                )),
+            ];
+            f.render_widget(Paragraph::new(lines), content_area);
+        }
+    }
+
+    let footer_text = match state.step {
+        crate::modals::SetupStep::Welcome => "Enter: Begin  │  Esc: Cancel",
+        crate::modals::SetupStep::Provider => {
+            "↑↓: Select Provider  │  Tab: Custom Endpoint  │  Enter: Next  │  Esc: Back"
+        }
+        crate::modals::SetupStep::Credentials => {
+            "Type: Enter API Key  │  Backspace: Delete  │  Enter: Next  │  Esc: Back"
+        }
+        crate::modals::SetupStep::Model => {
+            "↑↓: Select Model  │  Tab: Custom Model  │  Enter: Next  │  Esc: Back"
+        }
+        crate::modals::SetupStep::Security => {
+            "↑↓: Switch Setting  │  ←→/Space: Change Option  │  Enter: Next  │  Esc: Back"
+        }
+        crate::modals::SetupStep::Connectivity => {
+            "Enter/t: Probe Connection  │  r: Retry  │  s: Skip  │  Esc: Back"
+        }
+        crate::modals::SetupStep::Review => "Enter: Confirm & Save  │  Esc: Back",
+        crate::modals::SetupStep::Complete => "Enter/Esc: Return to Chat",
+    };
+    f.render_widget(
+        Paragraph::new(Span::styled(format!("  {}", footer_text), t.style_muted())),
+        chunks[2],
+    );
+}
+
+fn render_reasoning_effort(
+    f: &mut Frame,
+    state: &crate::modals::ReasoningEffortState,
+    area: Rect,
+    t: &Theme,
+) {
+    let popup_area = centered_rect(60, 48, area);
+    f.render_widget(Clear, popup_area);
+
+    let title_line = Line::from(vec![
+        Span::styled(
+            format!(" {} ", crate::icons::Icon::Sliders.render(t)),
+            t.style_secondary(),
+        ),
+        Span::styled(
+            "Reasoning Effort",
+            t.style_secondary().add_modifier(Modifier::BOLD),
+        ),
+    ]);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(t.border.modal)
+        .border_style(t.border_focus())
+        .title(title_line)
+        .style(t.style_surface1());
+
+    let inner = block.inner(popup_area);
+    f.render_widget(block, popup_area);
+
+    if inner.width < 10 || inner.height < 5 {
+        return;
+    }
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(2),
+            Constraint::Min(4),
+            Constraint::Length(1),
+            Constraint::Length(1),
+        ])
+        .split(inner);
+
+    let intro = Paragraph::new(Span::styled(
+        "Choose how much reasoning / thinking effort the model should expend:",
+        t.style_secondary(),
+    ));
+    f.render_widget(intro, chunks[0]);
+
+    let items: Vec<ListItem> = state
+        .options
+        .iter()
+        .enumerate()
+        .map(|(idx, opt)| {
+            let is_sel = idx == state.selected_index;
+            let marker = if is_sel { "▸ " } else { "  " };
+            let style = if is_sel {
+                t.style_selected().add_modifier(Modifier::BOLD)
             } else {
                 t.style_primary()
             };
 
             let line = Line::from(vec![
-                Span::styled(if is_sel { "▸ " } else { "  " }, row_style),
-                Span::styled(&item.title, row_style.add_modifier(Modifier::BOLD)),
-                Span::raw("  "),
+                Span::styled(marker, style),
                 Span::styled(
-                    &item.description,
-                    if is_sel { row_style } else { t.style_muted() },
+                    format!("{} ", opt.icon.render(t)),
+                    if is_sel { style } else { t.style_accent(false) },
                 ),
-                Span::raw("  "),
-                Span::styled(item.category.clone(), t.style_muted()),
+                Span::styled(format!("{:<10}", opt.label), style),
+                Span::styled(
+                    opt.description,
+                    if is_sel { style } else { t.style_muted() },
+                ),
             ]);
-            Some(ListItem::new(line))
+            ListItem::new(line)
         })
         .collect();
 
-    let list = List::new(items).block(block);
-    f.render_widget(list, popup_area);
+    let list = List::new(items).highlight_style(t.style_selected());
+    f.render_widget(list, chunks[1]);
+
+    let current_str = state
+        .current_setting
+        .as_deref()
+        .unwrap_or("None (provider default)");
+    let current_line = Line::from(vec![
+        Span::styled("Current Setting: ", t.style_muted()),
+        Span::styled(current_str, t.style_primary().add_modifier(Modifier::BOLD)),
+    ]);
+    f.render_widget(Paragraph::new(current_line), chunks[2]);
+
+    let footer = Line::from(vec![
+        Span::styled("↑↓", t.style_accent(true)),
+        Span::styled(" Navigate  ", t.style_muted()),
+        Span::styled("Enter", t.style_accent(true)),
+        Span::styled(" Apply  ", t.style_muted()),
+        Span::styled("Esc", t.style_accent(true)),
+        Span::styled(" Cancel", t.style_muted()),
+    ]);
+    f.render_widget(Paragraph::new(footer), chunks[3]);
 }
 
 fn render_select_picker_modal(
@@ -3735,7 +4745,10 @@ fn render_rollout_journal(
         .borders(Borders::ALL)
         .border_type(t.border.modal)
         .title(Line::from(vec![
-            Span::styled(" 📜 ", Style::default()),
+            Span::styled(
+                format!(" {} ", crate::icons::Icon::FileText.render(t)),
+                Style::default(),
+            ),
             Span::styled(title, t.style_secondary().add_modifier(Modifier::BOLD)),
         ]))
         .border_style(t.border_focus())

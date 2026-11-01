@@ -241,6 +241,27 @@ pub enum ProviderType {
     Mock,
 }
 
+impl std::fmt::Display for ProviderType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            Self::Nim => "nim",
+            Self::Ollama => "ollama",
+            Self::LmStudio => "lmstudio",
+            Self::OpenAi => "openai",
+            Self::Anthropic => "anthropic",
+            Self::Gemini => "gemini",
+            Self::Groq => "groq",
+            Self::DeepSeek => "deepseek",
+            Self::Mistral => "mistral",
+            Self::Together => "together",
+            Self::Custom => "custom",
+            #[cfg(any(test, feature = "test-support"))]
+            Self::Mock => "mock",
+        };
+        write!(f, "{s}")
+    }
+}
+
 impl ProviderType {
     pub fn default_api_base(&self) -> &'static str {
         match self {

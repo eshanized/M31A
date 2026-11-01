@@ -770,7 +770,11 @@ fn render_workspace_screen(f: &mut Frame, app: &App, area: Rect, t: &Theme) {
         .enumerate()
         .map(|(i, (name, is_dir))| {
             let is_selected = i == app.screen_selected_index;
-            let icon = if *is_dir { "📁 " } else { "📄 " };
+            let icon = if *is_dir {
+                format!("{} ", crate::icons::Icon::Folder.render(t))
+            } else {
+                format!("{} ", crate::icons::Icon::File.render(t))
+            };
             let style = if is_selected {
                 Style::default()
                     .bg(t.color(ColorRole::Surface2))

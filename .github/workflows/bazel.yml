@@ -2,9 +2,9 @@ name: Bazel CI
 
 on:
   push:
-    branches: [main, develop]
+    branches: [master]
   pull_request:
-    branches: [main, develop]
+    branches: [master]
 
 env:
   BAZEL_VERSION: "7.4.0"

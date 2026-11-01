@@ -710,7 +710,7 @@ impl TranscriptVirtualizer {
                     let status_badge = if *in_progress { " (running...)" } else { "" };
                     lines.push(Line::from(vec![
                         Span::styled(
-                            "▶ 🔍 Explored: ",
+                            "▶ ⚲ Explored: ",
                             Style::default()
                                 .fg(Color::Cyan)
                                 .add_modifier(Modifier::BOLD),
@@ -731,7 +731,7 @@ impl TranscriptVirtualizer {
                     ]));
                 } else {
                     lines.push(Line::from(vec![Span::styled(
-                        format!("▼ 🔍 Explored ({} discovery tools)", total_tools),
+                        format!("▼ ⚲ Explored ({} discovery tools)", total_tools),
                         Style::default()
                             .fg(Color::Cyan)
                             .add_modifier(Modifier::BOLD),
@@ -804,25 +804,25 @@ impl TranscriptVirtualizer {
                     || name.contains("write")
                     || name.contains("edit")
                 {
-                    ("📝", Color::Cyan)
+                    ("⟨/⟩", Color::Cyan)
                 } else if name.contains("read") || name.contains("view") || name.contains("list") {
-                    ("📖", Color::Blue)
+                    ("≡", Color::Blue)
                 } else if name.contains("exec")
                     || name.contains("shell")
                     || name == "sh"
                     || name == "bash"
                 {
-                    ("⚡", Color::Yellow)
+                    ("❯_", Color::Yellow)
                 } else if name.contains("search") || name.contains("web") || name.contains("fetch")
                 {
-                    ("🌐", Color::LightMagenta)
+                    ("⚲", Color::LightMagenta)
                 } else if name.contains("agent")
                     || name.contains("spawn")
                     || name.contains("subagent")
                 {
-                    ("🤖", Color::Green)
+                    ("◇", Color::Green)
                 } else if name.contains("goal") {
-                    ("🎯", Color::LightYellow)
+                    ("✓", Color::LightYellow)
                 } else {
                     ("⚙", Color::White)
                 };

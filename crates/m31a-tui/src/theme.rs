@@ -65,6 +65,7 @@ pub struct Theme {
     pub spacing: ThemeSpacing,
     pub border: ThemeBorder,
     pub typography: ThemeTypography,
+    pub icon_mode: crate::icons::IconMode,
 }
 
 #[derive(Debug, Clone)]
@@ -191,6 +192,7 @@ impl Theme {
                 header_bold: true,
                 use_icons: true,
             },
+            icon_mode: crate::icons::IconMode::Unicode,
         }
     }
 
@@ -248,6 +250,7 @@ impl Theme {
                 header_bold: true,
                 use_icons: true,
             },
+            icon_mode: crate::icons::IconMode::Unicode,
         }
     }
 
@@ -300,7 +303,21 @@ impl Theme {
                 header_bold: true,
                 use_icons: false, // Icons may not render in high contrast
             },
+            icon_mode: crate::icons::IconMode::Ascii,
         }
+    }
+
+    pub fn with_icon_mode(mut self, mode: crate::icons::IconMode) -> Self {
+        self.icon_mode = mode;
+        self
+    }
+
+    pub fn icon_glyph(&self, icon: crate::icons::Icon) -> &'static str {
+        icon.render(self)
+    }
+
+    pub fn effective_icon_mode(&self) -> crate::icons::IconMode {
+        effective_icon_mode(self)
     }
 
     /// Get color for semantic role
@@ -452,6 +469,31 @@ static EVERBLUSH_THEME: LazyLock<Theme> = LazyLock::new(Theme::everblush);
 static LIGHT_THEME: LazyLock<Theme> = LazyLock::new(Theme::light);
 static HC_THEME: LazyLock<Theme> = LazyLock::new(Theme::high_contrast);
 static THEME_VARIANT: AtomicU8 = AtomicU8::new(0);
+static ICON_OVERRIDE: AtomicU8 = AtomicU8::new(0);
+
+/// Set or clear explicit icon rendering preference override (None = use theme default)
+pub fn set_icon_mode(mode: Option<crate::icons::IconMode>) {
+    let val = match mode {
+        None => 0,
+        Some(crate::icons::IconMode::Lucide) => 1,
+        Some(crate::icons::IconMode::Unicode) => 2,
+        Some(crate::icons::IconMode::Ascii) => 3,
+    };
+    ICON_OVERRIDE.store(val, Ordering::SeqCst);
+}
+
+/// Computes effective icon mode considering theme typography and explicit user overrides.
+pub fn effective_icon_mode(theme: &Theme) -> crate::icons::IconMode {
+    if !theme.typography.use_icons {
+        return crate::icons::IconMode::Ascii;
+    }
+    match ICON_OVERRIDE.load(Ordering::Relaxed) {
+        1 => crate::icons::IconMode::Lucide,
+        2 => crate::icons::IconMode::Unicode,
+        3 => crate::icons::IconMode::Ascii,
+        _ => theme.icon_mode,
+    }
+}
 
 /// Initialize or switch global theme from config or command
 pub fn init_theme(variant: ThemeVariant) {

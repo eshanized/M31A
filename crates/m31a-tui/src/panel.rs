@@ -62,14 +62,14 @@ impl PanelTab {
 
     pub fn icon(&self) -> &'static str {
         match self {
-            PanelTab::Files => "📁",
-            PanelTab::Git => "",
+            PanelTab::Files => "▸",
+            PanelTab::Git => "⎇",
             PanelTab::Diff => "±",
-            PanelTab::Terminal => "⚡",
-            PanelTab::Context => "📌",
-            PanelTab::Activity => "⏱",
-            PanelTab::Subagents => "🤖",
-            PanelTab::Diagnostics => "📊",
+            PanelTab::Terminal => "❯_",
+            PanelTab::Context => "§",
+            PanelTab::Activity => "◷",
+            PanelTab::Subagents => "◇",
+            PanelTab::Diagnostics => "~",
         }
     }
 }
@@ -202,19 +202,19 @@ fn render_files_tab(f: &mut Frame, app: &App, area: Rect, t: &Theme) {
             .take(area.height.saturating_sub(3) as usize)
         {
             let (icon, color) = match cand.candidate_type {
-                m31a_fuzzy::CandidateType::Directory => ("📁 ", Color::LightBlue),
+                m31a_fuzzy::CandidateType::Directory => ("▸ ", Color::LightBlue),
                 m31a_fuzzy::CandidateType::Symbol => ("⚙ ", Color::LightYellow),
                 _ => {
                     if cand.insert_text.ends_with(".rs") {
-                        ("🦀 ", Color::Cyan)
+                        ("⟨/⟩ ", Color::Cyan)
                     } else if cand.insert_text.ends_with(".toml")
                         || cand.insert_text.ends_with(".json")
                     {
-                        ("📜 ", Color::Yellow)
+                        ("{} ", Color::Yellow)
                     } else if cand.insert_text.ends_with(".md") {
-                        ("📝 ", Color::Green)
+                        ("≡ ", Color::Green)
                     } else {
-                        ("📄 ", Color::White)
+                        ("· ", Color::White)
                     }
                 }
             };
@@ -439,7 +439,7 @@ fn render_terminal_tab(f: &mut Frame, app: &App, area: Rect, t: &Theme) {
 fn render_context_tab(f: &mut Frame, app: &App, area: Rect, t: &Theme) {
     let mut lines = Vec::new();
     lines.push(Line::from(vec![Span::styled(
-        "📌 Dynamic Context Items",
+        "§ Dynamic Context Items",
         t.style_secondary().add_modifier(Modifier::BOLD),
     )]));
     lines.push(Line::raw(""));
@@ -456,7 +456,7 @@ fn render_context_tab(f: &mut Frame, app: &App, area: Rect, t: &Theme) {
     } else {
         for (idx, item) in app.pinned_context.iter().enumerate().take(6) {
             lines.push(Line::from(vec![
-                Span::styled(format!("  {}. 📌 ", idx + 1), t.style_accent(false)),
+                Span::styled(format!("  {}. § ", idx + 1), t.style_accent(false)),
                 Span::styled(&item.path, t.style_primary().add_modifier(Modifier::BOLD)),
                 Span::styled(format!(" ({} tok)", item.tokens), t.style_muted()),
             ]));
@@ -560,7 +560,7 @@ fn render_activity_tab(f: &mut Frame, app: &App, area: Rect, t: &Theme) {
 fn render_subagents_tab(f: &mut Frame, app: &App, area: Rect, t: &Theme) {
     let mut lines = Vec::new();
     lines.push(Line::from(vec![Span::styled(
-        "🤖 Subagents & Swarm Hierarchy",
+        "◇ Subagents & Swarm Hierarchy",
         t.style_secondary().add_modifier(Modifier::BOLD),
     )]));
     lines.push(Line::raw(""));
@@ -627,7 +627,7 @@ fn render_subagents_tab(f: &mut Frame, app: &App, area: Rect, t: &Theme) {
 fn render_diagnostics_tab(f: &mut Frame, app: &App, area: Rect, t: &Theme) {
     let mut lines = Vec::new();
     lines.push(Line::from(vec![Span::styled(
-        "📊 Session Diagnostics",
+        "~ Session Diagnostics",
         t.style_secondary().add_modifier(Modifier::BOLD),
     )]));
     lines.push(Line::raw(""));

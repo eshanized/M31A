@@ -17,6 +17,7 @@ pub struct CommandPaletteItem {
     pub description: String,
     pub category: String,
     pub shortcut: Option<String>,
+    pub icon: crate::icons::Icon,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -247,12 +248,61 @@ impl CommandPaletteItem {
         category: impl Into<String>,
         shortcut: Option<impl Into<String>>,
     ) -> Self {
+        let id_str = id.into();
+        let icon = Self::default_icon_for_id(&id_str);
         Self {
-            id: id.into(),
+            id: id_str,
             title: title.into(),
             description: description.into(),
             category: category.into(),
             shortcut: shortcut.map(|s| s.into()),
+            icon,
+        }
+    }
+
+    pub fn with_icon(mut self, icon: crate::icons::Icon) -> Self {
+        self.icon = icon;
+        self
+    }
+
+    pub fn default_icon_for_id(id: &str) -> crate::icons::Icon {
+        match id {
+            "nav_chat" | "chat" => crate::icons::Icon::MessageSquare,
+            "nav_sessions" | "sessions" | "resume_picker" => crate::icons::Icon::History,
+            "nav_models" | "models" | "model_picker" => crate::icons::Icon::Cpu,
+            "nav_providers" | "providers" => crate::icons::Icon::Plug,
+            "nav_agents" | "agents" => crate::icons::Icon::Bot,
+            "nav_workspace" | "workspace" => crate::icons::Icon::Folder,
+            "nav_source_control" | "source_control" => crate::icons::Icon::GitBranch,
+            "git_diff" => crate::icons::Icon::GitCompare,
+            "nav_tools" | "tools" => crate::icons::Icon::Wrench,
+            "nav_settings" | "settings" => crate::icons::Icon::Settings,
+            "nav_diagnostics" | "diagnostics" | "doctor" => crate::icons::Icon::Activity,
+            "session_new" => crate::icons::Icon::Sparkles,
+            "worktrees" => crate::icons::Icon::GitBranch,
+            "cycle_reasoning" => crate::icons::Icon::Sliders,
+            "test_provider" => crate::icons::Icon::Zap,
+            "mode_toggle" => crate::icons::Icon::Sliders,
+            "toggle_inspector" => crate::icons::Icon::Layers,
+            "panel_tab_files" => crate::icons::Icon::FolderOpen,
+            "panel_tab_git" => crate::icons::Icon::GitBranch,
+            "panel_tab_diff" => crate::icons::Icon::GitCompare,
+            "panel_tab_term" => crate::icons::Icon::Terminal,
+            "panel_tab_context" => crate::icons::Icon::Context,
+            "panel_tab_activity" => crate::icons::Icon::Clock,
+            "panel_tab_subagents" => crate::icons::Icon::Bot,
+            "panel_tab_diagnostics" => crate::icons::Icon::Chart,
+            "panel_widen" | "panel_narrow" => crate::icons::Icon::ArrowUpDown,
+            "help" => crate::icons::Icon::HelpCircle,
+            "undo" => crate::icons::Icon::History,
+            "mcp_hub" => crate::icons::Icon::Plug,
+            "skills" => crate::icons::Icon::FileCode,
+            "templates" => crate::icons::Icon::Layers,
+            "personas" => crate::icons::Icon::User,
+            "export_html" | "export_json" => crate::icons::Icon::FileText,
+            "security_audit" => crate::icons::Icon::Shield,
+            "active_locks" => crate::icons::Icon::Lock,
+            _ => crate::icons::Icon::Command,
         }
     }
 }
@@ -519,6 +569,7 @@ pub enum ModalState {
     CommandPalette {
         query: String,
         selected_index: usize,
+        scroll_offset: usize,
         items: Vec<CommandPaletteItem>,
         filtered_indices: Vec<usize>,
     },
@@ -593,6 +644,14 @@ pub enum ModalState {
     RolloutJournal(RolloutJournalState),
     /// Generic unified fuzzy selector with category grouping and detail previews.
     SelectPicker(SelectPickerState),
+    /// Interactive multi-step setup onboarding wizard (`/setup`).
+    SetupWizard {
+        state: SetupWizardState,
+    },
+    /// Interactive reasoning effort selection dialog (`/effort`).
+    ReasoningEffort {
+        state: ReasoningEffortState,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -758,6 +817,449 @@ impl RolloutJournalState {
     }
 }
 
+/// Step progression in the interactive setup wizard.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SetupStep {
+    Welcome = 0,
+    Provider = 1,
+    Credentials = 2,
+    Model = 3,
+    Security = 4,
+    Connectivity = 5,
+    Review = 6,
+    Complete = 7,
+}
+
+impl SetupStep {
+    pub const ALL: [SetupStep; 8] = [
+        SetupStep::Welcome,
+        SetupStep::Provider,
+        SetupStep::Credentials,
+        SetupStep::Model,
+        SetupStep::Security,
+        SetupStep::Connectivity,
+        SetupStep::Review,
+        SetupStep::Complete,
+    ];
+
+    pub fn title(&self) -> &'static str {
+        match self {
+            Self::Welcome => "Welcome to M31A",
+            Self::Provider => "Provider Configuration",
+            Self::Credentials => "API Credentials",
+            Self::Model => "Model Selection",
+            Self::Security => "Execution Security",
+            Self::Connectivity => "Connectivity Verification",
+            Self::Review => "Review & Persist",
+            Self::Complete => "Setup Complete",
+        }
+    }
+}
+
+/// Provider connectivity status in setup wizard.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConnectivityStatus {
+    NotTested,
+    Testing,
+    Connected,
+    Failed,
+}
+
+/// Dedicated state for interactive multi-step `/setup` onboarding wizard.
+#[derive(Debug, Clone)]
+pub struct SetupWizardState {
+    pub step: SetupStep,
+    pub existing_config_detected: bool,
+
+    // Step 2: Provider
+    pub selected_provider_idx: usize,
+    pub providers: Vec<m31a_provider::ProviderType>,
+    pub custom_endpoint: String,
+    pub editing_endpoint: bool,
+
+    // Step 3: Credentials
+    pub api_key_input: String,
+    pub has_existing_key: bool,
+    pub preserve_existing_key: bool,
+
+    // Step 4: Model
+    pub models_for_provider: Vec<m31a_provider::models::ModelInfo>,
+    pub selected_model_idx: usize,
+    pub custom_model_name: String,
+    pub editing_custom_model: bool,
+
+    // Step 5: Security
+    pub sandbox_policy: m31a_core::SandboxPolicy,
+    pub approval_policy: m31a_core::ApprovalPolicy,
+    pub security_field_idx: usize, // 0 = sandbox, 1 = approval
+
+    // Step 6: Connectivity
+    pub connectivity_status: ConnectivityStatus,
+    pub connectivity_error: Option<String>,
+
+    // Step 7 & 8: Review & Save
+    pub save_error: Option<String>,
+}
+
+impl SetupWizardState {
+    pub fn new(
+        current_config: &m31a_core::Config,
+        available_models: &[m31a_provider::models::ModelInfo],
+    ) -> Self {
+        let providers = vec![
+            m31a_provider::ProviderType::Nim,
+            m31a_provider::ProviderType::OpenAi,
+            m31a_provider::ProviderType::Anthropic,
+            m31a_provider::ProviderType::Gemini,
+            m31a_provider::ProviderType::DeepSeek,
+            m31a_provider::ProviderType::Groq,
+            m31a_provider::ProviderType::Mistral,
+            m31a_provider::ProviderType::Together,
+            m31a_provider::ProviderType::Ollama,
+            m31a_provider::ProviderType::LmStudio,
+            m31a_provider::ProviderType::Custom,
+        ];
+
+        let config_file = m31a_core::Config::config_dir().join("config.toml");
+        let existing_detected = config_file.exists();
+
+        let detected_provider = m31a_provider::ProviderType::resolve(
+            current_config.model_provider.as_deref(),
+            &current_config.model,
+            Some(&current_config.api_base),
+        )
+        .unwrap_or(m31a_provider::ProviderType::Nim);
+
+        let selected_provider_idx = providers
+            .iter()
+            .position(|&p| p == detected_provider)
+            .unwrap_or(0);
+
+        let has_existing_key = current_config
+            .api_key
+            .as_ref()
+            .map(|k| !k.trim().is_empty())
+            .unwrap_or(false);
+
+        let mut wizard = Self {
+            step: SetupStep::Welcome,
+            existing_config_detected: existing_detected,
+            selected_provider_idx,
+            providers,
+            custom_endpoint: current_config.api_base.clone(),
+            editing_endpoint: false,
+            api_key_input: String::new(),
+            has_existing_key,
+            preserve_existing_key: has_existing_key,
+            models_for_provider: Vec::new(),
+            selected_model_idx: 0,
+            custom_model_name: current_config.model.clone(),
+            editing_custom_model: false,
+            sandbox_policy: current_config.sandbox,
+            approval_policy: current_config.approval,
+            security_field_idx: 0,
+            connectivity_status: ConnectivityStatus::NotTested,
+            connectivity_error: None,
+            save_error: None,
+        };
+
+        wizard.update_models_for_provider(available_models);
+        wizard
+    }
+
+    pub fn current_provider(&self) -> m31a_provider::ProviderType {
+        self.providers
+            .get(self.selected_provider_idx)
+            .copied()
+            .unwrap_or(m31a_provider::ProviderType::Nim)
+    }
+
+    pub fn effective_endpoint(&self) -> String {
+        if self.custom_endpoint.trim().is_empty() {
+            self.current_provider().default_api_base().to_string()
+        } else {
+            self.custom_endpoint.trim().to_string()
+        }
+    }
+
+    pub fn effective_model(&self) -> String {
+        if self.editing_custom_model && !self.custom_model_name.trim().is_empty() {
+            return self.custom_model_name.trim().to_string();
+        }
+        if let Some(m) = self.models_for_provider.get(self.selected_model_idx) {
+            m.slug.clone()
+        } else if !self.custom_model_name.trim().is_empty() {
+            self.custom_model_name.trim().to_string()
+        } else {
+            self.current_provider().default_model().to_string()
+        }
+    }
+
+    pub fn can_go_back(&self) -> bool {
+        self.step != SetupStep::Welcome && self.step != SetupStep::Complete
+    }
+
+    pub fn previous_step(&mut self) {
+        match self.step {
+            SetupStep::Welcome => {}
+            SetupStep::Provider => self.step = SetupStep::Welcome,
+            SetupStep::Credentials => self.step = SetupStep::Provider,
+            SetupStep::Model => self.step = SetupStep::Credentials,
+            SetupStep::Security => self.step = SetupStep::Model,
+            SetupStep::Connectivity => self.step = SetupStep::Security,
+            SetupStep::Review => self.step = SetupStep::Connectivity,
+            SetupStep::Complete => {}
+        }
+    }
+
+    pub fn next_step(&mut self) {
+        match self.step {
+            SetupStep::Welcome => self.step = SetupStep::Provider,
+            SetupStep::Provider => self.step = SetupStep::Credentials,
+            SetupStep::Credentials => self.step = SetupStep::Model,
+            SetupStep::Model => self.step = SetupStep::Security,
+            SetupStep::Security => self.step = SetupStep::Connectivity,
+            SetupStep::Connectivity => self.step = SetupStep::Review,
+            SetupStep::Review => self.step = SetupStep::Complete,
+            SetupStep::Complete => {}
+        }
+    }
+
+    pub fn update_models_for_provider(
+        &mut self,
+        catalog_models: &[m31a_provider::models::ModelInfo],
+    ) {
+        let provider = self.current_provider();
+        let filtered: Vec<m31a_provider::models::ModelInfo> = match provider {
+            m31a_provider::ProviderType::Nim => {
+                let mut list: Vec<_> = catalog_models
+                    .iter()
+                    .filter(|m| {
+                        m.originator.to_lowercase().contains("nvidia")
+                            || m.slug.contains("meta/")
+                            || m.slug.contains("deepseek-ai/")
+                    })
+                    .cloned()
+                    .collect();
+                if list.is_empty() {
+                    list = m31a_provider::models::get_nvidia_model_catalog();
+                }
+                list
+            }
+            m31a_provider::ProviderType::OpenAi => vec![
+                m31a_provider::models::ModelInfo {
+                    slug: "gpt-4o".to_string(),
+                    display_name: "GPT-4o (Omni)".to_string(),
+                    description: "OpenAI flagship omni-modal reasoning model".to_string(),
+                    context_window: 128_000,
+                    max_output_tokens: 16_384,
+                    supports_tools: true,
+                    supports_thinking: false,
+                    supports_vision: true,
+                    originator: "OpenAI".to_string(),
+                    ..Default::default()
+                },
+                m31a_provider::models::ModelInfo {
+                    slug: "gpt-4o-mini".to_string(),
+                    display_name: "GPT-4o Mini".to_string(),
+                    description: "Fast, cost-efficient small model for everyday coding".to_string(),
+                    context_window: 128_000,
+                    max_output_tokens: 16_384,
+                    supports_tools: true,
+                    supports_thinking: false,
+                    supports_vision: true,
+                    originator: "OpenAI".to_string(),
+                    ..Default::default()
+                },
+                m31a_provider::models::ModelInfo {
+                    slug: "o1".to_string(),
+                    display_name: "OpenAI o1".to_string(),
+                    description: "Advanced reasoning model with chain-of-thought tokens"
+                        .to_string(),
+                    context_window: 200_000,
+                    max_output_tokens: 100_000,
+                    supports_tools: true,
+                    supports_thinking: true,
+                    supports_vision: true,
+                    originator: "OpenAI".to_string(),
+                    ..Default::default()
+                },
+                m31a_provider::models::ModelInfo {
+                    slug: "o3-mini".to_string(),
+                    display_name: "OpenAI o3-mini".to_string(),
+                    description: "Cost-efficient reasoning model optimized for code and math"
+                        .to_string(),
+                    context_window: 200_000,
+                    max_output_tokens: 100_000,
+                    supports_tools: true,
+                    supports_thinking: true,
+                    supports_vision: false,
+                    originator: "OpenAI".to_string(),
+                    ..Default::default()
+                },
+            ],
+            m31a_provider::ProviderType::Anthropic => vec![
+                m31a_provider::models::ModelInfo {
+                    slug: "claude-3-5-sonnet-20241022".to_string(),
+                    display_name: "Claude 3.5 Sonnet".to_string(),
+                    description: "Anthropic frontier intelligence and coding capabilities"
+                        .to_string(),
+                    context_window: 200_000,
+                    max_output_tokens: 8_192,
+                    supports_tools: true,
+                    supports_thinking: false,
+                    supports_vision: true,
+                    originator: "Anthropic".to_string(),
+                    ..Default::default()
+                },
+                m31a_provider::models::ModelInfo {
+                    slug: "claude-3-5-haiku-20241022".to_string(),
+                    display_name: "Claude 3.5 Haiku".to_string(),
+                    description: "High speed, ultra-low latency model for rapid agent turns"
+                        .to_string(),
+                    context_window: 200_000,
+                    max_output_tokens: 8_192,
+                    supports_tools: true,
+                    supports_thinking: false,
+                    supports_vision: true,
+                    originator: "Anthropic".to_string(),
+                    ..Default::default()
+                },
+            ],
+            m31a_provider::ProviderType::DeepSeek => vec![
+                m31a_provider::models::ModelInfo {
+                    slug: "deepseek-chat".to_string(),
+                    display_name: "DeepSeek V3".to_string(),
+                    description: "Frontier MoE conversational and coding model".to_string(),
+                    context_window: 64_000,
+                    max_output_tokens: 8_000,
+                    supports_tools: true,
+                    supports_thinking: false,
+                    supports_vision: false,
+                    originator: "DeepSeek".to_string(),
+                    ..Default::default()
+                },
+                m31a_provider::models::ModelInfo {
+                    slug: "deepseek-reasoner".to_string(),
+                    display_name: "DeepSeek R1".to_string(),
+                    description: "Open-weights reasoning model with explicit CoT thinking tokens"
+                        .to_string(),
+                    context_window: 64_000,
+                    max_output_tokens: 8_000,
+                    supports_tools: true,
+                    supports_thinking: true,
+                    supports_vision: false,
+                    originator: "DeepSeek".to_string(),
+                    ..Default::default()
+                },
+            ],
+            _ => vec![m31a_provider::models::ModelInfo {
+                slug: provider.default_model().to_string(),
+                display_name: format!("{} Default", provider.display_name()),
+                description: format!("Default model for {}", provider.display_name()),
+                context_window: 128_000,
+                max_output_tokens: 8_192,
+                supports_tools: true,
+                supports_thinking: false,
+                supports_vision: false,
+                originator: provider.display_name().to_string(),
+                ..Default::default()
+            }],
+        };
+
+        self.models_for_provider = filtered;
+        self.selected_model_idx = 0;
+    }
+}
+
+/// Reasoning effort modal option description.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ReasoningEffortOption {
+    pub id: &'static str,
+    pub label: &'static str,
+    pub description: &'static str,
+    pub icon: crate::icons::Icon,
+}
+
+/// Dedicated state for interactive reasoning effort dialog (`/effort`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ReasoningEffortState {
+    pub selected_index: usize,
+    pub current_setting: Option<String>,
+    pub options: Vec<ReasoningEffortOption>,
+}
+
+impl ReasoningEffortState {
+    pub fn new(current: Option<String>) -> Self {
+        let options = vec![
+            ReasoningEffortOption {
+                id: "none",
+                label: "None",
+                description: "Use provider default thinking behavior (no reasoning override)",
+                icon: crate::icons::Icon::Sliders,
+            },
+            ReasoningEffortOption {
+                id: "low",
+                label: "Low",
+                description: "Minimize reasoning effort for low latency responses",
+                icon: crate::icons::Icon::Zap,
+            },
+            ReasoningEffortOption {
+                id: "medium",
+                label: "Medium",
+                description: "Balanced reasoning effort for general autonomous coding",
+                icon: crate::icons::Icon::Sliders,
+            },
+            ReasoningEffortOption {
+                id: "high",
+                label: "High",
+                description: "Maximum reasoning effort for deep multi-step architecture",
+                icon: crate::icons::Icon::Sparkles,
+            },
+        ];
+
+        let selected_index = match current.as_deref() {
+            Some("low") => 1,
+            Some("medium") | Some("med") => 2,
+            Some("high") => 3,
+            _ => 0,
+        };
+
+        Self {
+            selected_index,
+            current_setting: current,
+            options,
+        }
+    }
+
+    pub fn select_prev(&mut self) {
+        self.selected_index = self.selected_index.saturating_sub(1);
+    }
+
+    pub fn select_next(&mut self) {
+        if self.selected_index + 1 < self.options.len() {
+            self.selected_index += 1;
+        }
+    }
+
+    pub fn prev(&mut self) {
+        self.select_prev();
+    }
+
+    pub fn next(&mut self) {
+        self.select_next();
+    }
+
+    pub fn selected_value(&self) -> Option<String> {
+        match self.selected_index {
+            1 => Some("low".to_string()),
+            2 => Some("medium".to_string()),
+            3 => Some("high".to_string()),
+            _ => None,
+        }
+    }
+}
+
 impl ModalState {
     pub fn dimensions(&self) -> (u16, u16) {
         match self {
@@ -793,6 +1295,8 @@ impl ModalState {
             ModalState::CodeModeScratchpad(_) => (90, 85),
             ModalState::RolloutJournal(_) => (88, 80),
             ModalState::SelectPicker(_) => (76, 75),
+            ModalState::SetupWizard { .. } => (78, 80),
+            ModalState::ReasoningEffort { .. } => (60, 48),
         }
     }
 
@@ -998,42 +1502,42 @@ impl ModalState {
                 id: "balanced".to_string(),
                 name: "Balanced Engineer (Default)".to_string(),
                 description: "Pragmatic balance between speed, planning, clean implementation, and testing.".to_string(),
-                icon: "⚖",
+                icon: "≎",
                 prompt_directive: "Approach tasks pragmatically: balance architectural foresight, clean implementations, and focused verifications.",
             },
             PersonaItem {
                 id: "architect".to_string(),
                 name: "Software Architect".to_string(),
                 description: "Deep modular abstractions, clean interface boundaries, and visual mermaid system diagrams.".to_string(),
-                icon: "🏛",
+                icon: "⊞",
                 prompt_directive: "Adopt an Architectural perspective: prioritize high modularity, explicit domain boundaries, clean contracts, and mermaid architecture diagrams before mutating code.",
             },
             PersonaItem {
                 id: "security".to_string(),
                 name: "Security Auditor".to_string(),
                 description: "Paranoia-level vulnerability checks, boundary validation, least-privilege armor, and OWASP defenses.".to_string(),
-                icon: "🛡",
+                icon: "◈",
                 prompt_directive: "Act as a Senior Security Auditor: evaluate every boundary for command injection, path traversal, auth leaks, least-privilege violations, and defensive error handling.",
             },
             PersonaItem {
                 id: "perf".to_string(),
                 name: "Performance Optimizer".to_string(),
                 description: "Zero-cost abstractions, minimal heap allocations, fast hot paths, and algorithmic profiling.".to_string(),
-                icon: "🚀",
+                icon: "⚡",
                 prompt_directive: "Focus intensely on performance: eliminate redundant allocations, streamline hot execution loops, minimize algorithmic complexity, and profile critical latency paths.",
             },
             PersonaItem {
                 id: "tdd".to_string(),
                 name: "Test-Driven Engineer".to_string(),
                 description: "Strict Red-Green-Refactor discipline: write failing unit/integration tests before writing production code.".to_string(),
-                icon: "🧪",
+                icon: "✓",
                 prompt_directive: "Follow rigorous Test-Driven Development (TDD): first specify requirements with thorough test assertions, run the suite to confirm failure, then write minimal clean code to make it pass.",
             },
             PersonaItem {
                 id: "minimalist".to_string(),
                 name: "Minimalist Coder".to_string(),
                 description: "Lean, concise code avoiding extraneous abstractions, scaffolding, and bloated dependencies.".to_string(),
-                icon: "✂",
+                icon: "—",
                 prompt_directive: "Embody radical minimalism: write the simplest, cleanest code that satisfies the requirements without over-engineering, unnecessary abstractions, or new dependencies.",
             },
         ]
@@ -1046,11 +1550,22 @@ impl ModalState {
         }
     }
 
+    pub fn setup_wizard(state: SetupWizardState) -> Self {
+        Self::SetupWizard { state }
+    }
+
+    pub fn reasoning_effort(current: Option<String>) -> Self {
+        Self::ReasoningEffort {
+            state: ReasoningEffortState::new(current),
+        }
+    }
+
     pub fn command_palette(items: Vec<CommandPaletteItem>) -> Self {
         let filtered_indices = (0..items.len()).collect();
         Self::CommandPalette {
             query: String::new(),
             selected_index: 0,
+            scroll_offset: 0,
             items,
             filtered_indices,
         }

@@ -158,6 +158,8 @@ pub struct TuiConfig {
     #[serde(default)]
     pub theme: Option<String>,
     #[serde(default)]
+    pub icons: Option<String>,
+    #[serde(default)]
     pub vim_mode_default: bool,
     #[serde(default = "default_true", alias = "mouse")]
     pub mouse_enabled: bool,
@@ -178,6 +180,7 @@ impl Default for TuiConfig {
         Self {
             animations: true,
             theme: None,
+            icons: None,
             vim_mode_default: false,
             mouse_enabled: true,
             scroll_acceleration: true,

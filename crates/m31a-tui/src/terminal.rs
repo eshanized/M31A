@@ -1007,71 +1007,146 @@ pub fn handle_modal_key_event(app: &mut App, modal: ModalState, key: crossterm::
             mut selected_index,
             items,
             mut filtered_indices,
-        } => match key.code {
-            KeyCode::Esc => {
-                // closed (already popped)
-            }
-            KeyCode::Up => {
-                selected_index = selected_index.saturating_sub(1);
-                app.push_modal(ModalState::CommandPalette {
-                    query,
-                    selected_index,
-                    items,
-                    filtered_indices,
-                });
-            }
-            KeyCode::Down => {
-                if !filtered_indices.is_empty() && selected_index + 1 < filtered_indices.len() {
-                    selected_index += 1;
-                }
-                app.push_modal(ModalState::CommandPalette {
-                    query,
-                    selected_index,
-                    items,
-                    filtered_indices,
-                });
-            }
-            KeyCode::Backspace => {
-                query.pop();
-                filtered_indices = filter_palette_items(&query, &items);
-                selected_index = 0;
-                app.push_modal(ModalState::CommandPalette {
-                    query,
-                    selected_index,
-                    items,
-                    filtered_indices,
-                });
-            }
-            KeyCode::Char(c) => {
-                query.push(c);
-                filtered_indices = filter_palette_items(&query, &items);
-                selected_index = 0;
-                app.push_modal(ModalState::CommandPalette {
-                    query,
-                    selected_index,
-                    items,
-                    filtered_indices,
-                });
-            }
-            KeyCode::Enter => {
-                if let Some(&item_idx) = filtered_indices.get(selected_index)
-                    && let Some(item) = items.get(item_idx)
-                {
-                    let action_id = item.id.clone();
+            mut scroll_offset,
+        } => {
+            let visible_items = 12usize;
+            match key.code {
+                KeyCode::Esc => {
                     // closed (already popped)
-                    execute_palette_action(app, &action_id);
                 }
-                // closed (already popped)
+                KeyCode::Up => {
+                    selected_index = selected_index.saturating_sub(1);
+                    if selected_index < scroll_offset {
+                        scroll_offset = selected_index;
+                    }
+                    app.push_modal(ModalState::CommandPalette {
+                        query,
+                        selected_index,
+                        items,
+                        filtered_indices,
+                        scroll_offset,
+                    });
+                }
+                KeyCode::Down => {
+                    if !filtered_indices.is_empty() && selected_index + 1 < filtered_indices.len() {
+                        selected_index += 1;
+                        if selected_index >= scroll_offset + visible_items {
+                            scroll_offset =
+                                selected_index.saturating_sub(visible_items.saturating_sub(1));
+                        }
+                    }
+                    app.push_modal(ModalState::CommandPalette {
+                        query,
+                        selected_index,
+                        items,
+                        filtered_indices,
+                        scroll_offset,
+                    });
+                }
+                KeyCode::PageUp => {
+                    selected_index = selected_index.saturating_sub(visible_items);
+                    if selected_index < scroll_offset {
+                        scroll_offset = selected_index;
+                    }
+                    app.push_modal(ModalState::CommandPalette {
+                        query,
+                        selected_index,
+                        items,
+                        filtered_indices,
+                        scroll_offset,
+                    });
+                }
+                KeyCode::PageDown => {
+                    if !filtered_indices.is_empty() {
+                        selected_index = (selected_index + visible_items)
+                            .min(filtered_indices.len().saturating_sub(1));
+                        if selected_index >= scroll_offset + visible_items {
+                            scroll_offset =
+                                selected_index.saturating_sub(visible_items.saturating_sub(1));
+                        }
+                    }
+                    app.push_modal(ModalState::CommandPalette {
+                        query,
+                        selected_index,
+                        items,
+                        filtered_indices,
+                        scroll_offset,
+                    });
+                }
+                KeyCode::Home => {
+                    selected_index = 0;
+                    scroll_offset = 0;
+                    app.push_modal(ModalState::CommandPalette {
+                        query,
+                        selected_index,
+                        items,
+                        filtered_indices,
+                        scroll_offset,
+                    });
+                }
+                KeyCode::End => {
+                    if !filtered_indices.is_empty() {
+                        selected_index = filtered_indices.len().saturating_sub(1);
+                        if selected_index >= scroll_offset + visible_items {
+                            scroll_offset =
+                                selected_index.saturating_sub(visible_items.saturating_sub(1));
+                        }
+                    }
+                    app.push_modal(ModalState::CommandPalette {
+                        query,
+                        selected_index,
+                        items,
+                        filtered_indices,
+                        scroll_offset,
+                    });
+                }
+                KeyCode::Backspace => {
+                    query.pop();
+                    filtered_indices = filter_palette_items(&query, &items);
+                    selected_index = 0;
+                    scroll_offset = 0;
+                    app.push_modal(ModalState::CommandPalette {
+                        query,
+                        selected_index,
+                        items,
+                        filtered_indices,
+                        scroll_offset,
+                    });
+                }
+                KeyCode::Char(c) => {
+                    query.push(c);
+                    filtered_indices = filter_palette_items(&query, &items);
+                    selected_index = 0;
+                    scroll_offset = 0;
+                    app.push_modal(ModalState::CommandPalette {
+                        query,
+                        selected_index,
+                        items,
+                        filtered_indices,
+                        scroll_offset,
+                    });
+                }
+                KeyCode::Enter => {
+                    if let Some(&item_idx) = filtered_indices.get(selected_index)
+                        && let Some(item) = items.get(item_idx)
+                    {
+                        let action_id = item.id.clone();
+                        // closed (already popped)
+                        execute_palette_action(app, &action_id);
+                    }
+                    // closed (already popped)
+                }
+                _ => {
+                    app.push_modal(ModalState::CommandPalette {
+                        query,
+                        selected_index,
+                        items,
+                        filtered_indices,
+                        scroll_offset,
+                    });
+                }
             }
-            _ => {
-                app.push_modal(ModalState::CommandPalette {
-                    query,
-                    selected_index,
-                    items,
-                    filtered_indices,
-                });
-            }
-        },
+        }
         ModalState::SettingsModal {
             mut active_tab,
             mut selected_index,
@@ -1906,6 +1981,334 @@ pub fn handle_modal_key_event(app: &mut App, modal: ModalState, key: crossterm::
                 app.push_modal(ModalState::SelectPicker(picker));
             }
         },
+        ModalState::ReasoningEffort { mut state } => match key.code {
+            KeyCode::Esc => {
+                // Cancelled without modifying reasoning effort (already popped)
+            }
+            KeyCode::Up => {
+                state.prev();
+                app.push_modal(ModalState::ReasoningEffort { state });
+            }
+            KeyCode::Down => {
+                state.next();
+                app.push_modal(ModalState::ReasoningEffort { state });
+            }
+            KeyCode::Enter => {
+                let effort_opt = state.selected_value();
+                app.apply_reasoning_effort(effort_opt);
+            }
+            _ => {
+                app.push_modal(ModalState::ReasoningEffort { state });
+            }
+        },
+        ModalState::SetupWizard { mut state } => {
+            match state.step {
+                crate::modals::SetupStep::Welcome => match key.code {
+                    KeyCode::Esc => {
+                        // Cancelled/Closed
+                    }
+                    KeyCode::Enter => {
+                        state.next_step();
+                        app.push_modal(ModalState::SetupWizard { state });
+                    }
+                    _ => {
+                        app.push_modal(ModalState::SetupWizard { state });
+                    }
+                },
+                crate::modals::SetupStep::Provider => match key.code {
+                    KeyCode::Esc => {
+                        state.previous_step();
+                        app.push_modal(ModalState::SetupWizard { state });
+                    }
+                    KeyCode::Up => {
+                        if state.selected_provider_idx > 0 {
+                            state.selected_provider_idx -= 1;
+                            state.update_models_for_provider(&app.available_models);
+                        }
+                        app.push_modal(ModalState::SetupWizard { state });
+                    }
+                    KeyCode::Down => {
+                        if state.selected_provider_idx + 1 < state.providers.len() {
+                            state.selected_provider_idx += 1;
+                            state.update_models_for_provider(&app.available_models);
+                        }
+                        app.push_modal(ModalState::SetupWizard { state });
+                    }
+                    KeyCode::Tab => {
+                        state.editing_endpoint = !state.editing_endpoint;
+                        app.push_modal(ModalState::SetupWizard { state });
+                    }
+                    KeyCode::Backspace if state.editing_endpoint => {
+                        state.custom_endpoint.pop();
+                        app.push_modal(ModalState::SetupWizard { state });
+                    }
+                    KeyCode::Char(c) if state.editing_endpoint => {
+                        state.custom_endpoint.push(c);
+                        app.push_modal(ModalState::SetupWizard { state });
+                    }
+                    KeyCode::Enter => {
+                        state.next_step();
+                        app.push_modal(ModalState::SetupWizard { state });
+                    }
+                    _ => {
+                        app.push_modal(ModalState::SetupWizard { state });
+                    }
+                },
+                crate::modals::SetupStep::Credentials => match key.code {
+                    KeyCode::Esc => {
+                        state.previous_step();
+                        app.push_modal(ModalState::SetupWizard { state });
+                    }
+                    KeyCode::Tab => {
+                        if state.has_existing_key {
+                            state.preserve_existing_key = !state.preserve_existing_key;
+                        }
+                        app.push_modal(ModalState::SetupWizard { state });
+                    }
+                    KeyCode::Backspace => {
+                        if !state.preserve_existing_key || !state.has_existing_key {
+                            state.api_key_input.pop();
+                        }
+                        app.push_modal(ModalState::SetupWizard { state });
+                    }
+                    KeyCode::Char(c) => {
+                        if state.preserve_existing_key && state.has_existing_key {
+                            state.preserve_existing_key = false;
+                            state.api_key_input.clear();
+                        }
+                        state.api_key_input.push(c);
+                        app.push_modal(ModalState::SetupWizard { state });
+                    }
+                    KeyCode::Enter => {
+                        state.next_step();
+                        app.push_modal(ModalState::SetupWizard { state });
+                    }
+                    _ => {
+                        app.push_modal(ModalState::SetupWizard { state });
+                    }
+                },
+                crate::modals::SetupStep::Model => match key.code {
+                    KeyCode::Esc => {
+                        state.previous_step();
+                        app.push_modal(ModalState::SetupWizard { state });
+                    }
+                    KeyCode::Tab => {
+                        state.editing_custom_model = !state.editing_custom_model;
+                        app.push_modal(ModalState::SetupWizard { state });
+                    }
+                    KeyCode::Up if !state.editing_custom_model => {
+                        if state.selected_model_idx > 0 {
+                            state.selected_model_idx -= 1;
+                        }
+                        app.push_modal(ModalState::SetupWizard { state });
+                    }
+                    KeyCode::Down if !state.editing_custom_model => {
+                        if state.selected_model_idx + 1 < state.models_for_provider.len() {
+                            state.selected_model_idx += 1;
+                        }
+                        app.push_modal(ModalState::SetupWizard { state });
+                    }
+                    KeyCode::Backspace if state.editing_custom_model => {
+                        state.custom_model_name.pop();
+                        app.push_modal(ModalState::SetupWizard { state });
+                    }
+                    KeyCode::Char(c) if state.editing_custom_model => {
+                        state.custom_model_name.push(c);
+                        app.push_modal(ModalState::SetupWizard { state });
+                    }
+                    KeyCode::Enter => {
+                        state.next_step();
+                        app.push_modal(ModalState::SetupWizard { state });
+                    }
+                    _ => {
+                        app.push_modal(ModalState::SetupWizard { state });
+                    }
+                },
+                crate::modals::SetupStep::Security => match key.code {
+                    KeyCode::Esc => {
+                        state.previous_step();
+                        app.push_modal(ModalState::SetupWizard { state });
+                    }
+                    KeyCode::Tab => {
+                        state.security_field_idx = (state.security_field_idx + 1) % 2;
+                        app.push_modal(ModalState::SetupWizard { state });
+                    }
+                    KeyCode::Left | KeyCode::Right | KeyCode::Char(' ') => {
+                        if state.security_field_idx == 0 {
+                            state.sandbox_policy = match state.sandbox_policy {
+                                m31a_core::SandboxPolicy::ReadOnly => {
+                                    m31a_core::SandboxPolicy::WorkspaceWrite
+                                }
+                                m31a_core::SandboxPolicy::WorkspaceWrite => {
+                                    m31a_core::SandboxPolicy::DangerFullAccess
+                                }
+                                m31a_core::SandboxPolicy::DangerFullAccess => {
+                                    m31a_core::SandboxPolicy::ReadOnly
+                                }
+                            };
+                        } else {
+                            state.approval_policy = match state.approval_policy {
+                                m31a_core::ApprovalPolicy::OnRequest => {
+                                    m31a_core::ApprovalPolicy::ApproveForMe
+                                }
+                                m31a_core::ApprovalPolicy::ApproveForMe => {
+                                    m31a_core::ApprovalPolicy::Never
+                                }
+                                m31a_core::ApprovalPolicy::Never => {
+                                    m31a_core::ApprovalPolicy::OnRequest
+                                }
+                            };
+                        }
+                        app.push_modal(ModalState::SetupWizard { state });
+                    }
+                    KeyCode::Enter => {
+                        state.next_step();
+                        state.connectivity_status = crate::modals::ConnectivityStatus::Testing;
+                        state.connectivity_error = None;
+
+                        let event_tx = app.event_tx.clone();
+                        let provider_type = state.current_provider();
+                        let endpoint = state.effective_endpoint();
+                        let api_key = if !state.api_key_input.trim().is_empty() {
+                            Some(state.api_key_input.trim().to_string())
+                        } else if state.preserve_existing_key {
+                            app.config.api_key.clone()
+                        } else {
+                            None
+                        };
+                        let model_name = state.effective_model();
+
+                        std::thread::spawn(move || {
+                            let provider_config = m31a_provider::ProviderConfig {
+                                provider_type,
+                                api_key,
+                                api_base: if endpoint.is_empty() {
+                                    None
+                                } else {
+                                    Some(endpoint)
+                                },
+                                model: model_name,
+                                extra: std::collections::HashMap::new(),
+                            };
+
+                            let result =
+                                match m31a_provider::validate_provider_config(&provider_config) {
+                                    Ok(_) => match m31a_provider::ProviderBuilder::build_client(
+                                        provider_config,
+                                    ) {
+                                        Ok(_) => (true, None),
+                                        Err(e) => (false, Some(format!("Client build error: {e}"))),
+                                    },
+                                    Err(e) => (false, Some(format!("Validation failed: {e}"))),
+                                };
+
+                            let _ = event_tx.blocking_send(
+                                crate::app::TuiEvent::SetupConnectivityResult {
+                                    success: result.0,
+                                    error: result.1,
+                                },
+                            );
+                        });
+
+                        app.push_modal(ModalState::SetupWizard { state });
+                    }
+                    _ => {
+                        app.push_modal(ModalState::SetupWizard { state });
+                    }
+                },
+                crate::modals::SetupStep::Connectivity => match key.code {
+                    KeyCode::Esc => {
+                        state.previous_step();
+                        app.push_modal(ModalState::SetupWizard { state });
+                    }
+                    KeyCode::Char('r') | KeyCode::Char('R') => {
+                        state.connectivity_status = crate::modals::ConnectivityStatus::Testing;
+                        state.connectivity_error = None;
+
+                        let event_tx = app.event_tx.clone();
+                        let provider_type = state.current_provider();
+                        let endpoint = state.effective_endpoint();
+                        let api_key = if !state.api_key_input.trim().is_empty() {
+                            Some(state.api_key_input.trim().to_string())
+                        } else if state.preserve_existing_key {
+                            app.config.api_key.clone()
+                        } else {
+                            None
+                        };
+                        let model_name = state.effective_model();
+
+                        std::thread::spawn(move || {
+                            let provider_config = m31a_provider::ProviderConfig {
+                                provider_type,
+                                api_key,
+                                api_base: if endpoint.is_empty() {
+                                    None
+                                } else {
+                                    Some(endpoint)
+                                },
+                                model: model_name,
+                                extra: std::collections::HashMap::new(),
+                            };
+
+                            let result =
+                                match m31a_provider::validate_provider_config(&provider_config) {
+                                    Ok(_) => match m31a_provider::ProviderBuilder::build_client(
+                                        provider_config,
+                                    ) {
+                                        Ok(_) => (true, None),
+                                        Err(e) => (false, Some(format!("Client build error: {e}"))),
+                                    },
+                                    Err(e) => (false, Some(format!("Validation failed: {e}"))),
+                                };
+
+                            let _ = event_tx.blocking_send(
+                                crate::app::TuiEvent::SetupConnectivityResult {
+                                    success: result.0,
+                                    error: result.1,
+                                },
+                            );
+                        });
+
+                        app.push_modal(ModalState::SetupWizard { state });
+                    }
+                    KeyCode::Enter => {
+                        state.next_step();
+                        app.push_modal(ModalState::SetupWizard { state });
+                    }
+                    _ => {
+                        app.push_modal(ModalState::SetupWizard { state });
+                    }
+                },
+                crate::modals::SetupStep::Review => match key.code {
+                    KeyCode::Esc => {
+                        state.previous_step();
+                        app.push_modal(ModalState::SetupWizard { state });
+                    }
+                    KeyCode::Enter => {
+                        match app.persist_setup_wizard_config(&state) {
+                            Ok(_) => {
+                                state.next_step();
+                            }
+                            Err(e) => {
+                                state.save_error = Some(e.to_string());
+                            }
+                        }
+                        app.push_modal(ModalState::SetupWizard { state });
+                    }
+                    _ => {
+                        app.push_modal(ModalState::SetupWizard { state });
+                    }
+                },
+                crate::modals::SetupStep::Complete => match key.code {
+                    KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') => {
+                        // Wizard finished and popped
+                    }
+                    _ => {
+                        app.push_modal(ModalState::SetupWizard { state });
+                    }
+                },
+            }
+        }
     }
 }
 
@@ -2494,40 +2897,28 @@ pub fn execute_palette_action(app: &mut App, action_id: &str) {
             let _ = app.create_new_session(None);
         }
         "worktrees" => {
-            if let Ok(mgr) = m31a_core::worktree::WorktreeManager::new() {
-                if let Ok(worktrees) = mgr.list_worktrees(&app.cwd) {
-                    let current_idx = worktrees
-                        .iter()
-                        .position(|w| w.path == app.cwd)
-                        .unwrap_or(0);
-                    app.push_modal(ModalState::WorktreeSelector {
-                        worktrees,
-                        selected_index: current_idx,
-                    });
-                }
+            if let Ok(mgr) = m31a_core::worktree::WorktreeManager::new()
+                && let Ok(worktrees) = mgr.list_worktrees(&app.cwd)
+            {
+                let current_idx = worktrees
+                    .iter()
+                    .position(|w| w.path == app.cwd)
+                    .unwrap_or(0);
+                app.push_modal(ModalState::WorktreeSelector {
+                    worktrees,
+                    selected_index: current_idx,
+                });
             }
         }
         "cycle_reasoning" => {
-            let next_effort = match app.nim_client.reasoning_effort().as_deref() {
-                None => Some("low".to_string()),
-                Some("low") => Some("medium".to_string()),
-                Some("medium") => Some("high".to_string()),
-                _ => None,
-            };
-            app.nim_client = app
-                .nim_client
-                .clone()
-                .with_reasoning_effort(next_effort.clone());
-            app.bottom_pane.reasoning_effort = next_effort.clone();
-            app.transcript
-                .push(crate::transcript::TranscriptItem::notice(
-                    format!(
-                        "Reasoning effort set to: {}",
-                        next_effort.as_deref().unwrap_or("none/standard")
-                    ),
-                    crate::transcript::NoticeLevel::Info,
-                ));
-            app.sync_virtualizer();
+            app.push_modal(ModalState::reasoning_effort(
+                app.config.reasoning_effort.clone(),
+            ));
+        }
+        "setup_wizard" => {
+            app.push_modal(ModalState::setup_wizard(
+                crate::modals::SetupWizardState::new(&app.config, &app.available_models),
+            ));
         }
         "test_provider" => {
             let client = app.nim_client.clone();

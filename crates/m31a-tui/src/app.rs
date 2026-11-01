@@ -119,6 +119,10 @@ pub enum TuiEvent {
         label: String,
         lines: Vec<m31a_proc::ProcessLine>,
     },
+    SetupConnectivityResult {
+        success: bool,
+        error: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -436,6 +440,12 @@ impl App {
             init_theme(detected);
         }
 
+        if let Some(ref icon_pref) = config.tui.icons {
+            crate::theme::set_icon_mode(Some(crate::icons::IconMode::parse_str(icon_pref)));
+        } else {
+            crate::theme::set_icon_mode(None);
+        }
+
         // Dynamically fetch models from provider endpoint in background
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             let api_base_models = config.api_base.clone();
@@ -558,14 +568,18 @@ impl App {
             session_scrolls: std::collections::HashMap::new(),
         };
 
-        // Initialize welcome message in transcript
-        app.transcript.push(TranscriptItem::notice(
-            format!(
-                "Welcome to M31A Autonomous Software Engineering Runtime\nModel: {} | Policy: {:?} | Mode: {:?} | Type /help or press F1-F10 for screens",
-                app.active_model, app.config.sandbox, app.collaboration_mode
-            ),
-            NoticeLevel::Info,
-        ));
+        // Initialize welcome message in transcript with clean structural separation
+        let welcome = format!(
+            "M31A Autonomous Software Engineering Runtime\n\
+             • Runtime:  v0.1.13\n\
+             • Model:    {}\n\
+             • Policy:   Sandbox ({:?}) │ Approval ({:?})\n\
+             • Mode:     {:?}\n\
+             • Guidance: Type /help for command index or press F1-F10 for screens",
+            app.active_model, app.config.sandbox, app.config.approval, app.collaboration_mode
+        );
+        app.transcript
+            .push(TranscriptItem::notice(welcome, NoticeLevel::Info));
 
         // Evaluate workspace trust and git hook armor
         let decision = app.trust_store.lock().unwrap().evaluate(&app.cwd);
@@ -849,6 +863,76 @@ impl App {
     /// Returns true if an overlay modal is currently active.
     pub fn has_active_modal(&self) -> bool {
         !self.modal_stack.is_empty()
+    }
+
+    /// Applies a reasoning effort override across config, active client, and bottom pane.
+    pub fn apply_reasoning_effort(&mut self, new_effort: Option<String>) {
+        self.config.reasoning_effort = new_effort.clone();
+        self.nim_client = self
+            .nim_client
+            .clone()
+            .with_reasoning_effort(new_effort.clone());
+        self.bottom_pane.reasoning_effort = new_effort.clone();
+        if let Err(e) = self.config.save() {
+            tracing::warn!("Failed to persist reasoning effort: {e}");
+        }
+
+        let label = new_effort.as_deref().unwrap_or("none (default)");
+        self.transcript.push(TranscriptItem::notice(
+            format!("Reasoning effort override set to: `{label}` (Usage: `/effort [low|medium|high|none]`)"),
+            NoticeLevel::Success,
+        ));
+        self.sync_virtualizer();
+    }
+
+    /// Persists configuration adjustments made inside the Setup Wizard.
+    pub fn persist_setup_wizard_config(
+        &mut self,
+        wizard: &crate::modals::SetupWizardState,
+    ) -> anyhow::Result<()> {
+        let provider = wizard.current_provider();
+        self.config.model_provider = Some(provider.to_string());
+        self.config.api_base = wizard.effective_endpoint();
+        if !wizard.api_key_input.trim().is_empty() {
+            self.config.api_key = Some(wizard.api_key_input.trim().to_string());
+        }
+        let target_model = wizard.effective_model();
+        self.config.model = target_model.clone();
+        self.config.sandbox = wizard.sandbox_policy;
+        self.config.approval = wizard.approval_policy;
+
+        self.config.save()?;
+
+        self.active_model = target_model.clone();
+
+        let provider_config = m31a_provider::ProviderConfig {
+            provider_type: provider,
+            api_key: self.config.api_key.clone(),
+            api_base: if self.config.api_base.is_empty() {
+                None
+            } else {
+                Some(self.config.api_base.clone())
+            },
+            model: self.active_model.clone(),
+            extra: std::collections::HashMap::new(),
+        };
+
+        if let Ok(client) = m31a_provider::ProviderBuilder::build_client(provider_config) {
+            self.nim_client = client.with_reasoning_effort(self.config.reasoning_effort.clone());
+        }
+
+        self.bottom_pane.active_model = self.active_model.clone();
+        self.bottom_pane.sandbox_policy = format!("{:?}", self.config.sandbox);
+
+        self.transcript.push(TranscriptItem::notice(
+            format!(
+                "Setup configuration saved. Active model set to `{}`.",
+                self.active_model
+            ),
+            NoticeLevel::Success,
+        ));
+        self.sync_virtualizer();
+        Ok(())
     }
 
     /// Applies an approval action exactly as labeled by the one approval surface.
@@ -1913,13 +1997,39 @@ impl App {
                 self.push_modal(ModalState::settings());
             }
             "/setup" => {
-                if parts.len() > 1
-                    && (parts[1] == "gui"
-                        || parts[1] == "settings"
-                        || parts[1] == "wizard"
-                        || parts[1] == "edit")
-                {
-                    self.push_modal(ModalState::settings());
+                if parts.len() > 1 {
+                    let sub = parts[1].to_lowercase();
+                    match sub.as_str() {
+                        "settings" | "gui" | "edit" => {
+                            self.push_modal(ModalState::settings());
+                            return;
+                        }
+                        "wizard" => {
+                            self.push_modal(ModalState::setup_wizard(
+                                crate::modals::SetupWizardState::new(
+                                    &self.config,
+                                    &self.available_models,
+                                ),
+                            ));
+                            return;
+                        }
+                        "status" => {
+                            // fall through to print status
+                        }
+                        _ => {
+                            self.push_modal(ModalState::setup_wizard(
+                                crate::modals::SetupWizardState::new(
+                                    &self.config,
+                                    &self.available_models,
+                                ),
+                            ));
+                            return;
+                        }
+                    }
+                } else {
+                    self.push_modal(ModalState::setup_wizard(
+                        crate::modals::SetupWizardState::new(&self.config, &self.available_models),
+                    ));
                     return;
                 }
                 let config_file = m31a_core::Config::config_dir().join("config.toml");
@@ -1939,8 +2049,8 @@ impl App {
                      • Approval Mode:      {:?}\n\
                      • Collaboration Mode: {:?}\n\
                      • Dynamic Routing:    {}\n\n\
-                     • To configure settings interactively inside M31A: `/settings`\n\
-                     • To run the terminal onboarding wizard: exit M31A and run `m31a setup`\n\
+                     • To run interactive onboarding: `/setup wizard` or `/setup`\n\
+                     • To configure settings interactively: `/settings` or `/setup settings`\n\
                      ──────────────────────────────────────────────────────────────",
                     config_file.display(),
                     self.active_model,
@@ -1948,7 +2058,7 @@ impl App {
                     if has_api_key {
                         "Configured"
                     } else {
-                        "Missing - run m31a setup"
+                        "Missing - run /setup"
                     },
                     self.config.sandbox,
                     self.config.approval,
@@ -1961,6 +2071,7 @@ impl App {
                 );
                 self.transcript
                     .push(TranscriptItem::notice(text, NoticeLevel::Info));
+                self.sync_virtualizer();
             }
             "/model" | "/models" => {
                 if parts.len() > 1 {
@@ -2183,13 +2294,21 @@ impl App {
                 self.toggle_collaboration_mode();
             }
             "/effort" | "/reasoning-effort" => {
-                let new_effort = if parts.len() > 1 {
+                if parts.len() > 1 {
                     let val = parts[1].to_lowercase();
                     match val.as_str() {
-                        "none" | "default" | "reset" | "off" => None,
-                        "low" => Some("low".to_string()),
-                        "medium" | "med" => Some("medium".to_string()),
-                        "high" => Some("high".to_string()),
+                        "none" | "default" | "reset" | "off" => {
+                            self.apply_reasoning_effort(None);
+                        }
+                        "low" => {
+                            self.apply_reasoning_effort(Some("low".to_string()));
+                        }
+                        "medium" | "med" => {
+                            self.apply_reasoning_effort(Some("medium".to_string()));
+                        }
+                        "high" => {
+                            self.apply_reasoning_effort(Some("high".to_string()));
+                        }
                         other => {
                             self.transcript.push(TranscriptItem::notice(
                                 format!(
@@ -2198,37 +2317,13 @@ impl App {
                                 NoticeLevel::Warning,
                             ));
                             self.sync_virtualizer();
-                            return;
                         }
                     }
                 } else {
-                    // Cycling behavior when called without arguments (matches /theme, /sandbox, /approval)
-                    let current = self.config.reasoning_effort.as_deref().unwrap_or("none");
-                    match current {
-                        "none" => Some("low".to_string()),
-                        "low" => Some("medium".to_string()),
-                        "medium" => Some("high".to_string()),
-                        "high" => None,
-                        _ => Some("low".to_string()),
-                    }
-                };
-
-                self.config.reasoning_effort = new_effort.clone();
-                self.nim_client = self
-                    .nim_client
-                    .clone()
-                    .with_reasoning_effort(new_effort.clone());
-                self.bottom_pane.reasoning_effort = new_effort.clone();
-                if let Err(e) = self.config.save() {
-                    tracing::warn!("Failed to persist reasoning effort: {e}");
+                    self.push_modal(ModalState::reasoning_effort(
+                        self.config.reasoning_effort.clone(),
+                    ));
                 }
-
-                let label = new_effort.as_deref().unwrap_or("none (default)");
-                self.transcript.push(TranscriptItem::notice(
-                    format!("Reasoning effort override set to: `{label}` (Usage: `/effort [low|medium|high|none]`)"),
-                    NoticeLevel::Success,
-                ));
-                self.sync_virtualizer();
             }
             "/status" => {
                 let context_limit = 131_072usize;
@@ -3991,22 +4086,12 @@ impl App {
             &self.pinned_context,
         );
 
-        // §5.3: report exactly which world-state sections changed.
+        // Calculate and maintain world-state section digests silently.
         let deltas = state.diff_since(&self.world_state_digests);
         if !deltas.is_empty() {
-            let names: Vec<String> = deltas
-                .iter()
-                .map(|d| match d.kind {
-                    m31a_core::world_state::DeltaKind::Added => format!("+{}", d.id),
-                    m31a_core::world_state::DeltaKind::Removed => format!("-{}", d.id),
-                    m31a_core::world_state::DeltaKind::Changed => format!("~{}", d.id),
-                })
-                .collect();
             self.world_state_digests = state.section_digests();
-            self.transcript.push(TranscriptItem::notice(
-                format!("Dynamic context updated: {}", names.join(", ")),
-                NoticeLevel::Info,
-            ));
+            // Dynamic context updates must remain silent to conversation transcript.
+            // Never display raw internal identifiers such as workspace_status or digest values.
         }
 
         let sys_prompt = state.render();
@@ -4907,6 +4992,16 @@ impl App {
             TuiEvent::ProviderStatus(msg) => {
                 self.provider_status_message = Some(msg);
             }
+            TuiEvent::SetupConnectivityResult { success, error } => {
+                if let Some(ModalState::SetupWizard { state }) = self.current_modal_mut() {
+                    state.connectivity_status = if success {
+                        crate::modals::ConnectivityStatus::Connected
+                    } else {
+                        crate::modals::ConnectivityStatus::Failed
+                    };
+                    state.connectivity_error = error;
+                }
+            }
         }
     }
 
@@ -5467,13 +5562,20 @@ mod tests {
         });
         assert!(has_apply_notice);
 
-        // 5. /effort cycles and sets reasoning effort properly
+        // 5. /effort sets reasoning effort properly or opens modal
         app.execute_slash_command("/effort high");
         assert_eq!(app.config.reasoning_effort.as_deref(), Some("high"));
         assert_eq!(app.nim_client.reasoning_effort(), Some("high"));
         assert_eq!(app.bottom_pane.reasoning_effort.as_deref(), Some("high"));
 
-        app.execute_slash_command("/effort"); // cycles high -> None
+        app.execute_slash_command("/effort"); // without args opens modal!
+        assert!(matches!(
+            app.current_modal(),
+            Some(ModalState::ReasoningEffort { .. })
+        ));
+        app.pop_modal();
+
+        app.execute_slash_command("/effort none"); // explicit none sets to None
         assert_eq!(app.config.reasoning_effort, None);
         assert_eq!(app.nim_client.reasoning_effort(), None);
 
@@ -5878,13 +5980,28 @@ mod tests {
         };
         let mut app = App::new(config).unwrap();
 
-        // 1. /setup should push configuration notice AND sync virtualizer
-        let prev_lines = app.transcript_virtualizer.total_line_count(80);
+        // 1. /setup without args or /setup wizard should launch SetupWizard modal
         app.execute_slash_command("/setup");
+        assert!(matches!(
+            app.current_modal(),
+            Some(ModalState::SetupWizard { .. })
+        ));
+        app.pop_modal();
+
+        app.execute_slash_command("/setup wizard");
+        assert!(matches!(
+            app.current_modal(),
+            Some(ModalState::SetupWizard { .. })
+        ));
+        app.pop_modal();
+
+        // 1b. /setup status should push configuration notice AND sync virtualizer
+        let prev_lines = app.transcript_virtualizer.total_line_count(80);
+        app.execute_slash_command("/setup status");
         let new_lines = app.transcript_virtualizer.total_line_count(80);
         assert!(
             new_lines > prev_lines,
-            "Virtualizer line count should increase after /setup"
+            "Virtualizer line count should increase after /setup status"
         );
 
         let has_setup_notice = app.transcript.iter().any(|item| {

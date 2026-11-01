@@ -2,7 +2,7 @@
 
 use m31a_provider::models::{ModelInfo, ServiceTier, ToolMode, TruncationPolicy};
 use ratatui::{
-    layout::{Margin, Rect},
+    layout::{Constraint, Direction, Layout, Margin, Rect},
     style::Modifier,
     text::{Line, Span},
     widgets::{
@@ -237,7 +237,66 @@ impl ModelListState {
 }
 
 /// Renders a model list with proper scrolling, Ratatui scrollbar, and 1-row compact selection highlighting.
+/// Renders a model list with responsive two-pane layout (models list + specification details)
+/// and full Ratatui scrolling and search management.
 pub fn render_model_list(
+    f: &mut ratatui::Frame,
+    state: &ModelListState,
+    area: Rect,
+    theme: &crate::theme::Theme,
+    title: &str,
+) {
+    if area.width < 10 || area.height < 4 {
+        return;
+    }
+
+    let is_wide = area.width >= 80;
+    if is_wide {
+        let chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(58), Constraint::Percentage(42)])
+            .split(area);
+
+        let left_chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(3), Constraint::Min(4)])
+            .split(chunks[0]);
+
+        let search_text = if state.search_query.is_empty() {
+            Span::styled("Type to search models...", theme.style_muted())
+        } else {
+            Span::styled(&state.search_query, theme.style_accent(true))
+        };
+        let search_block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(theme.border_subtle())
+            .title(Line::from(vec![
+                Span::styled(
+                    format!(" {} ", crate::icons::Icon::Search.render(theme)),
+                    theme.style_secondary(),
+                ),
+                Span::styled(
+                    "Search Models",
+                    theme.style_secondary().add_modifier(Modifier::BOLD),
+                ),
+            ]))
+            .style(theme.style_surface1());
+        let search_p =
+            Paragraph::new(Line::from(vec![Span::raw(" "), search_text])).block(search_block);
+        f.render_widget(search_p, left_chunks[0]);
+
+        render_model_list_pane(f, state, left_chunks[1], theme, title);
+        let is_active = state
+            .get_selected_model()
+            .map(|m| m.slug == state.active_model)
+            .unwrap_or(false);
+        render_model_details(f, state.get_selected_model(), is_active, chunks[1], theme);
+    } else {
+        render_model_list_pane(f, state, area, theme, title);
+    }
+}
+
+fn render_model_list_pane(
     f: &mut ratatui::Frame,
     state: &ModelListState,
     area: Rect,
@@ -247,15 +306,15 @@ pub fn render_model_list(
     let geometry = ModelSelectorGeometry::new(area);
     if state.is_empty() {
         let msg = if state.search_query.is_empty() {
-            "No models available"
+            "No models available in catalog"
         } else {
-            "No models match search"
+            "No models match current query"
         };
         let p = Paragraph::new(msg)
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .title(title)
+                    .title(format!(" {} ", title))
                     .border_style(theme.border_subtle()),
             )
             .style(theme.style_muted());
@@ -284,9 +343,7 @@ pub fn render_model_list(
             let name_style = if is_selected {
                 theme.style_selected().add_modifier(Modifier::BOLD)
             } else if is_active {
-                theme
-                    .style_primary()
-                    .add_modifier(Modifier::BOLD | Modifier::ITALIC)
+                theme.style_primary().add_modifier(Modifier::BOLD)
             } else {
                 theme.style_primary()
             };
@@ -312,14 +369,12 @@ pub fn render_model_list(
                 Span::styled(
                     active_indicator,
                     if is_active {
-                        theme.style_success(false)
+                        theme.style_success(true)
                     } else {
                         theme.style_muted()
                     },
                 ),
                 Span::styled(&m.display_name, name_style),
-                Span::raw(" "),
-                Span::styled(format!("({})", m.slug), meta_style),
                 Span::raw(" "),
                 Span::styled(format!("[{}k]", m.context_window / 1024), meta_style),
             ];
@@ -377,24 +432,23 @@ pub fn render_model_list(
         String::new()
     };
 
+    let title_line = Line::from(vec![
+        Span::styled(
+            format!(" {} ", title),
+            theme.style_secondary().add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!("↑↓ PgUp/Dn Enter=Select Esc=Close{}", scroll_indicator),
+            theme.style_muted(),
+        ),
+    ]);
+
     let list = List::new(items)
         .block(
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(theme.border_focus())
-                .title(Line::from(vec![
-                    Span::styled(
-                        format!(" {} ", title),
-                        theme.style_secondary().add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(
-                        format!(
-                            "↑↓ PgUp/PgDn Home/End Enter=Select Esc=Close{}",
-                            scroll_indicator
-                        ),
-                        theme.style_muted(),
-                    ),
-                ]))
+                .title(title_line)
                 .style(theme.style_surface1()),
         )
         .highlight_style(theme.style_selected());

@@ -852,10 +852,10 @@ fn detect_alert_callout(line: &str) -> Option<(AlertKind, &'static str)> {
 fn alert_style(kind: AlertKind) -> (Color, &'static str) {
     match kind {
         AlertKind::Note => (Color::Cyan, "ℹ"),
-        AlertKind::Tip => (Color::Green, "💡"),
-        AlertKind::Important => (Color::LightMagenta, "❗"),
-        AlertKind::Warning => (Color::Yellow, "⚠"),
-        AlertKind::Caution => (Color::Red, "🛑"),
+        AlertKind::Tip => (Color::Green, "✧"),
+        AlertKind::Important => (Color::LightMagenta, "!"),
+        AlertKind::Warning => (Color::Yellow, "▲"),
+        AlertKind::Caution => (Color::Red, "■"),
     }
 }
 

@@ -167,20 +167,38 @@ fn handle_mouse_scroll(app: &mut App, is_up: bool, _col: u16, _row: u16, _screen
                 mut selected_index,
                 items,
                 filtered_indices,
+                mut scroll_offset,
             } => {
+                let visible_items = 12usize;
                 if is_up {
                     selected_index = selected_index.saturating_sub(1);
+                    if selected_index < scroll_offset {
+                        scroll_offset = selected_index;
+                    }
                 } else if !filtered_indices.is_empty()
                     && selected_index + 1 < filtered_indices.len()
                 {
                     selected_index += 1;
+                    if selected_index >= scroll_offset + visible_items {
+                        scroll_offset =
+                            selected_index.saturating_sub(visible_items.saturating_sub(1));
+                    }
                 }
                 ModalState::CommandPalette {
                     query,
                     selected_index,
                     items,
                     filtered_indices,
+                    scroll_offset,
                 }
+            }
+            ModalState::ReasoningEffort { mut state } => {
+                if is_up {
+                    state.prev();
+                } else {
+                    state.next();
+                }
+                ModalState::ReasoningEffort { state }
             }
             ModalState::SettingsModal {
                 active_tab,
@@ -603,11 +621,20 @@ fn handle_left_click_down(app: &mut App, col: u16, row: u16, screen_area: Rect) 
             ModalState::CommandPalette {
                 query,
                 selected_index,
+                scroll_offset,
                 items,
                 filtered_indices,
             } => {
-                if row > popup_area.y && row < popup_area.y + popup_area.height.saturating_sub(1) {
-                    let clicked_idx = (row - (popup_area.y + 1)) as usize;
+                let list_start_y = popup_area.y + 5;
+                let list_end_y = popup_area.y + popup_area.height.saturating_sub(2);
+                let list_max_x = if popup_area.width >= 70 {
+                    popup_area.x + (popup_area.width * 58 / 100)
+                } else {
+                    popup_area.x + popup_area.width
+                };
+                if row >= list_start_y && row < list_end_y && col <= list_max_x {
+                    let clicked_offset = (row - list_start_y) as usize;
+                    let clicked_idx = scroll_offset + clicked_offset;
                     if clicked_idx < filtered_indices.len()
                         && let Some(&item_idx) = filtered_indices.get(clicked_idx)
                         && let Some(item) = items.get(item_idx)
@@ -620,9 +647,25 @@ fn handle_left_click_down(app: &mut App, col: u16, row: u16, screen_area: Rect) 
                 app.push_modal(ModalState::CommandPalette {
                     query,
                     selected_index,
+                    scroll_offset,
                     items,
                     filtered_indices,
                 });
+            }
+            ModalState::ReasoningEffort { state } => {
+                let options_start_y = popup_area.y + 3;
+                if row >= options_start_y && row < options_start_y + state.options.len() as u16 {
+                    let clicked_idx = (row - options_start_y) as usize;
+                    if let Some(opt) = state.options.get(clicked_idx) {
+                        let effort_opt = match opt.id {
+                            "none" => None,
+                            other => Some(other.to_string()),
+                        };
+                        app.apply_reasoning_effort(effort_opt);
+                        return;
+                    }
+                }
+                app.push_modal(ModalState::ReasoningEffort { state });
             }
             ModalState::ExperimentalFeatures {
                 mut items,

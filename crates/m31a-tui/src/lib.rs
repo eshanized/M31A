@@ -10,6 +10,7 @@ pub mod chatwidget;
 pub mod clipboard;
 pub mod composer;
 pub mod diff_render;
+pub mod icons;
 pub mod interrupts;
 pub mod keybindings;
 pub mod markdown_syntax;
@@ -44,12 +45,14 @@ pub use chatwidget::{
 };
 pub use clipboard::{ClipboardResult, copy_to_clipboard, copy_to_clipboard_bool};
 pub use diff_render::DiffRenderer;
+pub use icons::{Icon, IconMode};
 pub use interrupts::{DeferredInterrupt, DeferredInterruptQueue, ToolActivityStatus};
 pub use keybindings::{CANONICAL_KEYBINDINGS, KeyAction, Keybinding, canonical_keybindings};
 pub use mermaid::{MermaidError, render as render_mermaid};
 pub use modals::{
-    CommandPaletteItem, ModalStack, ModalState, PendingApproval, ScrubTurnItem, SelectPickerItem,
-    SelectPickerState,
+    CommandPaletteItem, ConnectivityStatus, ModalStack, ModalState, PendingApproval,
+    ReasoningEffortOption, ReasoningEffortState, ScrubTurnItem, SelectPickerItem,
+    SelectPickerState, SetupStep, SetupWizardState,
 };
 pub use model_selector::{ModelListState, ModelSelectorGeometry, render_model_list};
 pub use mouse::{MouseSelection, handle_mouse_event};
