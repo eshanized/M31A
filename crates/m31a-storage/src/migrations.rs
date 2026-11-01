@@ -356,6 +356,30 @@ pub const BUILTIN_MIGRATIONS: &[Migration] = &[
         CREATE INDEX IF NOT EXISTS idx_session_memories_topic ON session_memories(topic);
         "#,
     ),
+    Migration::new(
+        14,
+        "thread_ownership_and_session_todos",
+        r#"
+        CREATE TABLE IF NOT EXISTS thread_ownership (
+            thread_id TEXT PRIMARY KEY,
+            owner_client_id TEXT NOT NULL,
+            created_at_epoch_ms INTEGER NOT NULL,
+            updated_at_epoch_ms INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_thread_ownership_owner ON thread_ownership(owner_client_id);
+
+        CREATE TABLE IF NOT EXISTS session_todos (
+            id TEXT PRIMARY KEY,
+            thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+            content TEXT NOT NULL,
+            status TEXT NOT NULL CHECK(status IN ('pending', 'in_progress', 'completed', 'cancelled')),
+            position INTEGER NOT NULL DEFAULT 0,
+            created_at_epoch_ms INTEGER NOT NULL,
+            updated_at_epoch_ms INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_session_todos_thread ON session_todos(thread_id, position);
+        "#,
+    ),
 ];
 
 /// Migration engine responsible for running and validating SQLite migrations.

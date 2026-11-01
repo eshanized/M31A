@@ -18,6 +18,7 @@ m31a_release_archive(
 # Workspace Verification Test
 m31a_test(
     name = "workspace_test",
+    tags = ["local", "no-sandbox"],
 )
 
 # Full Session E2E Benchmark Target

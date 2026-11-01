@@ -953,7 +953,7 @@ impl SetupStep {
     }
 }
 
-/// Provider connectivity status in setup wizard.
+/// Provider connectivity status in setup wizard with explicit distinguishable failure and verification states.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConnectivityStatus {
     NotTested,
@@ -961,7 +961,50 @@ pub enum ConnectivityStatus {
     TestingConnection,
     CheckingModel,
     Connected,
+    AuthenticationFailed,
+    ModelUnsupported,
+    TimedOut,
+    Unreachable,
     Failed,
+}
+
+impl ConnectivityStatus {
+    pub fn is_success(&self) -> bool {
+        matches!(self, Self::Connected)
+    }
+
+    pub fn is_failure(&self) -> bool {
+        matches!(
+            self,
+            Self::AuthenticationFailed
+                | Self::ModelUnsupported
+                | Self::TimedOut
+                | Self::Unreachable
+                | Self::Failed
+        )
+    }
+
+    pub fn is_in_progress(&self) -> bool {
+        matches!(
+            self,
+            Self::Validating | Self::TestingConnection | Self::CheckingModel
+        )
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::NotTested => "Not Tested",
+            Self::Validating => "Validating Configuration",
+            Self::TestingConnection => "Testing Connection",
+            Self::CheckingModel => "Checking Model",
+            Self::Connected => "Connected",
+            Self::AuthenticationFailed => "Authentication Failed",
+            Self::ModelUnsupported => "Model Unsupported",
+            Self::TimedOut => "Timed Out",
+            Self::Unreachable => "Host Unreachable",
+            Self::Failed => "Verification Failed",
+        }
+    }
 }
 
 /// Structured outcome of genuine provider verification probe.

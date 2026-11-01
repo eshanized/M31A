@@ -112,6 +112,48 @@ impl MxcSandbox {
     }
 }
 
+/// Escapes an argument according to the Win32 `CommandLineToArgvW` rules.
+///
+/// Ensures arguments containing spaces, quotes, backslashes, or empty strings are safely preserved.
+pub fn windows_quote_arg(arg: &str) -> String {
+    if arg.is_empty() {
+        return "\"\"".to_string();
+    }
+    if !arg
+        .chars()
+        .any(|c| c == ' ' || c == '\t' || c == '\n' || c == '\x0b' || c == '\"')
+    {
+        return arg.to_string();
+    }
+
+    let mut result = String::with_capacity(arg.len() + 2);
+    result.push('"');
+
+    let mut backslashes = 0;
+    for c in arg.chars() {
+        if c == '\\' {
+            backslashes += 1;
+        } else if c == '"' {
+            for _ in 0..(backslashes * 2 + 1) {
+                result.push('\\');
+            }
+            result.push('"');
+            backslashes = 0;
+        } else {
+            for _ in 0..backslashes {
+                result.push('\\');
+            }
+            backslashes = 0;
+            result.push(c);
+        }
+    }
+    for _ in 0..(backslashes * 2) {
+        result.push('\\');
+    }
+    result.push('"');
+    result
+}
+
 /// Command output
 #[derive(Debug, Clone)]
 pub struct CommandOutput {
@@ -129,5 +171,21 @@ mod tests {
         let workspace = std::path::Path::new("C:\\temp\\test");
         let sandbox = MxcSandbox::new(SandboxPolicy::WorkspaceWrite, workspace).unwrap();
         assert!(!sandbox.container_name.is_empty());
+    }
+
+    #[test]
+    fn test_windows_quote_arg() {
+        assert_eq!(windows_quote_arg(""), "\"\"");
+        assert_eq!(windows_quote_arg("hello"), "hello");
+        assert_eq!(windows_quote_arg("hello world"), "\"hello world\"");
+        assert_eq!(
+            windows_quote_arg("hello \"world\""),
+            "\"hello \\\"world\\\"\""
+        );
+        assert_eq!(
+            windows_quote_arg("C:\\Program Files\\"),
+            "\"C:\\Program Files\\\\\""
+        );
+        assert_eq!(windows_quote_arg("foo\\bar"), "foo\\bar");
     }
 }

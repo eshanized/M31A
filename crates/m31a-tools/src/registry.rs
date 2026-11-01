@@ -49,6 +49,8 @@ pub struct ToolRegistry {
     pub compactor: Option<Arc<ContextCompactor>>,
     /// Current message history for context budget calculation (set by engine per turn)
     pub message_history: Option<Arc<Vec<ChatMessage>>>,
+    /// Active session/thread identifier for session-scoped tool execution.
+    pub session_id: Option<String>,
 }
 
 impl Default for ToolRegistry {
@@ -98,6 +100,7 @@ impl ToolRegistry {
             agent_runtime: Arc::new(std::sync::RwLock::new(None)),
             compactor: None,
             message_history: None,
+            session_id: None,
         }
     }
 
@@ -173,6 +176,7 @@ impl ToolRegistry {
             agent_runtime: Arc::new(std::sync::RwLock::new(None)),
             compactor: None,
             message_history: None,
+            session_id: None,
         }
     }
 
@@ -238,6 +242,22 @@ impl ToolRegistry {
 
     pub fn harness(&self) -> Arc<crate::harness::ToolExecutionHarness> {
         Arc::clone(&self.harness)
+    }
+
+    /// Evaluates the granular security and effect classification of a tool invocation.
+    pub fn tool_effect(&self, name: &str, args_str: Option<&str>) -> m31a_execpolicy::ToolEffect {
+        m31a_execpolicy::classify_tool(name, args_str)
+    }
+
+    /// Sets the active session/thread identifier on this registry.
+    pub fn with_session_id(mut self, session_id: impl Into<String>) -> Self {
+        self.session_id = Some(session_id.into());
+        self
+    }
+
+    /// Mutably updates the active session/thread identifier.
+    pub fn set_session_id(&mut self, session_id: impl Into<String>) {
+        self.session_id = Some(session_id.into());
     }
 
     /// Executes a batch of tool calls sequentially or concurrently based on mutability classification.
@@ -3274,7 +3294,13 @@ impl ToolRegistry {
             "todowrite" => {
                 let todo_args: crate::todo::TodoArgs = serde_json::from_value(args.clone())
                     .context("Failed to deserialize 'todowrite' tool arguments")?;
-                let res = crate::todo::execute_todowrite(&todo_args).await?;
+                let sess = self.session_id.as_deref().unwrap_or("default");
+                let res = crate::todo::execute_todowrite_scoped(
+                    sess,
+                    &todo_args,
+                    self.storage.as_ref(),
+                )
+                .await?;
                 Ok(serde_json::to_string_pretty(&res)?)
             }
             "schedule" => {

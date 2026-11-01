@@ -98,7 +98,7 @@ pub async fn run_http_server_with_listener(
             None,
         );
     } else if config.require_auth {
-        let generated = server.auth_manager.generate_token(
+        let _generated = server.auth_manager.generate_token(
             "admin",
             "Auto-generated Admin Token",
             vec![
@@ -109,7 +109,7 @@ pub async fn run_http_server_with_listener(
             ],
             None,
         );
-        info!("M31A HTTP Server generated admin token: {}", generated);
+        info!("M31A HTTP Server initialized admin token (client_id: admin, sha256-hashed)");
     }
 
     info!(
@@ -303,46 +303,52 @@ async fn handle_connection(
 
     // Authenticate sensitive routes
     let client_identity = if config.require_auth {
-        let token_opt = extract_token(&headers, &query_params);
-        let token = match token_opt {
-            Some(t) => t,
-            None => {
-                return send_unauthorized(
-                    &mut write_half,
-                    "missing_token",
-                    "Missing authentication token",
-                    allowed_origin.as_deref(),
-                )
-                .await;
-            }
-        };
+        // SSE route allows either Bearer header or short-lived single-use stream ticket
+        let is_sse_route = (path == "/events" || path == "/api/events") && method == "GET";
+        let bearer_opt = extract_bearer_token(&headers);
 
-        match server.auth_manager.validate_token(&token) {
-            Ok(identity) => identity,
-            Err(e) => {
-                return send_unauthorized(
-                    &mut write_half,
-                    "invalid_token",
-                    &e.to_string(),
-                    allowed_origin.as_deref(),
-                )
-                .await;
+        if let Some(token) = bearer_opt {
+            match server.auth_manager.validate_token(&token) {
+                Ok(identity) => identity,
+                Err(e) => {
+                    return send_unauthorized(
+                        &mut write_half,
+                        "invalid_token",
+                        &e.to_string(),
+                        allowed_origin.as_deref(),
+                    )
+                    .await;
+                }
             }
+        } else if is_sse_route && let Some(ticket) = query_params.get("ticket") {
+            match server.auth_manager.consume_stream_ticket(ticket) {
+                Ok(identity) => identity,
+                Err(e) => {
+                    return send_unauthorized(
+                        &mut write_half,
+                        "invalid_stream_ticket",
+                        &e.to_string(),
+                        allowed_origin.as_deref(),
+                    )
+                    .await;
+                }
+            }
+        } else {
+            return send_unauthorized(
+                &mut write_half,
+                "missing_token",
+                if is_sse_route {
+                    "Missing authentication token: HTTP Authorization header or valid single-use stream ticket required"
+                } else {
+                    "Missing authentication credentials: HTTP Authorization header required (URL query tokens not permitted)"
+                },
+                allowed_origin.as_deref(),
+            )
+            .await;
         }
     } else {
         // Compatibility loopback mode with default admin identity
-        ClientIdentity {
-            client_id: "local_dev".to_string(),
-            label: "Local Development Client".to_string(),
-            scopes: [
-                crate::auth::AuthScope::Read,
-                crate::auth::AuthScope::Write,
-                crate::auth::AuthScope::Admin,
-                crate::auth::AuthScope::Execute,
-            ]
-            .into_iter()
-            .collect(),
-        }
+        ClientIdentity::trusted_local()
     };
 
     // Route dispatch
@@ -361,6 +367,34 @@ async fn handle_connection(
             server,
             client_identity,
             filter_thread_id,
+            allowed_origin.as_deref(),
+        )
+        .await;
+    }
+
+    if (path == "/api/auth/stream-ticket" || path == "/auth/stream-ticket") && method == "POST" {
+        let target_thread = query_params.get("thread_id").cloned();
+        if let Some(ref tid) = target_thread {
+            if let Err(e) = server.auth_manager.require_thread_access(tid, &client_identity) {
+                return send_forbidden(&mut write_half, &e.to_string(), allowed_origin.as_deref()).await;
+            }
+        }
+        let ticket = server.auth_manager.issue_stream_ticket(
+            &client_identity,
+            target_thread.as_deref(),
+            60,
+        );
+        let resp = serde_json::json!({
+            "ticket": ticket,
+            "expires_in_secs": 60
+        });
+        let bytes = serde_json::to_vec(&resp)?;
+        return send_response(
+            &mut write_half,
+            200,
+            "OK",
+            "application/json",
+            &bytes,
             allowed_origin.as_deref(),
         )
         .await;
@@ -633,20 +667,11 @@ fn resolve_cors_origin(origin_header: Option<&str>, config: &HttpServerConfig) -
     }
 }
 
-fn extract_token(
-    headers: &HashMap<String, String>,
-    query_params: &HashMap<String, String>,
-) -> Option<String> {
+fn extract_bearer_token(headers: &HashMap<String, String>) -> Option<String> {
     if let Some(auth_val) = headers.get("authorization")
         && let Some(token) = auth_val.strip_prefix("Bearer ")
     {
         return Some(token.trim().to_string());
-    }
-    if let Some(token) = query_params
-        .get("token")
-        .or_else(|| query_params.get("auth"))
-    {
-        return Some(token.clone());
     }
     None
 }

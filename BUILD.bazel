@@ -31,4 +31,5 @@ m31a_e2e_benchmark(
 # Workspace Verification Test Target
 m31a_test(
     name = "workspace_test",
+    tags = ["local", "no-sandbox"],
 )

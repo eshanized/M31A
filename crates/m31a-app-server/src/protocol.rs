@@ -21,7 +21,7 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JsonRpcRequest {
     pub jsonrpc: String,
     pub id: Option<serde_json::Value>,
@@ -30,7 +30,7 @@ pub struct JsonRpcRequest {
     pub params: Option<serde_json::Value>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JsonRpcResponse {
     pub jsonrpc: String,
     pub id: Option<serde_json::Value>,
@@ -40,7 +40,7 @@ pub struct JsonRpcResponse {
     pub error: Option<JsonRpcError>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JsonRpcError {
     pub code: i64,
     pub message: String,
@@ -97,7 +97,7 @@ impl AppServer {
         let pending_approvals = Arc::new(Mutex::new(HashMap::new()));
         let pending_questions = Arc::new(Mutex::new(HashMap::new()));
         let active_turns = Arc::new(Mutex::new(HashMap::new()));
-        let auth_manager = Arc::new(crate::auth::AuthManager::new());
+        let auth_manager = Arc::new(crate::auth::AuthManager::with_storage(storage.clone()));
         let trust_store = Arc::new(Mutex::new(m31a_trust::TrustStore::new()));
 
         let hooks = Arc::new(m31a_hooks::HookRuntime::new(
@@ -199,7 +199,10 @@ impl AppServer {
             }
 
             let response = match serde_json::from_str::<JsonRpcRequest>(line) {
-                Ok(req) => self.handle_request(req).await,
+                Ok(req) => {
+                    let trusted_local = crate::auth::ClientIdentity::trusted_local();
+                    self.handle_request_with_identity(req, Some(&trusted_local)).await
+                }
                 Err(err) => JsonRpcResponse {
                     jsonrpc: "2.0".to_string(),
                     id: None,
@@ -271,7 +274,12 @@ impl AppServer {
                     }
 
                     let response = match serde_json::from_str::<JsonRpcRequest>(line) {
-                        Ok(req) => server_clone.handle_request(req).await,
+                        Ok(req) => {
+                            let trusted_local = crate::auth::ClientIdentity::trusted_local();
+                            server_clone
+                                .handle_request_with_identity(req, Some(&trusted_local))
+                                .await
+                        }
                         Err(err) => JsonRpcResponse {
                             jsonrpc: "2.0".to_string(),
                             id: None,
@@ -465,15 +473,15 @@ impl AppServer {
         let (method, params): (&str, serde_json::Value) = match ev {
             EngineEvent::ContentChunk(chunk) => (
                 "notification/turn_content_chunk",
-                serde_json::json!({ "turn_id": turn_id, "chunk": chunk }),
+                serde_json::json!({ "turn_id": turn_id, "thread_id": thread_id, "chunk": chunk }),
             ),
             EngineEvent::ReasoningChunk(chunk) => (
                 "notification/turn_reasoning_chunk",
-                serde_json::json!({ "turn_id": turn_id, "chunk": chunk }),
+                serde_json::json!({ "turn_id": turn_id, "thread_id": thread_id, "chunk": chunk }),
             ),
             EngineEvent::ToolCallStarted { id, name, args } => (
                 "notification/tool_started",
-                serde_json::json!({ "turn_id": turn_id, "call_id": id, "tool": name, "arguments": args }),
+                serde_json::json!({ "turn_id": turn_id, "thread_id": thread_id, "call_id": id, "tool": name, "arguments": args }),
             ),
             EngineEvent::ToolCallFinished {
                 id,
@@ -481,15 +489,15 @@ impl AppServer {
                 success,
             } => (
                 "notification/tool_finished",
-                serde_json::json!({ "turn_id": turn_id, "call_id": id, "success": success, "output": output }),
+                serde_json::json!({ "turn_id": turn_id, "thread_id": thread_id, "call_id": id, "success": success, "output": output }),
             ),
             EngineEvent::GuardianDenied { rationale } => (
                 "notification/guardian_denied",
-                serde_json::json!({ "turn_id": turn_id, "rationale": rationale }),
+                serde_json::json!({ "turn_id": turn_id, "thread_id": thread_id, "rationale": rationale }),
             ),
             EngineEvent::Notice(msg, is_warning) => (
                 "notification/notice",
-                serde_json::json!({ "turn_id": turn_id, "message": msg, "warning": is_warning }),
+                serde_json::json!({ "turn_id": turn_id, "thread_id": thread_id, "message": msg, "warning": is_warning }),
             ),
             EngineEvent::ApprovalRequested {
                 approval,
@@ -556,6 +564,7 @@ impl AppServer {
                 "notification/compaction",
                 serde_json::json!({
                     "turn_id": turn_id,
+                    "thread_id": thread_id,
                     "window_id": window_id,
                     "original_tokens": original_tokens,
                     "compacted_tokens": compacted_tokens,
@@ -570,12 +579,12 @@ impl AppServer {
                     .unwrap_or_default();
                 (
                     "notification/turn_message",
-                    serde_json::json!({ "turn_id": turn_id, "message": last, "usage": usage }),
+                    serde_json::json!({ "turn_id": turn_id, "thread_id": thread_id, "message": last, "usage": usage }),
                 )
             }
             EngineEvent::TurnFailed(err) => (
                 "notification/turn_failed",
-                serde_json::json!({ "turn_id": turn_id, "error": err }),
+                serde_json::json!({ "turn_id": turn_id, "thread_id": thread_id, "error": err }),
             ),
         };
 
@@ -600,6 +609,22 @@ impl AppServer {
         identity: Option<&crate::auth::ClientIdentity>,
     ) -> JsonRpcResponse {
         let id = req.id.clone();
+        let params_val = req.params.clone().unwrap_or(serde_json::Value::Null);
+
+        // §2.1: Centralized RPC authorization enforcement before sensitive dispatch
+        if let Err(auth_err) = self.auth_manager.authorize_rpc(&req.method, &params_val, identity) {
+            return JsonRpcResponse {
+                jsonrpc: "2.0".to_string(),
+                id,
+                result: None,
+                error: Some(JsonRpcError {
+                    code: auth_err.jsonrpc_code(),
+                    message: auth_err.to_string(),
+                    data: None,
+                }),
+            };
+        }
+
         match self.dispatch(&req.method, req.params, identity).await {
             Ok(result) => JsonRpcResponse {
                 jsonrpc: "2.0".to_string(),
@@ -673,7 +698,7 @@ impl AppServer {
                 }))
             }
 
-            "config/read" => Ok(serde_json::to_value(&*self.config)?),
+            "config/read" => Ok(self.config.sanitized_value()),
 
             "models/list" | "model/list" => {
                 let catalog = get_nvidia_model_catalog();
@@ -723,9 +748,6 @@ impl AppServer {
                 if let Some(ident) = identity {
                     self.auth_manager
                         .register_thread_owner(&session.metadata.id, &ident.client_id);
-                } else if let Some(client_id) = params.get("client_id").and_then(|v| v.as_str()) {
-                    self.auth_manager
-                        .register_thread_owner(&session.metadata.id, client_id);
                 }
 
                 Ok(serde_json::to_value(&session.metadata)?)
@@ -739,10 +761,6 @@ impl AppServer {
                     .context("Missing 'thread_id'")?;
                 if let Some(ident) = identity {
                     self.auth_manager.require_thread_access(id, ident)?;
-                } else if let Some(client_id) = params.get("client_id").and_then(|v| v.as_str())
-                    && !self.auth_manager.is_thread_owner(id, client_id)
-                {
-                    anyhow::bail!("Access denied: thread '{id}' is owned by another client");
                 }
                 let thread = self
                     .storage
@@ -865,11 +883,18 @@ impl AppServer {
                     .or_else(|| params.get("id"))
                     .and_then(|v| v.as_str())
                     .context("Missing 'thread_id'")?;
+                if let Some(ident) = identity {
+                    self.auth_manager.require_thread_access(parent_id, ident)?;
+                }
                 let new_title = params
                     .get("title")
                     .and_then(|v| v.as_str())
                     .unwrap_or("Forked Session");
                 let forked = self.storage.fork_thread(parent_id, new_title)?;
+                if let Some(ident) = identity {
+                    self.auth_manager
+                        .register_thread_owner(&forked.id, &ident.client_id);
+                }
                 Ok(serde_json::to_value(forked)?)
             }
 
@@ -998,10 +1023,6 @@ impl AppServer {
                     .context("Missing 'thread_id'")?;
                 if let Some(ident) = identity {
                     self.auth_manager.require_thread_access(thread_id, ident)?;
-                } else if let Some(client_id) = params.get("client_id").and_then(|v| v.as_str())
-                    && !self.auth_manager.is_thread_owner(thread_id, client_id)
-                {
-                    anyhow::bail!("Access denied: thread '{thread_id}' is owned by another client");
                 }
                 let prompt = params
                     .get("prompt")
@@ -1631,6 +1652,43 @@ impl AppServer {
                 Ok(serde_json::to_value(recovered)?)
             }
 
+            "auth/stream_ticket" => {
+                let ident = identity.context("Missing authenticated client identity")?;
+                let target_thread = params.get("thread_id").and_then(|v| v.as_str());
+                if let Some(tid) = target_thread {
+                    self.auth_manager.require_thread_access(tid, ident)?;
+                }
+                let ttl_secs = params.get("ttl_secs").and_then(|v| v.as_u64()).unwrap_or(60);
+                let ticket = self.auth_manager.issue_stream_ticket(ident, target_thread, ttl_secs);
+                Ok(serde_json::json!({
+                    "ticket": ticket,
+                    "expires_in_secs": ttl_secs
+                }))
+            }
+
+            "auth/rotate_token" => {
+                let old_token = params
+                    .get("token")
+                    .and_then(|v| v.as_str())
+                    .context("Missing 'token' in params")?;
+                let ttl_secs = params.get("ttl_secs").and_then(|v| v.as_u64());
+                let new_token = self.auth_manager.rotate_token(old_token, ttl_secs)?;
+                Ok(serde_json::json!({
+                    "new_token": new_token
+                }))
+            }
+
+            "auth/revoke_token" => {
+                let token = params
+                    .get("token")
+                    .and_then(|v| v.as_str())
+                    .context("Missing 'token' in params")?;
+                let revoked = self.auth_manager.revoke_token(token);
+                Ok(serde_json::json!({
+                    "revoked": revoked
+                }))
+            }
+
             _ => Err(anyhow!("Method not found: {}", method)),
         }
     }
@@ -1658,19 +1716,25 @@ mod tests {
             params: None,
         };
 
+        // Public method works without identity
         let res = server.handle_request(req).await;
         assert!(res.error.is_none());
         let val = res.result.unwrap();
         assert_eq!(val.get("server_name").unwrap(), "m31a-app-server");
 
-        // Test models/list
+        // Authenticated methods without identity MUST fail closed
         let req_models = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
             id: Some(serde_json::json!(2)),
             method: "models/list".to_string(),
             params: None,
         };
-        let res_models = server.handle_request(req_models).await;
+        let res_models_unauth = server.handle_request(req_models.clone()).await;
+        assert!(res_models_unauth.error.is_some());
+
+        // Authenticated methods with trusted local identity succeed
+        let local_id = crate::auth::ClientIdentity::trusted_local();
+        let res_models = server.handle_request_with_identity(req_models, Some(&local_id)).await;
         assert!(res_models.error.is_none());
 
         // Test thread lifecycle: untrusted workspace fails closed
@@ -1680,7 +1744,7 @@ mod tests {
             method: "thread/create".to_string(),
             params: Some(serde_json::json!({"cwd": "/tmp"})),
         };
-        let res_untrusted = server.handle_request(req_untrusted).await;
+        let res_untrusted = server.handle_request_with_identity(req_untrusted, Some(&local_id)).await;
         assert!(
             res_untrusted.error.is_some(),
             "Untrusted workspace without authorization must fail closed"
@@ -1693,7 +1757,7 @@ mod tests {
             method: "workspace/trust_grant".to_string(),
             params: Some(serde_json::json!({"path": "/tmp", "level": "session_only"})),
         };
-        let res_grant = server.handle_request(req_grant).await;
+        let res_grant = server.handle_request_with_identity(req_grant, Some(&local_id)).await;
         assert!(res_grant.error.is_none());
 
         // Thread creation now succeeds in authorized workspace
@@ -1703,7 +1767,7 @@ mod tests {
             method: "thread/create".to_string(),
             params: Some(serde_json::json!({"cwd": "/tmp"})),
         };
-        let res_thread = server.handle_request(req_thread).await;
+        let res_thread = server.handle_request_with_identity(req_thread, Some(&local_id)).await;
         assert!(res_thread.error.is_none());
         let thread_id = res_thread
             .result
@@ -1721,7 +1785,7 @@ mod tests {
             method: "thread/fork".to_string(),
             params: Some(serde_json::json!({"thread_id": thread_id, "title": "Forked Branch"})),
         };
-        let res_fork = server.handle_request(req_fork).await;
+        let res_fork = server.handle_request_with_identity(req_fork, Some(&local_id)).await;
         assert!(res_fork.error.is_none());
 
         // Test checkpoint creation and notification
@@ -1737,7 +1801,7 @@ mod tests {
                 "modified_files": ["crates/lib.rs"]
             })),
         };
-        let res_cp = server.handle_request(req_cp).await;
+        let res_cp = server.handle_request_with_identity(req_cp, Some(&local_id)).await;
         assert!(res_cp.error.is_none());
         let cp_val = res_cp.result.unwrap();
         let cp_id = cp_val.get("id").unwrap().as_str().unwrap().to_string();
@@ -1757,7 +1821,7 @@ mod tests {
             method: "checkpoint/list".to_string(),
             params: Some(serde_json::json!({ "thread_id": thread_id })),
         };
-        let res_list_cp = server.handle_request(req_list_cp).await;
+        let res_list_cp = server.handle_request_with_identity(req_list_cp, Some(&local_id)).await;
         assert!(res_list_cp.error.is_none());
         let list_val = res_list_cp.result.unwrap();
         assert_eq!(list_val.as_array().unwrap().len(), 1);
@@ -1769,7 +1833,7 @@ mod tests {
             method: "locks/list".to_string(),
             params: None,
         };
-        let res_locks = server.handle_request(req_locks).await;
+        let res_locks = server.handle_request_with_identity(req_locks, Some(&local_id)).await;
         assert!(res_locks.error.is_none());
 
         // Test thread sections RPC
@@ -1783,7 +1847,7 @@ mod tests {
                 "icon": "shield"
             })),
         };
-        let res_sec_create = server.handle_request(req_sec_create).await;
+        let res_sec_create = server.handle_request_with_identity(req_sec_create, Some(&local_id)).await;
         assert!(res_sec_create.error.is_none());
         let sec_id = res_sec_create
             .result
@@ -1800,7 +1864,7 @@ mod tests {
             method: "thread/section/list".to_string(),
             params: None,
         };
-        let res_sec_list = server.handle_request(req_sec_list).await;
+        let res_sec_list = server.handle_request_with_identity(req_sec_list, Some(&local_id)).await;
         assert!(res_sec_list.error.is_none());
         assert!(!res_sec_list.result.unwrap().as_array().unwrap().is_empty());
 
@@ -1813,7 +1877,7 @@ mod tests {
                 "section_id": sec_id
             })),
         };
-        let res_sec_move = server.handle_request(req_sec_move).await;
+        let res_sec_move = server.handle_request_with_identity(req_sec_move, Some(&local_id)).await;
         assert!(res_sec_move.error.is_none());
         assert_eq!(res_sec_move.result.unwrap().get("moved").unwrap(), true);
 
@@ -1858,11 +1922,12 @@ mod tests {
             id: Some(serde_json::json!(11)),
             method: "turn/approve".to_string(),
             params: Some(serde_json::json!({
+                "thread_id": thread_id,
                 "approval_id": appr_id,
                 "decision": "allow",
             })),
         };
-        let res_approve = server.handle_request(req_approve).await;
+        let res_approve = server.handle_request_with_identity(req_approve, Some(&local_id)).await;
         assert!(res_approve.error.is_none());
         assert_eq!(res_approve.result.unwrap().get("resolved").unwrap(), true);
 
@@ -1906,11 +1971,12 @@ mod tests {
             id: Some(serde_json::json!(12)),
             method: "turn/answer".to_string(),
             params: Some(serde_json::json!({
+                "thread_id": thread_id,
                 "question_id": q_id,
                 "answers": ["gRPC"],
             })),
         };
-        let res_answer = server.handle_request(req_answer).await;
+        let res_answer = server.handle_request_with_identity(req_answer, Some(&local_id)).await;
         assert!(res_answer.error.is_none());
         assert_eq!(res_answer.result.unwrap().get("resolved").unwrap(), true);
 
@@ -1935,11 +2001,12 @@ mod tests {
             id: Some(serde_json::json!(13)),
             method: "turn/steer".to_string(),
             params: Some(serde_json::json!({
+                "thread_id": thread_id,
                 "turn_id": "turn_active_1",
                 "message": "Focus on security",
             })),
         };
-        let res_steer = server.handle_request(req_steer).await;
+        let res_steer = server.handle_request_with_identity(req_steer, Some(&local_id)).await;
         assert!(res_steer.error.is_none());
         assert_eq!(steer_rx.recv().await.unwrap(), "Focus on security");
 
@@ -1948,10 +2015,11 @@ mod tests {
             id: Some(serde_json::json!(14)),
             method: "turn/interrupt".to_string(),
             params: Some(serde_json::json!({
+                "thread_id": thread_id,
                 "turn_id": "turn_active_1",
             })),
         };
-        let res_interrupt = server.handle_request(req_interrupt).await;
+        let res_interrupt = server.handle_request_with_identity(req_interrupt, Some(&local_id)).await;
         assert!(res_interrupt.error.is_none());
         assert!(cancel_token.is_cancelled());
 
@@ -1966,7 +2034,7 @@ mod tests {
                 "budget": 50000,
             })),
         };
-        let res_goal = server.handle_request(req_goal).await;
+        let res_goal = server.handle_request_with_identity(req_goal, Some(&local_id)).await;
         assert!(res_goal.error.is_none());
 
         let req_get_goal = JsonRpcRequest {
@@ -1977,7 +2045,7 @@ mod tests {
                 "thread_id": thread_id,
             })),
         };
-        let res_get_goal = server.handle_request(req_get_goal).await;
+        let res_get_goal = server.handle_request_with_identity(req_get_goal, Some(&local_id)).await;
         assert!(res_get_goal.error.is_none());
         assert_eq!(
             res_get_goal.result.unwrap().get("objective").unwrap(),
@@ -1995,7 +2063,7 @@ mod tests {
                 "payload": "Deferred user message",
             })),
         };
-        let res_inbox = server.handle_request(req_inbox).await;
+        let res_inbox = server.handle_request_with_identity(req_inbox, Some(&local_id)).await;
         assert!(res_inbox.error.is_none());
 
         let req_deq = JsonRpcRequest {
@@ -2006,7 +2074,7 @@ mod tests {
                 "thread_id": thread_id,
             })),
         };
-        let res_deq = server.handle_request(req_deq).await;
+        let res_deq = server.handle_request_with_identity(req_deq, Some(&local_id)).await;
         assert!(res_deq.error.is_none());
         assert_eq!(
             res_deq.result.unwrap().get("payload").unwrap(),

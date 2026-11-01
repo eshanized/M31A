@@ -109,7 +109,12 @@ fn test_slash_command_quoted_arguments_with_spaces() {
 #[test]
 fn test_unknown_slash_command_handling() {
     init_theme(ThemeVariant::Dark);
-    let config = Config::default();
+    let config = Config {
+        model: "mock-model".to_string(),
+        model_provider: Some("mock".to_string()),
+        api_key: Some("test_api_key".to_string()),
+        ..Default::default()
+    };
     let mut app = App::new(config).expect("failed to create app");
 
     let count_before = app.transcript.len();

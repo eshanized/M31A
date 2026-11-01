@@ -4,7 +4,33 @@
 //! embedding the canonical 85-model registry from NVIDIA NIM and the M31A Model Registry.
 
 use serde::{Deserialize, Serialize};
-use std::sync::OnceLock;
+use std::sync::{OnceLock, RwLock};
+
+static DYNAMIC_CATALOG: RwLock<Vec<ModelInfo>> = RwLock::new(Vec::new());
+
+/// Registers custom or dynamic models into the model catalog.
+pub fn register_dynamic_models(models: Vec<ModelInfo>) {
+    if let Ok(mut lock) = DYNAMIC_CATALOG.write() {
+        for m in models {
+            if !lock.iter().any(|existing| existing.slug == m.slug) {
+                lock.push(m);
+            }
+        }
+    }
+}
+
+/// Retrieves the complete model catalog, merging static catalog with any dynamically registered models.
+pub fn get_model_catalog() -> Vec<ModelInfo> {
+    let mut models = get_nvidia_model_catalog();
+    if let Ok(lock) = DYNAMIC_CATALOG.read() {
+        for m in lock.iter() {
+            if !models.iter().any(|existing| existing.slug == m.slug) {
+                models.push(m.clone());
+            }
+        }
+    }
+    models
+}
 
 /// Tool calling format expected by the model (standard function call vs custom formatting).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -494,7 +520,7 @@ pub fn get_nvidia_model_catalog() -> Vec<ModelInfo> {
 /// Finds a model by its slug identifier (case-insensitive and prefix-tolerant).
 pub fn find_model(slug: &str) -> Option<ModelInfo> {
     let lower = slug.to_ascii_lowercase();
-    get_nvidia_model_catalog().into_iter().find(|m| {
+    get_model_catalog().into_iter().find(|m| {
         m.slug.eq_ignore_ascii_case(slug)
             || m.slug
                 .split('/')

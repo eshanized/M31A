@@ -86,55 +86,16 @@ fn is_parallel_safe_tool(name: &str) -> bool {
     )
 }
 
-/// Tools strictly prohibited when the agent runs in Plan Mode to enforce read-only exploration and prevent accidental mutations.
+#[cfg(test)]
 fn is_plan_mode_blocked_tool(name: &str) -> bool {
-    matches!(
-        name,
-        "write_file"
-            | "apply_patch"
-            | "edit"
-            | "cloud_deploy"
-            | "supabase_migrate"
-            | "lock_path"
-            | "unlock_path"
-            | "create_worktree"
-            | "remove_worktree"
-            | "notes_write"
-            | "notes_append"
-            | "create_channel"
-            | "post_message"
-            | "delete_secret"
-            | "store_secret"
-    )
+    m31a_execpolicy::evaluate_plan_mode(name, None).is_err()
 }
 
-/// Checks if a shell command issued in Plan mode attempts to mutate files or git state.
+#[cfg(test)]
 fn is_mutating_shell_command(cmd_args: &str) -> bool {
-    let lower = cmd_args.to_lowercase();
-    let mutating_patterns = [
-        "rm ",
-        "mv ",
-        "touch ",
-        "mkdir ",
-        "chmod ",
-        "chown ",
-        "git commit",
-        "git push",
-        "git checkout",
-        "git reset",
-        "git merge",
-        "git rebase",
-        "git branch -d",
-        "git stash pop",
-        "git stash drop",
-        "sed -i",
-        "npm install",
-        "yarn add",
-        "pnpm add",
-        "cargo add",
-    ];
-    mutating_patterns.iter().any(|pat| lower.contains(pat))
+    m31a_execpolicy::evaluate_plan_mode("exec_command", Some(cmd_args)).is_err()
 }
+
 
 /// Guardian reviews every sequential dispatch only when the user opted into
 /// automated supervision (`ApproveForMe`) and a reviewer is configured.
@@ -733,6 +694,7 @@ impl AgentEngine {
         cancel_token: CancellationToken,
         max_turns: usize,
     ) -> Result<()> {
+        self.tools.set_session_id(session_id);
         let tools_def = compose_tool_surface(&self.tools.definitions(), self.code_mode.as_ref());
         let mut total_usage = TokenUsage::default();
         let router = HybridModelRouter::new();
@@ -998,7 +960,7 @@ impl AgentEngine {
 
             // Dynamic model routing (opt-in via `routing_enabled`): classify the task and
             // swap the model per tier. Router tier mapping only yields nvidia_nim models.
-            let turn_client = if self.routing_enabled {
+            let mut turn_client = if self.routing_enabled {
                 let tier = classify_task_tier(&last_user_text(&history), None);
                 let routed = router.route_for_tier(tier);
                 let _ = event_tx.send(EngineEvent::Notice(
@@ -1659,21 +1621,13 @@ impl AgentEngine {
 
                                 // §CollaborationModes: Plan Mode enforcement
                                 if self.collaboration_mode == CollaborationMode::Plan {
-                                    let mut plan_blocked_msg: Option<String> = None;
-                                    if is_plan_mode_blocked_tool(&fn_name) {
-                                        plan_blocked_msg = Some(format!(
-                                            "Tool '{}' is blocked: Agent is in Plan Mode. Mutating files or workspace state is not permitted during planning. Call 'update_plan' to formulate proposed changes or request the user switch to Default/Code Mode.",
-                                            fn_name
-                                        ));
-                                    } else if fn_name == "exec_command"
-                                        && is_mutating_shell_command(&fn_args)
+                                    if let Err(violation) =
+                                        m31a_execpolicy::evaluate_plan_mode(&fn_name, Some(&fn_args))
                                     {
-                                        plan_blocked_msg = Some(
-                                            "Command is blocked: Agent is in Plan Mode. Mutating shell commands are not permitted during planning. Call 'update_plan' to document proposed execution steps or switch to Default/Code Mode.".to_string()
+                                        let blocked_reason = format!(
+                                            "Tool '{}' is blocked: Agent is in Plan Mode. {violation}. Call 'update_plan' to document proposed execution steps or switch to Default/Code Mode.",
+                                            fn_name
                                         );
-                                    }
-
-                                    if let Some(blocked_reason) = plan_blocked_msg {
                                         let _ = event_tx.send(EngineEvent::ToolCallStarted {
                                             id: call_id.clone(),
                                             name: fn_name.clone(),
@@ -1815,9 +1769,14 @@ impl AgentEngine {
                                     args: fn_args.clone(),
                                 });
 
+                                let effective_sandbox = if self.collaboration_mode == CollaborationMode::Plan {
+                                    SandboxPolicy::ReadOnly
+                                } else {
+                                    self.sandbox_policy
+                                };
                                 let res = self
                                     .tools
-                                    .execute(&fn_name, &fn_args, &self.cwd, self.sandbox_policy)
+                                    .execute(&fn_name, &fn_args, &self.cwd, effective_sandbox)
                                     .await;
                                 // §4.4 PostToolUse hook gates result acceptance
                                 // (sequential path; the parallel allowlist skips
@@ -1990,6 +1949,44 @@ impl AgentEngine {
                             break;
                         }
                         _ => {
+                            let err_str = err.to_string();
+                            let is_retryable = err_str.contains("429")
+                                || err_str.contains("rate limit")
+                                || err_str.contains("overloaded")
+                                || err_str.contains("timeout")
+                                || err_str.contains("timed out")
+                                || err_str.contains("503")
+                                || err_str.contains("502")
+                                || err_str.contains("504")
+                                || err_str.contains("connection closed")
+                                || err_str.contains("connection reset");
+
+                            if is_retryable && stream_attempt < 3 {
+                                let tier = classify_task_tier(&last_user_text(&history), None);
+                                if let Some(fallback_cfg) =
+                                    router.fallback_for_failure_tier(turn_client.model(), Some(tier))
+                                {
+                                    let backoff_ms = (stream_attempt + 1) * 1000;
+                                    let _ = event_tx.send(EngineEvent::Notice(
+                                        format!(
+                                            "Provider error on model '{}' ({}); executing fallback failover to '{}' in {}ms",
+                                            turn_client.model(),
+                                            err,
+                                            fallback_cfg.model_id,
+                                            backoff_ms
+                                        ),
+                                        true,
+                                    ));
+                                    turn_client = self.client.with_model(&fallback_cfg.model_id);
+                                    tokio::time::sleep(tokio::time::Duration::from_millis(
+                                        backoff_ms as u64,
+                                    ))
+                                    .await;
+                                    stream_attempt += 1;
+                                    continue;
+                                }
+                            }
+
                             let _ = event_tx.send(EngineEvent::TurnFailed(err.to_string()));
                             break;
                         }
@@ -2393,6 +2390,12 @@ mod tests {
         assert!(is_mutating_shell_command("git commit -m 'wip'"));
         assert!(!is_mutating_shell_command("ls -la"));
         assert!(!is_mutating_shell_command("git status"));
+
+        // Redirection bypasses, subshells, interpreter invocations blocked in Plan Mode
+        assert!(is_mutating_shell_command("echo 'foo' > /tmp/evil"));
+        assert!(is_mutating_shell_command("cat < /dev/null >> test.txt"));
+        assert!(is_mutating_shell_command("$(whoami)"));
+        assert!(is_mutating_shell_command("python3 -c 'import os; os.remove(\"foo\")'"));
     }
 
     #[test]

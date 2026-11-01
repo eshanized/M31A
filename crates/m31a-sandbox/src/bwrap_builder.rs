@@ -274,6 +274,16 @@ impl CanonicalSandboxPlan {
         extra_ro_paths: &[PathBuf],
         hardened_env: &HashMap<String, String>,
     ) -> anyhow::Result<Self> {
+        let abs_cwd = if cwd.is_absolute() {
+            cwd.to_path_buf()
+        } else {
+            std::env::current_dir()
+                .unwrap_or_else(|_| PathBuf::from("/"))
+                .join(cwd)
+        };
+        let abs_cwd = std::fs::canonicalize(&abs_cwd).unwrap_or(abs_cwd);
+        let cwd = &abs_cwd;
+
         let mut bwrap_args = Vec::new();
 
         // 1. Core security unshares
@@ -492,8 +502,9 @@ mod tests {
 
     #[test]
     fn test_canonical_sandbox_plan_equivalence() {
+        let temp_dir = tempfile::tempdir().unwrap();
         let bwrap = PathBuf::from("/usr/bin/bwrap");
-        let cwd = PathBuf::from("/tmp");
+        let cwd = temp_dir.path().to_path_buf();
         let env = HashMap::new();
         let plan = CanonicalSandboxPlan::build(
             &bwrap,

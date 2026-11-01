@@ -50,7 +50,7 @@ pub use process_manager::{
 };
 pub use process_reaper::{ProcessReapReport, reap_zombies, terminate_process_group};
 pub use pty_runner::{PtyProcessHandle, PtySession, PtySize, spawn_command_in_pty};
-pub use runner::{CommandOutput, SandboxRunner};
+pub use runner::{CommandOutput, SandboxCommand, SandboxRunner};
 pub use sandbox_integrity::{IntegrityFinding, SandboxIntegrityChecker};
 pub use sandbox_launcher::{ContainmentStrategy, SandboxEngineCapabilities, SandboxLauncherProbe};
 pub use seccomp_filter::{

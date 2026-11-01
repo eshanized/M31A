@@ -2632,11 +2632,115 @@ fn render_setup_wizard(
                         t.style_accent(true),
                     )));
                 }
+                crate::modals::ConnectivityStatus::AuthenticationFailed => {
+                    let err = state
+                        .connectivity_error
+                        .as_deref()
+                        .unwrap_or("Authentication failed (HTTP 401/403). Check API key.");
+                    lines.push(Line::from(vec![
+                        Span::styled(
+                            format!(
+                                "  {} Authentication Failed: ",
+                                crate::icons::Icon::CircleX.render(t)
+                            ),
+                            t.style_error(true),
+                        ),
+                        Span::styled(err, t.style_error(false)),
+                    ]));
+                    lines.push(Line::from(""));
+                    lines.push(Line::from(Span::styled(
+                        "  The provider rejected your credentials. Press [Esc] to return to Credentials step.",
+                        t.style_warning(false),
+                    )));
+                    lines.push(Line::from(""));
+                    lines.push(Line::from(Span::styled(
+                        "  Press [r] to retry, [Esc] to adjust settings, or [s] to skip verification.",
+                        t.style_muted(),
+                    )));
+                }
+                crate::modals::ConnectivityStatus::ModelUnsupported => {
+                    let err = state
+                        .connectivity_error
+                        .as_deref()
+                        .unwrap_or("Model unsupported or unavailable at this endpoint.");
+                    lines.push(Line::from(vec![
+                        Span::styled(
+                            format!(
+                                "  {} Model Unsupported: ",
+                                crate::icons::Icon::CircleX.render(t)
+                            ),
+                            t.style_error(true),
+                        ),
+                        Span::styled(err, t.style_error(false)),
+                    ]));
+                    lines.push(Line::from(""));
+                    lines.push(Line::from(Span::styled(
+                        "  The endpoint is reachable, but does not provide or support this model ID.",
+                        t.style_warning(false),
+                    )));
+                    lines.push(Line::from(""));
+                    lines.push(Line::from(Span::styled(
+                        "  Press [r] to retry, [Esc] to select another model, or [s] to skip verification.",
+                        t.style_muted(),
+                    )));
+                }
+                crate::modals::ConnectivityStatus::TimedOut => {
+                    let err = state
+                        .connectivity_error
+                        .as_deref()
+                        .unwrap_or("Probe timed out after 8s.");
+                    lines.push(Line::from(vec![
+                        Span::styled(
+                            format!(
+                                "  {} Connection Timed Out: ",
+                                crate::icons::Icon::CircleX.render(t)
+                            ),
+                            t.style_error(true),
+                        ),
+                        Span::styled(err, t.style_error(false)),
+                    ]));
+                    lines.push(Line::from(""));
+                    lines.push(Line::from(Span::styled(
+                        "  Provider did not respond in time. Check endpoint responsiveness or firewall.",
+                        t.style_warning(false),
+                    )));
+                    lines.push(Line::from(""));
+                    lines.push(Line::from(Span::styled(
+                        "  Press [r] to retry, [Esc] to adjust endpoint, or [s] to skip verification.",
+                        t.style_muted(),
+                    )));
+                }
+                crate::modals::ConnectivityStatus::Unreachable => {
+                    let err = state
+                        .connectivity_error
+                        .as_deref()
+                        .unwrap_or("Host unreachable. Network failure or DNS resolution error.");
+                    lines.push(Line::from(vec![
+                        Span::styled(
+                            format!(
+                                "  {} Host Unreachable: ",
+                                crate::icons::Icon::CircleX.render(t)
+                            ),
+                            t.style_error(true),
+                        ),
+                        Span::styled(err, t.style_error(false)),
+                    ]));
+                    lines.push(Line::from(""));
+                    lines.push(Line::from(Span::styled(
+                        "  Could not establish TCP connection to endpoint. Check network connection and URL.",
+                        t.style_warning(false),
+                    )));
+                    lines.push(Line::from(""));
+                    lines.push(Line::from(Span::styled(
+                        "  Press [r] to retry, [Esc] to adjust endpoint, or [s] to skip verification.",
+                        t.style_muted(),
+                    )));
+                }
                 crate::modals::ConnectivityStatus::Failed => {
                     let err = state
                         .connectivity_error
                         .as_deref()
-                        .unwrap_or("Network or authentication error");
+                        .unwrap_or("Network or configuration error");
                     lines.push(Line::from(vec![
                         Span::styled(
                             format!(
@@ -2725,9 +2829,7 @@ fn render_setup_wizard(
                     Span::styled("  • Connectivity:    ", t.style_muted()),
                     if state.skipped_verification {
                         Span::styled("[Verification Skipped by User]", t.style_warning(true))
-                    } else if state.connectivity_status
-                        == crate::modals::ConnectivityStatus::Connected
-                    {
+                    } else if state.connectivity_status.is_success() {
                         if let Some(ref details) = state.connectivity_details {
                             if details.model_verified {
                                 Span::styled(
@@ -2745,9 +2847,8 @@ fn render_setup_wizard(
                         } else {
                             Span::styled("[Verified]", t.style_success(true))
                         }
-                    } else if state.connectivity_status == crate::modals::ConnectivityStatus::Failed
-                    {
-                        Span::styled("[Verification Failed]", t.style_error(true))
+                    } else if state.connectivity_status.is_failure() {
+                        Span::styled(format!("[{}]", state.connectivity_status.label()), t.style_error(true))
                     } else {
                         Span::styled("[Not Tested]", t.style_warning(false))
                     },
@@ -2827,9 +2928,9 @@ fn render_setup_wizard(
             "↑↓: Switch Setting  │  ←→/Space: Change Option  │  Enter: Next  │  Esc: Back"
         }
         crate::modals::SetupStep::Connectivity => {
-            if state.connectivity_status == crate::modals::ConnectivityStatus::Connected {
+            if state.connectivity_status.is_success() {
                 "Enter: Proceed to Review  │  r: Retest  │  Esc: Back"
-            } else if state.connectivity_status == crate::modals::ConnectivityStatus::Failed {
+            } else if state.connectivity_status.is_failure() {
                 "r: Retry  │  s: Skip Verification  │  Esc: Back (Enter disabled on failure)"
             } else {
                 "Enter/t: Probe Connection  │  r: Retry  │  s: Skip Verification  │  Esc: Back"

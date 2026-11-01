@@ -253,7 +253,11 @@ mod tests {
             .execute_batch(script, &registry, &cwd, policy)
             .await
             .unwrap();
-        assert!(res.contains("Starting orchestration..."));
+        assert!(
+            res.contains("Starting orchestration..."),
+            "res did not contain expected text. Got: {:?}",
+            res
+        );
         assert!(res.contains(">>> Tool: read_file"));
         assert_eq!(orch.load("counter"), Some(serde_json::json!(42)));
     }

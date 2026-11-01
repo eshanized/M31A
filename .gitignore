@@ -17,3 +17,18 @@ dist/
 .m31a/
 bazel-*
 
+# Benchmark & test runtime outputs
+benchmark_results.json
+benchmark*.json
+*.profraw
+*.profdata
+
+# Python cache & bytecode
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Local Bazel configuration
+.bazelrc.local
+user.bazelrc
+

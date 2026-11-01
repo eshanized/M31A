@@ -76,6 +76,17 @@ pub struct ThreadSectionRecord {
     pub created_at: i64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionTodoRecord {
+    pub id: String,
+    pub thread_id: String,
+    pub content: String,
+    pub status: String,
+    pub position: i64,
+    pub created_at_epoch_ms: i64,
+    pub updated_at_epoch_ms: i64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Goal {
     pub thread_id: String,
@@ -334,51 +345,56 @@ impl Storage {
         sandbox: &str,
         approval: &str,
     ) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            r#"
-            INSERT OR REPLACE INTO threads (
-                id, rollout_path, created_at, updated_at, source, model_provider, cwd, title, sandbox_policy, approval_mode, is_archived, parent_thread_id
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 0, NULL)
-            "#,
-            params![
-                meta.id,
-                rollout_path,
-                meta.created_at.timestamp(),
-                meta.updated_at.timestamp(),
-                "m31a-cli",
-                meta.model,
-                meta.cwd,
-                meta.title,
-                sandbox,
-                approval
-            ],
-        )?;
-
-        // §6.1: best-effort session-meta rollout record, embedding the git
-        // identity of the thread (upstream session meta carries commit/branch).
-        if self.rollout_root().is_some() {
-            let git = {
-                let run = |args: &[&str]| -> Option<String> {
-                    let out = std::process::Command::new("git")
-                        .args(args)
-                        .current_dir(&meta.cwd)
-                        .output()
-                        .ok()?;
-                    if out.status.success() {
-                        Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
-                    } else {
-                        None
-                    }
-                };
-                let branch = run(&["rev-parse", "--abbrev-ref", "HEAD"]);
-                let commit = run(&["rev-parse", "HEAD"]);
-                if branch.is_none() && commit.is_none() {
-                    None
+        // §9.1: Resolve external metadata outside the database connection critical section
+        let git_meta = if self.rollout_root().is_some() {
+            let run = |args: &[&str]| -> Option<String> {
+                let out = std::process::Command::new("git")
+                    .args(args)
+                    .current_dir(&meta.cwd)
+                    .output()
+                    .ok()?;
+                if out.status.success() {
+                    Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
                 } else {
-                    Some(serde_json::json!({ "branch": branch, "commit": commit }))
+                    None
                 }
             };
+            let branch = run(&["rev-parse", "--abbrev-ref", "HEAD"]);
+            let commit = run(&["rev-parse", "HEAD"]);
+            if branch.is_none() && commit.is_none() {
+                None
+            } else {
+                Some(serde_json::json!({ "branch": branch, "commit": commit }))
+            }
+        } else {
+            None
+        };
+
+        {
+            let conn = self.conn.lock().unwrap();
+            conn.execute(
+                r#"
+                INSERT OR REPLACE INTO threads (
+                    id, rollout_path, created_at, updated_at, source, model_provider, cwd, title, sandbox_policy, approval_mode, is_archived, parent_thread_id
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 0, NULL)
+                "#,
+                params![
+                    meta.id,
+                    rollout_path,
+                    meta.created_at.timestamp(),
+                    meta.updated_at.timestamp(),
+                    "m31a-cli",
+                    meta.model,
+                    meta.cwd,
+                    meta.title,
+                    sandbox,
+                    approval
+                ],
+            )?;
+        }
+
+        // §6.1 / §9.1: Best-effort session-meta rollout record mirrored outside the database mutex
+        if self.rollout_root().is_some() {
             self.mirror_rollout(
                 &meta.id,
                 "session_meta",
@@ -389,7 +405,7 @@ impl Storage {
                     "cwd": meta.cwd,
                     "sandbox": sandbox,
                     "approval": approval,
-                    "git": git,
+                    "git": git_meta,
                 }),
             );
         }
@@ -484,6 +500,92 @@ impl Storage {
         let conn = self.conn.lock().unwrap();
         conn.execute("DELETE FROM threads WHERE id = ?1", params![id])?;
         Ok(())
+    }
+
+    pub fn set_thread_owner(&self, thread_id: &str, client_id: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let now = chrono::Utc::now().timestamp_millis();
+        conn.execute(
+            r#"
+            INSERT OR REPLACE INTO thread_ownership (thread_id, owner_client_id, created_at_epoch_ms, updated_at_epoch_ms)
+            VALUES (?1, ?2, COALESCE((SELECT created_at_epoch_ms FROM thread_ownership WHERE thread_id = ?1), ?3), ?3)
+            "#,
+            params![thread_id, client_id, now],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_thread_owner(&self, thread_id: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT owner_client_id FROM thread_ownership WHERE thread_id = ?1")?;
+        let res = stmt.query_row(params![thread_id], |row| row.get(0)).optional()?;
+        Ok(res)
+    }
+
+    pub fn list_thread_owners(&self) -> Result<std::collections::HashMap<String, String>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT thread_id, owner_client_id FROM thread_ownership")?;
+        let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        let mut map = std::collections::HashMap::new();
+        for r in rows {
+            let (k, v) = r?;
+            map.insert(k, v);
+        }
+        Ok(map)
+    }
+
+    pub fn save_session_todos(&self, thread_id: &str, todos: &[SessionTodoRecord]) -> Result<()> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        tx.execute("DELETE FROM session_todos WHERE thread_id = ?1", params![thread_id])?;
+        let now = chrono::Utc::now().timestamp_millis();
+        for (idx, item) in todos.iter().enumerate() {
+            tx.execute(
+                r#"
+                INSERT INTO session_todos (id, thread_id, content, status, position, created_at_epoch_ms, updated_at_epoch_ms)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                "#,
+                params![
+                    item.id,
+                    thread_id,
+                    item.content,
+                    item.status,
+                    idx as i64,
+                    if item.created_at_epoch_ms > 0 { item.created_at_epoch_ms } else { now },
+                    now
+                ],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn get_session_todos(&self, thread_id: &str) -> Result<Vec<SessionTodoRecord>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT id, thread_id, content, status, position, created_at_epoch_ms, updated_at_epoch_ms
+            FROM session_todos
+            WHERE thread_id = ?1
+            ORDER BY position ASC
+            "#,
+        )?;
+        let rows = stmt.query_map(params![thread_id], |row| {
+            Ok(SessionTodoRecord {
+                id: row.get(0)?,
+                thread_id: row.get(1)?,
+                content: row.get(2)?,
+                status: row.get(3)?,
+                position: row.get(4)?,
+                created_at_epoch_ms: row.get(5)?,
+                updated_at_epoch_ms: row.get(6)?,
+            })
+        })?;
+        let mut list = Vec::new();
+        for r in rows {
+            list.push(r?);
+        }
+        Ok(list)
     }
 
     pub fn fork_thread(&self, parent_id: &str, new_title: &str) -> Result<ThreadRecord> {

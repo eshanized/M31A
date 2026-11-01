@@ -44,6 +44,7 @@ use crate::turn_loop::{AgentEngine, EngineEvent};
 /// reservation, upstream `max_threads`).
 const MAX_CONCURRENT_THREADS: usize = 8;
 /// Maximum spawn-tree depth: root engine → child = depth 1, grandchild = 2.
+#[cfg(test)]
 const MAX_SPAWN_DEPTH: usize = 3;
 /// Turn budget for a child agent's single `run_turn`.
 const CHILD_MAX_TURNS: usize = 20;
@@ -51,7 +52,7 @@ const CHILD_MAX_TURNS: usize = 20;
 /// A reserved concurrency slot for one running child agent. Releases the
 /// slot exactly once: either explicitly via [`SpawnSlot::release`] or on
 /// drop (whichever comes first).
-struct SpawnSlot {
+pub struct SpawnSlot {
     counter: Arc<AtomicUsize>,
     released: bool,
 }
@@ -75,6 +76,25 @@ impl Drop for SpawnSlot {
 }
 
 pub use m31a_core::types::{AgentRunStatus, TreeTerminationReport};
+
+/// Closure signature for parent-mediated approval of subagent actions.
+pub type ApprovalMediator = Arc<
+    dyn Fn(
+            &str, // subagent_id
+            &crate::turn_loop::PendingApproval,
+        ) -> Option<m31a_elicitation::ApprovalDecision>
+        + Send
+        + Sync,
+>;
+
+/// Approval request forwarded from a subagent to its parent or orchestrator.
+#[derive(Debug)]
+pub struct ChildApprovalRequest {
+    pub agent_id: String,
+    pub parent_agent_id: Option<String>,
+    pub approval: crate::turn_loop::PendingApproval,
+    pub response_tx: tokio::sync::oneshot::Sender<m31a_elicitation::ApprovalDecision>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InputQueueActivity {
@@ -122,6 +142,14 @@ pub struct EngineAgentRuntime {
     active_count: Arc<AtomicUsize>,
     worktree_mgr: Option<Arc<m31a_storage::WorktreeManager>>,
     pub trust_store: Arc<Mutex<m31a_trust::TrustStore>>,
+    /// Multi-agent resource governance policies.
+    pub governance: m31a_core::ResourceGovernance,
+    /// Atomically tracked token usage aggregated across all running child agents.
+    pub aggregate_tokens: Arc<AtomicUsize>,
+    /// Optional parent-mediated approval request channel.
+    child_approval_tx: Option<mpsc::UnboundedSender<ChildApprovalRequest>>,
+    /// Optional parent-mediated approval decision handler.
+    approval_mediator: Option<ApprovalMediator>,
 }
 
 impl EngineAgentRuntime {
@@ -137,6 +165,12 @@ impl EngineAgentRuntime {
         max_depth: u32,
     ) -> Self {
         let base_client = base_client.into();
+        let governance = m31a_core::ResourceGovernance {
+            max_spawn_depth: max_depth as usize,
+            max_concurrent_threads: MAX_CONCURRENT_THREADS,
+            max_child_turns: CHILD_MAX_TURNS,
+            max_aggregate_tokens: None,
+        };
         Self {
             base_client,
             tools,
@@ -150,7 +184,68 @@ impl EngineAgentRuntime {
             active_count: Arc::new(AtomicUsize::new(0)),
             worktree_mgr: None,
             trust_store: Arc::new(Mutex::new(m31a_trust::TrustStore::new())),
+            governance,
+            aggregate_tokens: Arc::new(AtomicUsize::new(0)),
+            child_approval_tx: None,
+            approval_mediator: None,
         }
+    }
+
+    /// Construct a new runtime with explicit resource governance configuration.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_governance(
+        base_client: impl Into<ProviderClient>,
+        tools: ToolRegistry,
+        storage: Storage,
+        exec_policy: ExecPolicy,
+        cwd: PathBuf,
+        hooks: Option<Arc<m31a_hooks::HookRuntime>>,
+        context_window: usize,
+        governance: m31a_core::ResourceGovernance,
+    ) -> Result<Self> {
+        governance.validate().map_err(|e| anyhow!(e))?;
+        let max_depth = governance.max_spawn_depth as u32;
+        let mut rt = Self::new(
+            base_client,
+            tools,
+            storage,
+            exec_policy,
+            cwd,
+            hooks,
+            context_window,
+            max_depth,
+        );
+        rt.governance = governance;
+        Ok(rt)
+    }
+
+    /// Attach a resource governance configuration.
+    pub fn with_governance(mut self, governance: m31a_core::ResourceGovernance) -> Self {
+        self.max_depth = governance.max_spawn_depth as u32;
+        self.governance = governance;
+        self
+    }
+
+    /// Attach a parent approval mediator for subagent actions.
+    pub fn with_approval_mediator(mut self, mediator: ApprovalMediator) -> Self {
+        self.approval_mediator = Some(mediator);
+        self
+    }
+
+    /// Attach an approval request channel for asynchronous parent supervision.
+    pub fn with_approval_channel(mut self, tx: mpsc::UnboundedSender<ChildApprovalRequest>) -> Self {
+        self.child_approval_tx = Some(tx);
+        self
+    }
+
+    /// Returns current aggregate tokens consumed across all child agents.
+    pub fn aggregate_tokens(&self) -> usize {
+        self.aggregate_tokens.load(Ordering::SeqCst)
+    }
+
+    /// Atomically records tokens consumed by a child agent.
+    pub fn record_tokens(&self, count: usize) -> usize {
+        self.aggregate_tokens.fetch_add(count, Ordering::SeqCst) + count
     }
 
     /// Attach a trust store for workspace authorization evaluation.
@@ -213,16 +308,15 @@ impl EngineAgentRuntime {
             .map(|c| c.transcript.lock().unwrap().clone())
     }
 
-    /// Spawn-slot reservation (upstream `max_threads` semantics). The returned
-    /// guard releases its slot exactly once (on [`SpawnSlot::release`] or
-    /// drop); the child task owns it so early returns never leak a slot.
-    fn reserve_slot(&self) -> Result<SpawnSlot> {
+    /// Spawn-slot reservation (governance max_concurrent_threads semantics).
+    pub fn reserve_slot(&self) -> Result<SpawnSlot> {
         let prev = self.active_count.fetch_add(1, Ordering::SeqCst);
-        if prev + 1 > MAX_CONCURRENT_THREADS {
+        let max_threads = self.governance.max_concurrent_threads;
+        if prev >= max_threads {
             self.active_count.fetch_sub(1, Ordering::SeqCst);
             return Err(anyhow!(
                 "Spawn rejected: {} concurrent agent limit reached (close or wait for agents first)",
-                MAX_CONCURRENT_THREADS
+                max_threads
             ));
         }
         Ok(SpawnSlot {
@@ -231,19 +325,40 @@ impl EngineAgentRuntime {
         })
     }
 
-    pub fn ensure_depth(depth: usize) -> Result<()> {
-        if depth > MAX_SPAWN_DEPTH {
+    pub fn ensure_depth(&self, depth: usize) -> Result<()> {
+        let max = self.governance.max_spawn_depth;
+        if depth > max {
             return Err(anyhow!(
                 "Spawn rejected: depth limit {} exceeded (agent tree too deep)",
-                MAX_SPAWN_DEPTH
+                max
             ));
         }
         Ok(())
     }
 
-    /// Folds one engine event into the child's transcript; returns the final
-    /// answer when `TurnComplete` carries one.
-    fn fold_event(event: EngineEvent, transcript: &mut Vec<String>) -> Option<String> {
+    /// Static depth gate check helper.
+    pub fn ensure_depth_limit(depth: usize, max_depth: usize) -> Result<()> {
+        if depth > max_depth {
+            return Err(anyhow!(
+                "Spawn rejected: depth limit {} exceeded (agent tree too deep)",
+                max_depth
+            ));
+        }
+        Ok(())
+    }
+
+    /// Folds one engine event into the child's transcript with parent approval mediation and token tracking.
+    #[allow(clippy::too_many_arguments)]
+    pub fn fold_event_mediated(
+        agent_id: &str,
+        event: EngineEvent,
+        transcript: &mut Vec<String>,
+        approval_mediator: Option<&ApprovalMediator>,
+        child_approval_tx: Option<&mpsc::UnboundedSender<ChildApprovalRequest>>,
+        parent_agent_id: Option<&str>,
+        aggregate_tokens: &Arc<AtomicUsize>,
+        max_aggregate_tokens: Option<usize>,
+    ) -> Option<String> {
         match event {
             EngineEvent::ContentChunk(chunk) => {
                 transcript.push(chunk);
@@ -257,7 +372,6 @@ impl EngineAgentRuntime {
             EngineEvent::ToolCallFinished {
                 output, success, ..
             } => {
-                // Tail-truncate tool chatter safely across UTF-8 boundaries to keep wait results readable.
                 let out = safe_tail_truncate(&output, 400);
                 transcript.push(format!(
                     "[tool {}] {}",
@@ -278,13 +392,64 @@ impl EngineAgentRuntime {
                 ));
                 None
             }
-            // Defensive: children are configured non-interactive, but an
-            // unanswered oneshot would deadlock run_turn forever — auto-deny.
-            EngineEvent::ApprovalRequested { response_tx, .. } => {
-                let _ = response_tx.send(m31a_elicitation::ApprovalDecision::Deny {
-                    reason: "Subagent cannot request interactive approval".to_string(),
-                });
-                transcript.push("[approval auto-denied]".to_string());
+            EngineEvent::ApprovalRequested {
+                approval,
+                response_tx,
+            } => {
+                // 1. If an explicit child approval channel is wired, forward request to parent
+                if let Some(tx) = child_approval_tx {
+                    let req = ChildApprovalRequest {
+                        agent_id: agent_id.to_string(),
+                        parent_agent_id: parent_agent_id.map(|s| s.to_string()),
+                        approval: approval.clone(),
+                        response_tx,
+                    };
+                    if tx.send(req).is_ok() {
+                        transcript.push(format!(
+                            "[approval forwarded to parent for '{}']",
+                            approval.tool_call.function.name
+                        ));
+                    }
+                    return None;
+                }
+
+                // 2. If a parent approval mediator callback is configured, delegate decision
+                if let Some(mediator) = approval_mediator {
+                    if let Some(decision) = mediator(agent_id, &approval) {
+                        let is_approve =
+                            !matches!(decision, m31a_elicitation::ApprovalDecision::Deny { .. });
+                        let _ = response_tx.send(decision);
+                        transcript.push(format!(
+                            "[approval mediated by parent: {}]",
+                            if is_approve { "approved" } else { "denied" }
+                        ));
+                        return None;
+                    }
+                }
+
+                // 3. Fallback: classify tool effect; auto-approve read-only, deny mutating tools fail-closed
+                let effect = m31a_execpolicy::classify_tool(
+                    &approval.tool_call.function.name,
+                    Some(&approval.tool_call.function.arguments),
+                );
+                if effect == m31a_execpolicy::ToolEffect::ReadOnly {
+                    let _ = response_tx.send(m31a_elicitation::ApprovalDecision::AllowOnce);
+                    transcript.push(format!(
+                        "[approval auto-approved read-only tool '{}']",
+                        approval.tool_call.function.name
+                    ));
+                } else {
+                    let _ = response_tx.send(m31a_elicitation::ApprovalDecision::Deny {
+                        reason: format!(
+                            "Subagent '{}' cannot execute mutating tool '{}' without parent interactive approval",
+                            agent_id, approval.tool_call.function.name
+                        ),
+                    });
+                    transcript.push(format!(
+                        "[approval denied for '{}': requires parent approval]",
+                        approval.tool_call.function.name
+                    ));
+                }
                 None
             }
             EngineEvent::QuestionRequested { response_tx, .. } => {
@@ -296,17 +461,48 @@ impl EngineAgentRuntime {
                 transcript.push("[context compacted]".to_string());
                 None
             }
-            EngineEvent::TurnComplete { messages, .. } => messages
-                .iter()
-                .rev()
-                .find(|m| m.role == Role::Assistant)
-                .and_then(|m| m.content.clone())
-                .filter(|c| !c.trim().is_empty()),
+            EngineEvent::TurnComplete { messages, .. } => {
+                let estimated_tokens: usize = messages
+                    .iter()
+                    .map(|m| m.content.as_ref().map(|c| c.len() / 4).unwrap_or(0))
+                    .sum();
+                let new_total = aggregate_tokens.fetch_add(estimated_tokens, Ordering::SeqCst)
+                    + estimated_tokens;
+                if let Some(max) = max_aggregate_tokens {
+                    if new_total > max {
+                        transcript.push(format!(
+                            "[governance: aggregate token budget {} exceeded (total: {})]",
+                            max, new_total
+                        ));
+                    }
+                }
+                messages
+                    .iter()
+                    .rev()
+                    .find(|m| m.role == Role::Assistant)
+                    .and_then(|m| m.content.clone())
+                    .filter(|c| !c.trim().is_empty())
+            }
             EngineEvent::TurnFailed(e) => {
                 transcript.push(format!("[turn failed] {e}"));
                 None
             }
         }
+    }
+
+    /// Backwards-compatible event fold helper.
+    pub fn fold_event(event: EngineEvent, transcript: &mut Vec<String>) -> Option<String> {
+        let dummy_tokens = Arc::new(AtomicUsize::new(0));
+        Self::fold_event_mediated(
+            "agent",
+            event,
+            transcript,
+            None,
+            None,
+            None,
+            &dummy_tokens,
+            None,
+        )
     }
 }
 
@@ -353,11 +549,11 @@ impl AgentRuntime for EngineAgentRuntime {
         } else {
             self.caller_depth(caller.as_deref()) + 1
         };
-        // Use max_depth from request if provided, otherwise use constant
+        // Use max_depth from request if provided, otherwise use governance
         let max_depth = if req.max_depth > 0 {
             req.max_depth as usize
         } else {
-            MAX_SPAWN_DEPTH
+            self.governance.max_spawn_depth
         };
         if depth > max_depth {
             return Err(anyhow!(
@@ -366,7 +562,19 @@ impl AgentRuntime for EngineAgentRuntime {
                 depth
             ));
         }
-        Self::ensure_depth(depth)?;
+        self.ensure_depth(depth)?;
+
+        // Enforce aggregate token budget before reserving a slot
+        if let Some(max_tokens) = self.governance.max_aggregate_tokens {
+            let current = self.aggregate_tokens.load(Ordering::SeqCst);
+            if current >= max_tokens {
+                return Err(anyhow!(
+                    "Spawn rejected: Aggregate token budget limit of {} reached (current: {})",
+                    max_tokens,
+                    current
+                ));
+            }
+        }
 
         // Spawn-slot reservation (upstream max_threads semantics). The guard
         // is handed to the child task, which releases it when run_turn ends.
@@ -551,8 +759,37 @@ impl AgentRuntime for EngineAgentRuntime {
         let task_cell = cell.clone();
         let task_worktree = child_worktree.clone();
         let task_wt_mgr = self.worktree_mgr.clone();
+        let task_child_max_turns = self.governance.max_child_turns;
+        let task_approval_mediator = self.approval_mediator.clone();
+        let task_child_approval_tx = self.child_approval_tx.clone();
+        let task_parent = cell.parent.clone();
+        let task_aggregate_tokens = Arc::clone(&self.aggregate_tokens);
+        let task_max_aggregate_tokens = self.governance.max_aggregate_tokens;
+
         tokio::spawn(async move {
             let (event_tx, mut event_rx) = mpsc::unbounded_channel::<EngineEvent>();
+            let transcript_holder = Arc::new(Mutex::new(Vec::new()));
+            let transcript_clone = Arc::clone(&transcript_holder);
+
+            let drain_agent_id = task_agent_id.clone();
+            let drain_handle = tokio::spawn(async move {
+                while let Some(event) = event_rx.recv().await {
+                    let mut lock = transcript_clone.lock().unwrap();
+                    if let Some(final_answer) = EngineAgentRuntime::fold_event_mediated(
+                        &drain_agent_id,
+                        event,
+                        &mut lock,
+                        task_approval_mediator.as_ref(),
+                        task_child_approval_tx.as_ref(),
+                        task_parent.as_deref(),
+                        &task_aggregate_tokens,
+                        task_max_aggregate_tokens,
+                    ) {
+                        lock.push(final_answer);
+                    }
+                }
+            });
+
             let result = CALLER_AGENT_ID
                 .scope(
                     task_agent_id.clone(),
@@ -562,18 +799,13 @@ impl AgentRuntime for EngineAgentRuntime {
                         event_tx,
                         steer_rx,
                         cancel_token,
-                        CHILD_MAX_TURNS,
+                        task_child_max_turns,
                     ),
                 )
                 .await;
 
-            // Drain every event into the transcript; capture the final answer.
-            let mut transcript = Vec::new();
-            while let Some(event) = event_rx.recv().await {
-                if let Some(final_answer) = EngineAgentRuntime::fold_event(event, &mut transcript) {
-                    transcript.push(final_answer.clone());
-                }
-            }
+            let _ = drain_handle.await;
+            let transcript = transcript_holder.lock().unwrap().clone();
 
             let was_cancelled = task_cell.cancel_token.is_cancelled();
             let mut status = match &result {
@@ -801,7 +1033,7 @@ impl AgentRuntime for EngineAgentRuntime {
         // Collect target and all descendants from storage and active in-memory cells
         let mut to_close = vec![agent_id.to_string()];
         let mut frontier = vec![agent_id.to_string()];
-        for _ in 0..MAX_SPAWN_DEPTH + 1 {
+        for _ in 0..self.governance.max_spawn_depth + 1 {
             let mut next = Vec::new();
             for parent in &frontier {
                 if let Ok(children) = self.storage.list_spawn_children(parent, None) {
@@ -1172,9 +1404,10 @@ mod tests {
 
     #[test]
     fn test_depth_gate() {
-        assert!(EngineAgentRuntime::ensure_depth(1).is_ok());
-        assert!(EngineAgentRuntime::ensure_depth(MAX_SPAWN_DEPTH).is_ok());
-        assert!(EngineAgentRuntime::ensure_depth(MAX_SPAWN_DEPTH + 1).is_err());
+        let rt = test_runtime();
+        assert!(rt.ensure_depth(1).is_ok());
+        assert!(rt.ensure_depth(MAX_SPAWN_DEPTH).is_ok());
+        assert!(rt.ensure_depth(MAX_SPAWN_DEPTH + 1).is_err());
     }
 
     #[test]
@@ -1565,5 +1798,184 @@ mod tests {
         assert!(truncated.len() <= 400 + '…'.len_utf8());
         // Verify valid UTF-8
         std::str::from_utf8(truncated.as_bytes()).unwrap();
+    }
+
+    #[test]
+    fn test_resource_governance_validation_and_application() {
+        let gov = m31a_core::ResourceGovernance {
+            max_concurrent_threads: 4,
+            max_spawn_depth: 2,
+            max_child_turns: 10,
+            max_aggregate_tokens: Some(50_000),
+        };
+        assert!(gov.validate().is_ok());
+
+        let invalid = m31a_core::ResourceGovernance {
+            max_concurrent_threads: 0,
+            max_spawn_depth: 2,
+            max_child_turns: 10,
+            max_aggregate_tokens: None,
+        };
+        assert!(invalid.validate().is_err());
+
+        let rt = test_runtime().with_governance(gov.clone());
+        assert_eq!(rt.governance.max_concurrent_threads, 4);
+        assert_eq!(rt.governance.max_spawn_depth, 2);
+        assert_eq!(rt.governance.max_child_turns, 10);
+        assert_eq!(rt.governance.max_aggregate_tokens, Some(50_000));
+    }
+
+    #[tokio::test]
+    async fn test_parent_mediated_approval_flow() {
+        let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
+        let approval = crate::turn_loop::PendingApproval {
+            tool_call: m31a_core::types::ToolCall {
+                id: "call-1".to_string(),
+                call_type: "function".to_string(),
+                function: m31a_core::types::FunctionCall {
+                    name: "write_file".to_string(),
+                    arguments: r#"{"path": "test.txt", "content": "hello"}"#.to_string(),
+                },
+            },
+            reason: "Mutating file write".to_string(),
+            command: None,
+        };
+        let event = EngineEvent::ApprovalRequested {
+            approval,
+            response_tx: resp_tx,
+        };
+
+        let mediator: ApprovalMediator = Arc::new(|_agent_id, pending| {
+            if pending.tool_call.function.name == "write_file" {
+                Some(m31a_elicitation::ApprovalDecision::AllowOnce)
+            } else {
+                Some(m31a_elicitation::ApprovalDecision::Deny {
+                    reason: "Not permitted".to_string(),
+                })
+            }
+        });
+
+        let mut transcript = Vec::new();
+        let tokens = Arc::new(AtomicUsize::new(0));
+        let res = EngineAgentRuntime::fold_event_mediated(
+            "child_1",
+            event,
+            &mut transcript,
+            Some(&mediator),
+            None,
+            None,
+            &tokens,
+            None,
+        );
+        assert!(res.is_none());
+        assert!(transcript[0].contains("[approval mediated by parent: approved]"));
+
+        let decision = resp_rx.await.unwrap();
+        assert!(matches!(
+            decision,
+            m31a_elicitation::ApprovalDecision::AllowOnce
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_subagent_unapproved_mutation_denied_fail_closed() {
+        let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
+        let approval = crate::turn_loop::PendingApproval {
+            tool_call: m31a_core::types::ToolCall {
+                id: "call-2".to_string(),
+                call_type: "function".to_string(),
+                function: m31a_core::types::FunctionCall {
+                    name: "write_file".to_string(),
+                    arguments: r#"{"path": "test.txt"}"#.to_string(),
+                },
+            },
+            reason: "Mutating file write".to_string(),
+            command: None,
+        };
+        let event = EngineEvent::ApprovalRequested {
+            approval,
+            response_tx: resp_tx,
+        };
+
+        let mut transcript = Vec::new();
+        let tokens = Arc::new(AtomicUsize::new(0));
+        // No mediator and no channel -> fail-closed denial
+        EngineAgentRuntime::fold_event_mediated(
+            "child_2",
+            event,
+            &mut transcript,
+            None,
+            None,
+            None,
+            &tokens,
+            None,
+        );
+        assert!(transcript[0].contains("[approval denied for 'write_file': requires parent approval]"));
+
+        let decision = resp_rx.await.unwrap();
+        assert!(matches!(
+            decision,
+            m31a_elicitation::ApprovalDecision::Deny { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_subagent_read_only_tool_auto_approved() {
+        let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
+        let approval = crate::turn_loop::PendingApproval {
+            tool_call: m31a_core::types::ToolCall {
+                id: "call-3".to_string(),
+                call_type: "function".to_string(),
+                function: m31a_core::types::FunctionCall {
+                    name: "read_file".to_string(),
+                    arguments: r#"{"path": "README.md"}"#.to_string(),
+                },
+            },
+            reason: "Read file".to_string(),
+            command: None,
+        };
+        let event = EngineEvent::ApprovalRequested {
+            approval,
+            response_tx: resp_tx,
+        };
+
+        let mut transcript = Vec::new();
+        let tokens = Arc::new(AtomicUsize::new(0));
+        EngineAgentRuntime::fold_event_mediated(
+            "child_3",
+            event,
+            &mut transcript,
+            None,
+            None,
+            None,
+            &tokens,
+            None,
+        );
+        assert!(transcript[0].contains("[approval auto-approved read-only tool 'read_file']"));
+
+        let decision = resp_rx.await.unwrap();
+        assert!(matches!(
+            decision,
+            m31a_elicitation::ApprovalDecision::AllowOnce
+        ));
+    }
+
+    #[test]
+    fn test_aggregate_token_budget_enforcement() {
+        let gov = m31a_core::ResourceGovernance {
+            max_concurrent_threads: 4,
+            max_spawn_depth: 3,
+            max_child_turns: 10,
+            max_aggregate_tokens: Some(100),
+        };
+        let rt = test_runtime().with_governance(gov);
+        assert_eq!(rt.aggregate_tokens(), 0);
+
+        rt.record_tokens(50);
+        assert_eq!(rt.aggregate_tokens(), 50);
+
+        rt.record_tokens(60);
+        assert_eq!(rt.aggregate_tokens(), 110);
+        // Tokens recorded atomically across hierarchy
     }
 }

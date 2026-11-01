@@ -107,8 +107,9 @@ pub use schema_compaction::{
 };
 pub use search::{FileSearchEngine, SearchEntryType, SearchResult};
 pub use todo::{
-    TodoArgs, TodoItem, TodoResult, TodoStatus, execute_todowrite, get_current_todos,
-    get_todo_badge, summarize_todos,
+    TodoArgs, TodoItem, TodoResult, TodoStatus, execute_todowrite, execute_todowrite_scoped,
+    get_current_todos, get_session_todos, get_todo_badge, get_todo_badge_for_session,
+    summarize_todos,
 };
 pub use web_search::{
     WebSearchMode, WebSearchQuery, WebSearchResponse, WebSearchResultItem, build_proxied_client,

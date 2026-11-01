@@ -230,12 +230,54 @@ impl HybridModelRouter {
         self.route_for_tier(tier)
     }
 
+    /// Dynamically constructs router configured for a specific provider.
+    pub fn with_provider(provider_label: impl Into<String>) -> Self {
+        let label = provider_label.into();
+        let mut router = Self::default();
+        for (_, cfg) in router.tier_mapping.iter_mut() {
+            cfg.provider_label = label.clone();
+        }
+        for cfg in router.fallback_models.iter_mut() {
+            if cfg.provider_label != "ollama_local" {
+                cfg.provider_label = label.clone();
+            }
+        }
+        for (_, ladder) in router.tier_fallbacks.iter_mut() {
+            for cfg in ladder.iter_mut() {
+                cfg.provider_label = label.clone();
+            }
+        }
+        router
+    }
+
+    /// Finds which tier a model is mapped to (if any).
+    pub fn tier_for_model(&self, model_id: &str) -> Option<ModelTier> {
+        self.tier_mapping
+            .iter()
+            .find(|(_, cfg)| cfg.model_id == model_id)
+            .map(|(tier, _)| *tier)
+    }
+
     /// Resolves fallback model when the primary model returns rate-limits or fails.
     pub fn fallback_for_failure(&self, failed_model_id: &str) -> Option<RouteModelConfig> {
-        // Try tier-specific fallbacks first if applicable
-        for fallbacks in self.tier_fallbacks.values() {
-            if let Some(m) = fallbacks.iter().find(|m| m.model_id != failed_model_id) {
-                return Some(m.clone());
+        self.fallback_for_failure_tier(failed_model_id, None)
+    }
+
+    /// Resolves fallback model for a specific failed model and optional request tier.
+    /// Follows a deterministic capability-bound fallback ladder.
+    pub fn fallback_for_failure_tier(
+        &self,
+        failed_model_id: &str,
+        tier: Option<ModelTier>,
+    ) -> Option<RouteModelConfig> {
+        let target_tier = tier.or_else(|| self.tier_for_model(failed_model_id));
+        if let Some(t) = target_tier {
+            if let Some(tier_fallbacks) = self.tier_fallbacks.get(&t) {
+                for m in tier_fallbacks {
+                    if m.model_id != failed_model_id {
+                        return Some(m.clone());
+                    }
+                }
             }
         }
         self.fallback_models

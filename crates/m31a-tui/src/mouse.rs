@@ -606,7 +606,7 @@ fn handle_left_click_down(app: &mut App, col: u16, row: u16, screen_area: Rect) 
                     if clicked_idx < state.filtered_indices.len() {
                         let model_idx = state.filtered_indices[clicked_idx];
                         let slug = state.models[model_idx].slug.clone();
-                        match app.switch_model(&slug) {
+                        match app.switch_model_async(&slug) {
                             Ok(_) => {
                                 return;
                             }
@@ -698,7 +698,7 @@ fn handle_left_click_down(app: &mut App, col: u16, row: u16, screen_area: Rect) 
                     if clicked_idx < picker.filtered_indices.len() {
                         picker.selected_index = clicked_idx;
                         if let Some(thread) = picker.selected_thread().cloned() {
-                            if let Err(e) = app.resume_session(&thread.id) {
+                            if let Err(e) = app.resume_session_async(&thread.id) {
                                 app.provider_status_message =
                                     Some(format!("Failed to resume session: {e}"));
                                 app.push_modal(ModalState::ResumePicker(picker));
@@ -851,7 +851,7 @@ fn handle_left_click_down(app: &mut App, col: u16, row: u16, screen_area: Rect) 
                             ms.selected_index = clicked_idx;
                             if let Some(model) = ms.get_selected_model() {
                                 let slug = model.slug.clone();
-                                match app.switch_model(&slug) {
+                                match app.switch_model_async(&slug) {
                                     Ok(_) => {
                                         app.bottom_pane.model_selector = None;
                                         app.bottom_pane.mode = BottomPaneMode::InputNormal;
@@ -1079,7 +1079,7 @@ pub fn toggle_or_cycle_setting(app: &mut App, active_tab: usize, selected_index:
                             .unwrap_or(0);
                         let next_idx = (cur_idx + 1) % app.available_models.len();
                         let next_slug = app.available_models[next_idx].slug.clone();
-                        if let Err(e) = app.switch_model(&next_slug) {
+                        if let Err(e) = app.switch_model_async(&next_slug) {
                             app.provider_status_message = Some(format!("Model switch failed: {e}"));
                         }
                     }

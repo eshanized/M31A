@@ -10,6 +10,7 @@ pub mod daemon_lifecycle;
 pub mod http_server;
 pub mod pairing;
 pub mod protocol;
+pub mod protocol_schema;
 pub mod relay;
 pub mod test_client;
 pub mod turn_admission;
@@ -26,6 +27,7 @@ pub use daemon_lifecycle::{
 pub use http_server::{HttpServerConfig, run_http_server, run_http_server_with_listener};
 pub use pairing::{EncryptedTunnel, PairingClient, PairingCredentials, PairingHost};
 pub use protocol::{AppServer, JsonRpcError, JsonRpcNotification, JsonRpcRequest, JsonRpcResponse};
+pub use protocol_schema::{generate_protocol_schema, write_protocol_schema};
 pub use relay::stdio_to_uds;
 pub use test_client::{
     AppServerTestHarness, CommandApprovalDecision, FileChangeApprovalDecision,

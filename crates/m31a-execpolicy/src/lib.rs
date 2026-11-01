@@ -15,6 +15,7 @@ pub mod policy;
 pub mod presets;
 pub mod proxy;
 pub mod tcp_tunnel;
+pub mod tool_effect;
 
 pub use ast_decomposer::{ShellAstDecomposer, ShellDecomposition};
 pub use attribution::{
@@ -42,3 +43,4 @@ pub use policy::{
 pub use presets::{ApprovalPreset, ApprovalPresetKind};
 pub use proxy::{NetworkProxyServer, ProxyConfig};
 pub use tcp_tunnel::{TcpTunnelInfo, TcpTunnelManager};
+pub use tool_effect::{classify_tool, evaluate_plan_mode, PlanModeViolation, ToolEffect};

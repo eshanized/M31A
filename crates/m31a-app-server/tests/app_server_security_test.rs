@@ -244,11 +244,11 @@ async fn test_4_sse_subscriptions_isolated_to_permitted_sessions() {
         .auth_manager
         .register_thread_owner(thread_b, "client_b");
 
-    // Client B connects to SSE stream
+    // Client B connects to SSE stream using Authorization Bearer header
     let mut client_b = TcpStream::connect(addr).await.unwrap();
     let req = format!(
-        "GET /events?token={} HTTP/1.1\r\nHost: {}\r\n\r\n",
-        token_b, addr
+        "GET /events HTTP/1.1\r\nHost: {}\r\nAuthorization: Bearer {}\r\n\r\n",
+        addr, token_b
     );
     client_b.write_all(req.as_bytes()).await.unwrap();
 
@@ -585,4 +585,316 @@ async fn test_12_concurrent_requests_preserve_session_boundaries() {
     for h in handles {
         h.await.unwrap();
     }
+}
+
+#[tokio::test]
+async fn test_13_scope_escalation_prevented() {
+    let (addr, server, _) = spawn_test_server(|_| {}).await;
+
+    // Token with ONLY Read scope
+    let read_token = server.auth_manager.generate_token(
+        "reader",
+        "Read Only Client",
+        vec![AuthScope::Read],
+        None,
+    );
+
+    // 1. Reader cannot call Write methods (e.g. thread/create) via RPC
+    let mut client = TcpStream::connect(addr).await.unwrap();
+    let body = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "thread/create",
+        "params": { "cwd": "/tmp" }
+    })
+    .to_string();
+    let req = format!(
+        "POST /api/rpc HTTP/1.1\r\nHost: {}\r\nAuthorization: Bearer {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+        addr, read_token, body.len(), body
+    );
+    client.write_all(req.as_bytes()).await.unwrap();
+    let mut resp = String::new();
+    client.read_to_string(&mut resp).await.unwrap();
+    assert!(resp.contains("-32003"));
+    assert!(resp.contains("Permission denied"));
+
+    // 2. Token with ONLY Write scope cannot call Admin methods (e.g. workspace/trust_grant)
+    let write_token = server.auth_manager.generate_token(
+        "writer",
+        "Write Only Client",
+        vec![AuthScope::Write],
+        None,
+    );
+    let mut client = TcpStream::connect(addr).await.unwrap();
+    let body = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "workspace/trust_grant",
+        "params": { "path": "/tmp", "level": "session_only" }
+    })
+    .to_string();
+    let req = format!(
+        "POST /api/rpc HTTP/1.1\r\nHost: {}\r\nAuthorization: Bearer {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+        addr, write_token, body.len(), body
+    );
+    client.write_all(req.as_bytes()).await.unwrap();
+    let mut resp = String::new();
+    client.read_to_string(&mut resp).await.unwrap();
+    assert!(resp.contains("-32003"));
+    assert!(resp.contains("Permission denied"));
+}
+
+#[tokio::test]
+async fn test_14_thread_operations_enforce_ownership_for_modify_fork_delete() {
+    let (addr, server, _) = spawn_test_server(|_| {}).await;
+
+    let token_a = server.auth_manager.generate_token(
+        "client_a",
+        "Client A",
+        vec![AuthScope::Read, AuthScope::Write, AuthScope::Execute],
+        None,
+    );
+    let token_b = server.auth_manager.generate_token(
+        "client_b",
+        "Client B",
+        vec![AuthScope::Read, AuthScope::Write, AuthScope::Execute],
+        None,
+    );
+
+    server
+        .trust_store
+        .lock()
+        .unwrap()
+        .trust(
+            std::path::Path::new("/tmp"),
+            m31a_trust::TrustLevel::SessionOnly,
+        )
+        .unwrap();
+
+    // Client A creates thread
+    let mut client_a = TcpStream::connect(addr).await.unwrap();
+    let body = serde_json::json!({ "cwd": "/tmp" }).to_string();
+    let req_a = format!(
+        "POST /api/threads HTTP/1.1\r\nHost: {}\r\nAuthorization: Bearer {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+        addr, token_a, body.len(), body
+    );
+    client_a.write_all(req_a.as_bytes()).await.unwrap();
+    let mut resp_a = String::new();
+    client_a.read_to_string(&mut resp_a).await.unwrap();
+    let parsed: serde_json::Value =
+        serde_json::from_str(resp_a.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    let thread_a_id = parsed["id"].as_str().unwrap();
+
+    // Client B attempts to fork Client A's thread -> MUST be denied with -32003
+    let mut client_b = TcpStream::connect(addr).await.unwrap();
+    let body = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "thread/fork",
+        "params": { "thread_id": thread_a_id, "title": "Stolen Fork" }
+    })
+    .to_string();
+    let req_b = format!(
+        "POST /api/rpc HTTP/1.1\r\nHost: {}\r\nAuthorization: Bearer {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+        addr, token_b, body.len(), body
+    );
+    client_b.write_all(req_b.as_bytes()).await.unwrap();
+    let mut resp_b = String::new();
+    client_b.read_to_string(&mut resp_b).await.unwrap();
+    assert!(resp_b.contains("-32003"));
+    assert!(resp_b.contains("Access denied"));
+
+    // Client B attempts to delete Client A's thread -> MUST be denied
+    let mut client_b = TcpStream::connect(addr).await.unwrap();
+    let body = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "thread/delete",
+        "params": { "thread_id": thread_a_id }
+    })
+    .to_string();
+    let req_b = format!(
+        "POST /api/rpc HTTP/1.1\r\nHost: {}\r\nAuthorization: Bearer {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+        addr, token_b, body.len(), body
+    );
+    client_b.write_all(req_b.as_bytes()).await.unwrap();
+    let mut resp_b = String::new();
+    client_b.read_to_string(&mut resp_b).await.unwrap();
+    assert!(resp_b.contains("-32003"));
+    assert!(resp_b.contains("Access denied"));
+}
+
+#[tokio::test]
+async fn test_15_thread_ownership_persistence_across_server_restart() {
+    init_test_env();
+    let dir = tempdir().unwrap();
+    let db_path = dir.path().join("persistent_session.db");
+
+    let thread_id = "thread_persist_test_1";
+
+    // 1. Open first storage and app server instance
+    {
+        let storage = Storage::open(&db_path).unwrap();
+        let auth_mgr = m31a_app_server::auth::AuthManager::with_storage(storage.clone());
+        auth_mgr.register_thread_owner(thread_id, "persistent_owner");
+        assert_eq!(
+            auth_mgr.get_thread_owner(thread_id).unwrap(),
+            "persistent_owner"
+        );
+    }
+
+    // 2. Simulate complete server shutdown & reboot: reopen storage from disk
+    {
+        let reopened_storage = Storage::open(&db_path).unwrap();
+        let rebooted_auth_mgr =
+            m31a_app_server::auth::AuthManager::with_storage(reopened_storage);
+
+        // Verification: ownership survived daemon reboot!
+        assert_eq!(
+            rebooted_auth_mgr.get_thread_owner(thread_id).unwrap(),
+            "persistent_owner"
+        );
+
+        let owner_identity = m31a_app_server::auth::ClientIdentity {
+            client_id: "persistent_owner".to_string(),
+            label: "Owner".to_string(),
+            scopes: [AuthScope::Read, AuthScope::Write].into_iter().collect(),
+        };
+        let intruder_identity = m31a_app_server::auth::ClientIdentity {
+            client_id: "intruder".to_string(),
+            label: "Intruder".to_string(),
+            scopes: [AuthScope::Read, AuthScope::Write].into_iter().collect(),
+        };
+
+        assert!(rebooted_auth_mgr.require_thread_access(thread_id, &owner_identity).is_ok());
+        assert!(rebooted_auth_mgr.require_thread_access(thread_id, &intruder_identity).is_err());
+    }
+}
+
+#[tokio::test]
+async fn test_16_query_param_token_rejected_and_stream_ticket_works() {
+    let (addr, server, _) = spawn_test_server(|_| {}).await;
+
+    let client_token = server.auth_manager.generate_token(
+        "sse_user",
+        "SSE User",
+        vec![AuthScope::Read, AuthScope::Write],
+        None,
+    );
+
+    // 1. Query parameter token on REST/RPC endpoints MUST be rejected
+    let mut client = TcpStream::connect(addr).await.unwrap();
+    let req = format!(
+        "GET /api/threads?token={} HTTP/1.1\r\nHost: {}\r\n\r\n",
+        client_token, addr
+    );
+    client.write_all(req.as_bytes()).await.unwrap();
+    let mut resp = String::new();
+    client.read_to_string(&mut resp).await.unwrap();
+    assert!(resp.contains("HTTP/1.1 401 Unauthorized"));
+    assert!(resp.contains("URL query tokens not permitted"));
+
+    // 2. Issue a short-lived single-use stream ticket via POST /api/auth/stream-ticket
+    let mut client = TcpStream::connect(addr).await.unwrap();
+    let req = format!(
+        "POST /api/auth/stream-ticket HTTP/1.1\r\nHost: {}\r\nAuthorization: Bearer {}\r\nContent-Length: 0\r\n\r\n",
+        addr, client_token
+    );
+    client.write_all(req.as_bytes()).await.unwrap();
+    let mut resp = String::new();
+    client.read_to_string(&mut resp).await.unwrap();
+    assert!(resp.contains("HTTP/1.1 200 OK"));
+
+    let body_json: serde_json::Value =
+        serde_json::from_str(resp.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    let ticket = body_json["ticket"].as_str().unwrap();
+
+    // 3. Connect to SSE stream using single-use ticket in ?ticket=
+    let mut sse_client = TcpStream::connect(addr).await.unwrap();
+    let req_sse = format!(
+        "GET /events?ticket={} HTTP/1.1\r\nHost: {}\r\n\r\n",
+        ticket, addr
+    );
+    sse_client.write_all(req_sse.as_bytes()).await.unwrap();
+    let mut header_buf = [0u8; 512];
+    let n = sse_client.read(&mut header_buf).await.unwrap();
+    let header_str = String::from_utf8_lossy(&header_buf[..n]);
+    assert!(header_str.contains("HTTP/1.1 200 OK"));
+    assert!(header_str.contains("text/event-stream"));
+
+    // 4. Attempt to replay ticket -> MUST fail because ticket is single-use
+    let mut replay_client = TcpStream::connect(addr).await.unwrap();
+    let req_replay = format!(
+        "GET /events?ticket={} HTTP/1.1\r\nHost: {}\r\n\r\n",
+        ticket, addr
+    );
+    replay_client.write_all(req_replay.as_bytes()).await.unwrap();
+    let mut replay_resp = String::new();
+    replay_client.read_to_string(&mut replay_resp).await.unwrap();
+    assert!(replay_resp.contains("HTTP/1.1 401 Unauthorized"));
+}
+
+#[tokio::test]
+async fn test_17_sanitized_config_redacts_secrets_and_mcp_credentials() {
+    let (addr, server, _) = spawn_test_server(|_| {}).await;
+
+    let admin_token = server.auth_manager.generate_token(
+        "admin",
+        "Admin",
+        vec![AuthScope::Read, AuthScope::Admin],
+        None,
+    );
+
+    let mut client = TcpStream::connect(addr).await.unwrap();
+    let body = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "config/read",
+        "params": {}
+    })
+    .to_string();
+    let req = format!(
+        "POST /api/rpc HTTP/1.1\r\nHost: {}\r\nAuthorization: Bearer {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+        addr, admin_token, body.len(), body
+    );
+    client.write_all(req.as_bytes()).await.unwrap();
+    let mut resp = String::new();
+    client.read_to_string(&mut resp).await.unwrap();
+    assert!(resp.contains("2.0"));
+
+    let body_part = resp.split("\r\n\r\n").nth(1).unwrap();
+    let json: serde_json::Value = serde_json::from_str(body_part).unwrap();
+    let result = &json["result"];
+
+    // Raw secrets must never be exposed
+    assert_ne!(result.get("api_key").unwrap(), "super_secret_raw_key");
+    assert!(result.get("api_key_configured").is_some());
+}
+
+#[tokio::test]
+async fn test_18_token_rotation_and_revocation() {
+    let (_, server, _) = spawn_test_server(|_| {}).await;
+
+    let tok1 = server.auth_manager.generate_token(
+        "rotator",
+        "Rotator Client",
+        vec![AuthScope::Read],
+        None,
+    );
+
+    // Initial token valid
+    assert!(server.auth_manager.validate_token(&tok1).is_ok());
+
+    // Rotate token
+    let tok2 = server.auth_manager.rotate_token(&tok1, None).unwrap();
+    assert_ne!(tok1, tok2);
+
+    // Old token invalid
+    assert!(server.auth_manager.validate_token(&tok1).is_err());
+    // New token valid
+    assert!(server.auth_manager.validate_token(&tok2).is_ok());
+
+    // Revoke new token
+    assert!(server.auth_manager.revoke_token(&tok2));
+    assert!(server.auth_manager.validate_token(&tok2).is_err());
 }

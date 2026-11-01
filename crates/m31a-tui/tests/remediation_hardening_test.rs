@@ -536,3 +536,80 @@ async fn test_model_health_probe_state_transitions_and_deduplication() {
         ModelHealthState::Healthy { latency_ms: 38 }
     );
 }
+
+// -----------------------------------------------------------------------------
+// 11. Explicit Distinguishable Connectivity Status Variants
+// -----------------------------------------------------------------------------
+
+#[test]
+fn test_explicit_connectivity_status_predicates_and_labels() {
+    let auth_fail = ConnectivityStatus::AuthenticationFailed;
+    assert!(auth_fail.is_failure());
+    assert!(!auth_fail.is_success());
+    assert!(!auth_fail.is_in_progress());
+    assert_eq!(auth_fail.label(), "Authentication Failed");
+
+    let model_unsupp = ConnectivityStatus::ModelUnsupported;
+    assert!(model_unsupp.is_failure());
+    assert!(!model_unsupp.is_success());
+    assert_eq!(model_unsupp.label(), "Model Unsupported");
+
+    let timeout = ConnectivityStatus::TimedOut;
+    assert!(timeout.is_failure());
+    assert_eq!(timeout.label(), "Timed Out");
+
+    let unreach = ConnectivityStatus::Unreachable;
+    assert!(unreach.is_failure());
+    assert_eq!(unreach.label(), "Host Unreachable");
+
+    let conn = ConnectivityStatus::Connected;
+    assert!(conn.is_success());
+    assert!(!conn.is_failure());
+
+    let testing = ConnectivityStatus::TestingConnection;
+    assert!(testing.is_in_progress());
+    assert!(!testing.is_failure());
+}
+
+// -----------------------------------------------------------------------------
+// 12. Asynchronous Model Switch and Session Resume State Transitions
+// -----------------------------------------------------------------------------
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_async_model_switch_lifecycle() {
+    let wire_server = m31a_provider::wire_server::LocalWireServer::start().await.expect("wire server start");
+    let temp = tempfile::tempdir().unwrap();
+
+    let initial_model = "nvidia/nemotron-3.5-lightning-30b-a3b";
+    let config = Config {
+        model: initial_model.to_string(),
+        api_base: wire_server.api_base(),
+        api_key: Some("valid-nim-key".to_string()),
+        ..Default::default()
+    };
+
+    let mut app = App::new_test(config, temp.path()).expect("app init");
+    assert_eq!(app.active_model, initial_model);
+
+    // Call switch_model_async
+    let target = "meta/llama-3.3-70b-instruct";
+    let async_res = app.switch_model_async(target);
+    assert!(async_res.is_ok(), "switch_model_async must initiate without blocking");
+
+    // Provider status message should indicate activation in progress
+    assert!(app.provider_status_message.is_some());
+
+    // Event should be received from the background task
+    let evt = tokio::time::timeout(std::time::Duration::from_secs(3), app.event_rx.recv())
+        .await
+        .expect("probe event delivered")
+        .expect("channel open");
+
+    // Handle event in App
+    app.handle_tui_event(evt);
+
+    // Verify atomic commit
+    assert_eq!(app.active_model, target);
+    assert_eq!(app.bottom_pane.active_model, target);
+    assert_eq!(app.nim_client.model(), target);
+}

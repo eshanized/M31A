@@ -45,6 +45,72 @@ pub struct CommandOutput {
     pub timed_out: bool,
 }
 
+/// Strongly typed command invocation representation for sandboxed execution.
+///
+/// Prevents word-splitting bugs by distinguishing between direct program execution
+/// with explicit arguments and shell command-line strings.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SandboxCommand {
+    /// A shell command line to be evaluated by the shell (e.g., `bash -c "..."` or `cmd /c "..."`).
+    Shell(String),
+    /// An executable program with exact argument vector, preserving quotes, spaces, and empty strings.
+    Exec {
+        program: String,
+        args: Vec<String>,
+    },
+}
+
+impl SandboxCommand {
+    pub fn shell(cmd: impl Into<String>) -> Self {
+        Self::Shell(cmd.into())
+    }
+
+    pub fn exec(program: impl Into<String>, args: Vec<String>) -> Self {
+        Self::Exec {
+            program: program.into(),
+            args,
+        }
+    }
+
+    /// Parses tokens using POSIX shlex if `Shell`, or returns program + args if `Exec`.
+    pub fn to_tokens(&self) -> Vec<String> {
+        match self {
+            Self::Exec { program, args } => {
+                let mut v = Vec::with_capacity(args.len() + 1);
+                v.push(program.clone());
+                v.extend(args.clone());
+                v
+            }
+            Self::Shell(cmd) => {
+                shlex::split(cmd).unwrap_or_else(|| {
+                    vec!["bash".to_string(), "-c".to_string(), cmd.clone()]
+                })
+            }
+        }
+    }
+}
+
+impl From<&str> for SandboxCommand {
+    fn from(s: &str) -> Self {
+        Self::Shell(s.to_string())
+    }
+}
+
+impl From<String> for SandboxCommand {
+    fn from(s: String) -> Self {
+        Self::Shell(s)
+    }
+}
+
+impl From<(&str, &[&str])> for SandboxCommand {
+    fn from((prog, args): (&str, &[&str])) -> Self {
+        Self::Exec {
+            program: prog.to_string(),
+            args: args.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct SandboxRunner {
     bwrap_path: Option<PathBuf>,
@@ -138,13 +204,47 @@ impl SandboxRunner {
         policy: SandboxPolicy,
         timeout: Duration,
     ) -> Result<CommandOutput> {
-        self.execute_with_env(command_line, cwd, policy, timeout, &HashMap::new())
-            .await
+        self.execute_command(
+            SandboxCommand::Shell(command_line.to_string()),
+            cwd,
+            policy,
+            timeout,
+        )
+        .await
     }
 
     pub async fn execute_with_env(
         &self,
         command_line: &str,
+        cwd: &Path,
+        policy: SandboxPolicy,
+        timeout: Duration,
+        extra_env: &HashMap<String, String>,
+    ) -> Result<CommandOutput> {
+        self.execute_command_with_env(
+            SandboxCommand::Shell(command_line.to_string()),
+            cwd,
+            policy,
+            timeout,
+            extra_env,
+        )
+        .await
+    }
+
+    pub async fn execute_command(
+        &self,
+        command: SandboxCommand,
+        cwd: &Path,
+        policy: SandboxPolicy,
+        timeout: Duration,
+    ) -> Result<CommandOutput> {
+        self.execute_command_with_env(command, cwd, policy, timeout, &HashMap::new())
+            .await
+    }
+
+    pub async fn execute_command_with_env(
+        &self,
+        command: SandboxCommand,
         cwd: &Path,
         policy: SandboxPolicy,
         timeout: Duration,
@@ -196,15 +296,28 @@ impl SandboxRunner {
         match backend {
             SandboxBackend::Seatbelt => {
                 let seatbelt = SeatbeltSandbox::new(policy, cwd)?;
-                let parts: Vec<String> = command_line
-                    .split_whitespace()
-                    .map(str::to_string)
-                    .collect();
+                let parts: Vec<String> = match &command {
+                    SandboxCommand::Exec { program, args } => {
+                        let mut p = Vec::with_capacity(args.len() + 1);
+                        p.push(program.clone());
+                        p.extend(args.clone());
+                        p
+                    }
+                    SandboxCommand::Shell(cmd) => {
+                        vec!["/bin/bash".to_string(), "-c".to_string(), cmd.clone()]
+                    }
+                };
+                let cmd_display = match &command {
+                    SandboxCommand::Exec { program, args } => {
+                        format!("{} {}", program, args.join(" "))
+                    }
+                    SandboxCommand::Shell(cmd) => cmd.clone(),
+                };
                 let cwd = cwd.to_path_buf();
                 let out = tokio::task::spawn_blocking(move || seatbelt.execute(&parts, &cwd))
                     .await
                     .context("Seatbelt sandbox task panicked")?
-                    .with_context(|| format!("Seatbelt sandbox failed: {}", command_line))?;
+                    .with_context(|| format!("Seatbelt sandbox failed: {}", cmd_display))?;
                 Ok(CommandOutput {
                     exit_code: out.exit_code,
                     stdout: out.stdout,
@@ -214,15 +327,32 @@ impl SandboxRunner {
             }
             SandboxBackend::Mxc => {
                 let mxc = MxcSandbox::new(policy, cwd)?;
-                let parts: Vec<String> = command_line
-                    .split_whitespace()
-                    .map(str::to_string)
-                    .collect();
+                let parts: Vec<String> = match &command {
+                    SandboxCommand::Exec { program, args } => {
+                        let mut p = Vec::with_capacity(args.len() + 1);
+                        p.push(program.clone());
+                        p.extend(
+                            args.iter()
+                                .map(|a| crate::mxc::windows_quote_arg(a))
+                                .collect::<Vec<_>>(),
+                        );
+                        p
+                    }
+                    SandboxCommand::Shell(cmd) => {
+                        vec![cmd.clone()]
+                    }
+                };
+                let cmd_display = match &command {
+                    SandboxCommand::Exec { program, args } => {
+                        format!("{} {}", program, args.join(" "))
+                    }
+                    SandboxCommand::Shell(cmd) => cmd.clone(),
+                };
                 let cwd = cwd.to_path_buf();
                 let out = tokio::task::spawn_blocking(move || mxc.execute(&parts, &cwd))
                     .await
                     .context("MXC sandbox task panicked")?
-                    .with_context(|| format!("MXC sandbox failed: {}", command_line))?;
+                    .with_context(|| format!("MXC sandbox failed: {}", cmd_display))?;
                 Ok(CommandOutput {
                     exit_code: out.exit_code,
                     stdout: out.stdout,
@@ -231,14 +361,50 @@ impl SandboxRunner {
                 })
             }
             SandboxBackend::Bubblewrap => {
-                return self
-                    .execute_bwrap(command_line, cwd, policy, timeout, &hardened_env)
-                    .await;
+                match &command {
+                    SandboxCommand::Exec { program, args } => {
+                        let args_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+                        let cmd = self.build_bwrap_process_with_env(
+                            program,
+                            &args_refs,
+                            cwd,
+                            policy,
+                            &hardened_env,
+                        )?;
+                        let cmd_display = format!("{} {}", program, args.join(" "));
+                        spawn_and_wait(cmd, "bwrap", &cmd_display, timeout).await
+                    }
+                    SandboxCommand::Shell(cmd_str) => {
+                        self.execute_bwrap(cmd_str, cwd, policy, timeout, &hardened_env)
+                            .await
+                    }
+                }
             }
             SandboxBackend::Process => {
                 // Process-level isolation fallback (Landlock/seccomp on Linux).
-                let cmd = build_process_fallback_command(command_line, cwd, policy, &hardened_env)?;
-                return spawn_and_wait(cmd, "process", command_line, timeout).await;
+                match &command {
+                    SandboxCommand::Exec { program, args } => {
+                        let mut std_cmd = std::process::Command::new(program);
+                        std_cmd.args(args);
+                        std_cmd.current_dir(cwd);
+                        std_cmd.env_clear();
+                        std_cmd.envs(&hardened_env);
+                        #[cfg(target_os = "linux")]
+                        let _ = crate::process_hardening::apply_process_hardening();
+                        let cmd = tokio::process::Command::from(std_cmd);
+                        let cmd_display = format!("{} {}", program, args.join(" "));
+                        spawn_and_wait(cmd, "process", &cmd_display, timeout).await
+                    }
+                    SandboxCommand::Shell(cmd_str) => {
+                        let cmd = build_process_fallback_command(
+                            cmd_str,
+                            cwd,
+                            policy,
+                            &hardened_env,
+                        )?;
+                        spawn_and_wait(cmd, "process", cmd_str, timeout).await
+                    }
+                }
             }
         }
     }
@@ -679,5 +845,43 @@ mod tests {
             .unwrap();
         assert!(output.timed_out);
         assert_eq!(output.exit_code, -1);
+    }
+
+    #[test]
+    fn test_sandbox_command_token_parsing() {
+        let cmd = SandboxCommand::shell("git commit -m \"fix(security): resolve issues\" --author=\"Test <test@m31a.local>\"");
+        let tokens = cmd.to_tokens();
+        assert_eq!(tokens[0], "git");
+        assert_eq!(tokens[1], "commit");
+        assert_eq!(tokens[2], "-m");
+        assert_eq!(tokens[3], "fix(security): resolve issues");
+        assert_eq!(tokens[4], "--author=Test <test@m31a.local>");
+    }
+
+    #[tokio::test]
+    async fn test_runner_executes_sandbox_command_exec_preserves_arguments() {
+        let runner = SandboxRunner::new();
+        let arg_with_spaces = "hello world with spaces and 'quotes' and \"double quotes\"";
+        let empty_arg = "";
+        let cmd = SandboxCommand::exec(
+            "echo",
+            vec![
+                arg_with_spaces.to_string(),
+                "arg2".to_string(),
+                empty_arg.to_string(),
+            ],
+        );
+
+        let output = runner
+            .execute_command(
+                cmd,
+                Path::new("/tmp"),
+                SandboxPolicy::ReadOnly,
+                Duration::from_secs(5),
+            )
+            .await
+            .unwrap();
+        assert_eq!(output.exit_code, 0);
+        assert!(output.stdout.contains("hello world with spaces and 'quotes' and \"double quotes\""));
     }
 }

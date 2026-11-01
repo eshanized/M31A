@@ -131,7 +131,7 @@ pub use cloud_task::{CloudTaskManager, CloudTaskOutput, CloudTaskStatus};
 pub use collaboration_templates::{
     CollaborationContext, CollaborationModeKind, CollaborationTemplateEngine,
 };
-pub use config::{ApprovalPolicy, Config, McpServerConfig, SandboxPolicy};
+pub use config::{AgentsConfig, ApprovalPolicy, Config, McpServerConfig, ResourceGovernance, SandboxPolicy};
 pub use config_schema::{generate_config_schema, validate_config_structure, write_config_schema};
 pub use connector_merge::{
     AppInfo, connector_install_url, filter_connectors, merge_connectors, merge_plugin_connectors,

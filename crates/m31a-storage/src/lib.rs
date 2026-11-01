@@ -29,8 +29,8 @@ pub use attachment_store::{
 };
 pub use db::{
     BoardPost, ChannelRecord, CheckpointRecord, ExecutionClaim, Goal, InboxItem, PathLockRecord,
-    Storage, StoredEvidenceRecord, StoredSessionMemory, ThreadRecord, ThreadSectionRecord,
-    ThreadSpawnEdgeRecord, ThreadStats, ThreadSummaryRecord, TurnRecord,
+    SessionTodoRecord, Storage, StoredEvidenceRecord, StoredSessionMemory, ThreadRecord,
+    ThreadSectionRecord, ThreadSpawnEdgeRecord, ThreadStats, ThreadSummaryRecord, TurnRecord,
 };
 pub use history_recovery::{
     HistoryItemInfo, HistoryListItemsQuery, HistoryReadResult, HistoryRecoveryStore,

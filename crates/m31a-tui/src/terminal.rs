@@ -372,12 +372,12 @@ pub fn handle_modal_key_event(app: &mut App, modal: ModalState, key: crossterm::
             KeyCode::Enter => {
                 if let Some(m) = state.get_selected_model() {
                     let chosen = m.slug.clone();
-                    match app.switch_model(&chosen) {
+                    match app.switch_model_async(&chosen) {
                         Ok(_) => {
-                            // Successful activation closes the modal
+                            // Initiated activation closes the modal; result reported via events
                         }
                         Err(e) => {
-                            // Failed activation preserves modal and reports actionable error
+                            // Failed validation preserves modal and reports actionable error
                             app.provider_status_message =
                                 Some(format!("Failed to activate model: {e}"));
                             app.push_modal(ModalState::ModelPicker { state });
@@ -622,7 +622,7 @@ pub fn handle_modal_key_event(app: &mut App, modal: ModalState, key: crossterm::
             KeyCode::Enter => {
                 if let Some(t) = picker.selected_thread() {
                     let tid = t.id.clone();
-                    if let Err(e) = app.resume_session(&tid) {
+                    if let Err(e) = app.resume_session_async(&tid) {
                         app.provider_status_message =
                             Some(format!("Failed to resume session: {e}"));
                         app.push_modal(ModalState::ResumePicker(picker));
@@ -2227,8 +2227,7 @@ pub fn handle_modal_key_event(app: &mut App, modal: ModalState, key: crossterm::
                         app.push_modal(ModalState::SetupWizard { state });
                     }
                     KeyCode::Enter => {
-                        if state.connectivity_status == crate::modals::ConnectivityStatus::Connected
-                        {
+                        if state.connectivity_status.is_success() {
                             state.next_step();
                         } else if state.connectivity_status
                             == crate::modals::ConnectivityStatus::NotTested
@@ -2674,7 +2673,7 @@ pub fn handle_composer_key_event(app: &mut App, key: crossterm::event::KeyEvent)
                                 app.execute_slash_command(&c);
                             }
                             crate::bottom_pane::BottomPaneSubmit::ModelSelected(slug) => {
-                                if let Err(e) = app.switch_model(&slug) {
+                                if let Err(e) = app.switch_model_async(&slug) {
                                     app.provider_status_message =
                                         Some(format!("Failed to activate model: {e}"));
                                 }
@@ -2698,7 +2697,7 @@ pub fn handle_composer_key_event(app: &mut App, key: crossterm::event::KeyEvent)
                         app.execute_slash_command(&cmd);
                     }
                     crate::bottom_pane::BottomPaneSubmit::ModelSelected(slug) => {
-                        if let Err(e) = app.switch_model(&slug) {
+                        if let Err(e) = app.switch_model_async(&slug) {
                             app.provider_status_message =
                                 Some(format!("Failed to activate model: {e}"));
                         }
@@ -3309,7 +3308,7 @@ pub fn handle_screen_key_event(app: &mut App, key: crossterm::event::KeyEvent) {
                     && let Some(t) = threads.get(app.screen_selected_index)
                 {
                     let tid = t.id.clone();
-                    if let Ok(()) = app.resume_session(&tid) {
+                    if let Ok(()) = app.resume_session_async(&tid) {
                         app.switch_screen(crate::screens::Screen::Chat);
                     }
                 }
@@ -3323,9 +3322,9 @@ pub fn handle_screen_key_event(app: &mut App, key: crossterm::event::KeyEvent) {
                         .map(|m| m.slug.clone())
                 };
                 if let Some(slug) = model_to_switch {
-                    match app.switch_model(&slug) {
+                    match app.switch_model_async(&slug) {
                         Ok(_) => {
-                            app.provider_status_message = Some(format!("Activated model: {slug}"));
+                            app.provider_status_message = Some(format!("Activating model: {slug}..."));
                         }
                         Err(e) => {
                             app.provider_status_message =

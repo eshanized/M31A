@@ -23,29 +23,57 @@ impl DaemonIsolation {
     /// or inside the workspace directory.
     pub fn get_security_masks(workspace_cwd: &Path) -> Vec<MaskType> {
         let mut masks = Vec::new();
-        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-        let home_path = PathBuf::from(&home);
+        let home_path = match std::env::var("HOME") {
+            Ok(h) if !h.trim().is_empty() && h != "." => {
+                let p = PathBuf::from(h);
+                if p.is_absolute() {
+                    p
+                } else {
+                    std::env::current_dir().unwrap_or_default().join(p)
+                }
+            }
+            _ => PathBuf::from("/tmp"),
+        };
+        let home_path = std::fs::canonicalize(&home_path).unwrap_or(home_path);
+
+        let abs_workspace = if workspace_cwd.is_absolute() {
+            workspace_cwd.to_path_buf()
+        } else {
+            std::env::current_dir().unwrap_or_default().join(workspace_cwd)
+        };
+        let abs_workspace = std::fs::canonicalize(&abs_workspace).unwrap_or(abs_workspace);
+        let workspace_cwd = &abs_workspace;
 
         // Helper to register masks for both original path and canonical target if symlinked
         let add_dir_mask = |dir: PathBuf, target_masks: &mut Vec<MaskType>| {
-            if dir.is_dir() {
-                if let Ok(canon) = dir.canonicalize()
-                    && canon != dir
+            let abs_dir = if dir.is_absolute() {
+                dir
+            } else {
+                std::env::current_dir().unwrap_or_default().join(dir)
+            };
+            if abs_dir.is_dir() {
+                if let Ok(canon) = abs_dir.canonicalize()
+                    && canon != abs_dir
                     && canon.is_dir()
                 {
                     target_masks.push(MaskType::DirectoryTmpfs(canon));
                 }
-                target_masks.push(MaskType::DirectoryTmpfs(dir));
+                target_masks.push(MaskType::DirectoryTmpfs(abs_dir));
             }
         };
 
         let add_file_mask = |file: PathBuf, target_masks: &mut Vec<MaskType>| {
-            if file.exists() {
-                if file.is_dir() {
-                    add_dir_mask(file, target_masks);
+            let abs_file = if file.is_absolute() {
+                file
+            } else {
+                std::env::current_dir().unwrap_or_default().join(file)
+            };
+            if abs_file.exists() {
+                if abs_file.is_dir() {
+                    add_dir_mask(abs_file, target_masks);
                 } else {
-                    if let Ok(canon) = file.canonicalize()
-                        && canon != file
+                    if let Ok(canon) = abs_file.canonicalize()
+                        && canon != abs_file
                     {
                         if canon.is_dir() {
                             target_masks.push(MaskType::DirectoryTmpfs(canon));
@@ -53,7 +81,7 @@ impl DaemonIsolation {
                             target_masks.push(MaskType::FileDevNull(canon));
                         }
                     }
-                    target_masks.push(MaskType::FileDevNull(file));
+                    target_masks.push(MaskType::FileDevNull(abs_file));
                 }
             }
         };

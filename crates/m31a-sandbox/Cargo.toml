@@ -21,3 +21,4 @@ seccompiler = "0.5"
 sha2.workspace = true
 uuid.workspace = true
 futures.workspace = true
+shlex.workspace = true

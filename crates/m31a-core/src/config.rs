@@ -241,19 +241,94 @@ impl Default for SkillsConfig {
     }
 }
 
+/// Configurable multi-agent resource governance policies.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ResourceGovernance {
+    /// Maximum concurrently running child agents across the entire runtime.
+    #[serde(default = "default_agent_max_threads")]
+    pub max_concurrent_threads: usize,
+    /// Maximum spawn-tree depth (root = 0, child = 1, grandchild = 2, etc.).
+    #[serde(default = "default_agent_max_depth")]
+    pub max_spawn_depth: usize,
+    /// Maximum turns a child agent is permitted to execute per run_turn.
+    #[serde(default = "default_agent_max_child_turns")]
+    pub max_child_turns: usize,
+    /// Optional aggregate token budget enforced atomically across the entire agent hierarchy.
+    #[serde(default)]
+    pub max_aggregate_tokens: Option<usize>,
+}
+
+pub fn default_agent_max_child_turns() -> usize {
+    20
+}
+
+impl Default for ResourceGovernance {
+    fn default() -> Self {
+        Self {
+            max_concurrent_threads: default_agent_max_threads(),
+            max_spawn_depth: default_agent_max_depth(),
+            max_child_turns: default_agent_max_child_turns(),
+            max_aggregate_tokens: None,
+        }
+    }
+}
+
+impl ResourceGovernance {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.max_concurrent_threads == 0 {
+            return Err("ResourceGovernance: max_concurrent_threads must be >= 1".to_string());
+        }
+        if self.max_spawn_depth == 0 {
+            return Err("ResourceGovernance: max_spawn_depth must be >= 1".to_string());
+        }
+        if self.max_child_turns == 0 {
+            return Err("ResourceGovernance: max_child_turns must be >= 1".to_string());
+        }
+        if let Some(tokens) = self.max_aggregate_tokens {
+            if tokens == 0 {
+                return Err(
+                    "ResourceGovernance: max_aggregate_tokens must be > 0 if specified".to_string(),
+                );
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentsConfig {
     #[serde(default = "default_agent_max_depth")]
     pub max_depth: usize,
     #[serde(default = "default_agent_max_threads")]
     pub max_threads: usize,
+    #[serde(default = "default_agent_max_child_turns")]
+    pub max_child_turns: usize,
+    #[serde(default)]
+    pub governance: Option<ResourceGovernance>,
+}
+
+impl AgentsConfig {
+    pub fn effective_governance(&self) -> ResourceGovernance {
+        if let Some(ref gov) = self.governance {
+            gov.clone()
+        } else {
+            ResourceGovernance {
+                max_concurrent_threads: self.max_threads,
+                max_spawn_depth: self.max_depth,
+                max_child_turns: self.max_child_turns,
+                max_aggregate_tokens: None,
+            }
+        }
+    }
 }
 
 impl Default for AgentsConfig {
     fn default() -> Self {
         Self {
-            max_depth: 3,
-            max_threads: 16,
+            max_depth: default_agent_max_depth(),
+            max_threads: default_agent_max_threads(),
+            max_child_turns: default_agent_max_child_turns(),
+            governance: None,
         }
     }
 }
@@ -512,6 +587,61 @@ pub fn default_features() -> HashMap<String, bool> {
 }
 
 impl Config {
+    /// Returns a sanitized public JSON representation of the configuration.
+    /// Redacts raw API keys, OAuth tokens, and sensitive MCP environment variables and headers,
+    /// while preserving presence indicators.
+    pub fn sanitized_value(&self) -> serde_json::Value {
+        let mut val = serde_json::to_value(self).unwrap_or(serde_json::Value::Null);
+        if let Some(obj) = val.as_object_mut() {
+            let has_key = self
+                .api_key
+                .as_ref()
+                .map(|k| !k.trim().is_empty())
+                .unwrap_or(false);
+            obj.insert("api_key_configured".to_string(), serde_json::json!(has_key));
+            obj.insert(
+                "api_key".to_string(),
+                if has_key {
+                    serde_json::json!("[REDACTED]")
+                } else {
+                    serde_json::Value::Null
+                },
+            );
+
+            // Sanitize mcp_servers
+            if let Some(mcp) = obj.get_mut("mcp_servers").and_then(|v| v.as_object_mut()) {
+                for (_name, server_val) in mcp.iter_mut() {
+                    if let Some(srv_obj) = server_val.as_object_mut() {
+                        if let Some(env_obj) = srv_obj.get_mut("env").and_then(|v| v.as_object_mut()) {
+                            for (_env_k, env_v) in env_obj.iter_mut() {
+                                *env_v = serde_json::json!("[REDACTED]");
+                            }
+                        }
+                        if let Some(hdr_obj) = srv_obj.get_mut("headers").and_then(|v| v.as_object_mut()) {
+                            for (_hdr_k, hdr_v) in hdr_obj.iter_mut() {
+                                *hdr_v = serde_json::json!("[REDACTED]");
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Sanitize profiles
+            if let Some(profiles) = obj.get_mut("profiles").and_then(|v| v.as_object_mut()) {
+                for (_pname, pval) in profiles.iter_mut() {
+                    if let Some(pobj) = pval.as_object_mut() {
+                        if let Some(k) = pobj.get("api_key") {
+                            if !k.is_null() {
+                                pobj.insert("api_key".to_string(), serde_json::json!("[REDACTED]"));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        val
+    }
+
     pub fn config_dir() -> PathBuf {
         if let Ok(dir) = std::env::var("M31A_HOME") {
             PathBuf::from(dir)

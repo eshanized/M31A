@@ -1,0 +1,769 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "EngineNotifications": {
+      "description": "Asynchronous events emitted by the agent engine.",
+      "properties": {
+        "chunk": {
+          "description": "Incremental streaming token delta from the model.",
+          "properties": {
+            "delta": {
+              "type": "string"
+            },
+            "thread_id": {
+              "type": "string"
+            }
+          }
+        },
+        "compact": {
+          "description": "Context compaction event with token statistics.",
+          "properties": {
+            "thread_id": {
+              "type": "string"
+            },
+            "tokens_after": {
+              "type": "integer"
+            },
+            "tokens_before": {
+              "type": "integer"
+            }
+          }
+        },
+        "done": {
+          "description": "Turn execution finished.",
+          "properties": {
+            "thread_id": {
+              "type": "string"
+            },
+            "turn_id": {
+              "type": "string"
+            },
+            "usage": {
+              "type": "object"
+            }
+          }
+        },
+        "error": {
+          "description": "Turn failed with an unrecoverable error.",
+          "properties": {
+            "error_code": {
+              "type": "string"
+            },
+            "error_message": {
+              "type": "string"
+            },
+            "thread_id": {
+              "type": "string"
+            }
+          }
+        },
+        "interrupted": {
+          "description": "Turn execution was canceled or interrupted.",
+          "properties": {
+            "reason": {
+              "type": "string"
+            },
+            "thread_id": {
+              "type": "string"
+            }
+          }
+        },
+        "tool_result": {
+          "description": "Notification containing output of completed tool call.",
+          "properties": {
+            "call_id": {
+              "type": "string"
+            },
+            "is_error": {
+              "type": "boolean"
+            },
+            "output": {
+              "type": "string"
+            },
+            "thread_id": {
+              "type": "string"
+            }
+          }
+        },
+        "tool_start": {
+          "description": "Notification that a tool call has begun execution.",
+          "properties": {
+            "arguments": {
+              "type": "object"
+            },
+            "call_id": {
+              "type": "string"
+            },
+            "thread_id": {
+              "type": "string"
+            },
+            "tool_name": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "type": "object"
+    },
+    "JsonRpcError": {
+      "description": "Standard JSON-RPC 2.0 error representation.",
+      "properties": {
+        "code": {
+          "type": "integer"
+        },
+        "data": {
+          "description": "Optional structured diagnostic data."
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "type": "object"
+    },
+    "JsonRpcNotification": {
+      "description": "Unsolicited notification dispatched to subscribers over SSE, stdio, or UDS.",
+      "properties": {
+        "jsonrpc": {
+          "enum": [
+            "2.0"
+          ],
+          "type": "string"
+        },
+        "method": {
+          "type": "string"
+        },
+        "params": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "method",
+        "params"
+      ],
+      "type": "object"
+    },
+    "JsonRpcRequest": {
+      "description": "Standard JSON-RPC 2.0 request payload.",
+      "properties": {
+        "id": {
+          "oneOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            }
+          ]
+        },
+        "jsonrpc": {
+          "enum": [
+            "2.0"
+          ],
+          "type": "string"
+        },
+        "method": {
+          "type": "string"
+        },
+        "params": {
+          "description": "Method-specific parameters object."
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id",
+        "method"
+      ],
+      "type": "object"
+    },
+    "JsonRpcResponse": {
+      "description": "Standard JSON-RPC 2.0 response payload.",
+      "properties": {
+        "error": {
+          "$ref": "#/definitions/JsonRpcError"
+        },
+        "id": {
+          "oneOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "jsonrpc": {
+          "enum": [
+            "2.0"
+          ],
+          "type": "string"
+        },
+        "result": {
+          "description": "Success payload if no error occurred."
+        }
+      },
+      "required": [
+        "jsonrpc",
+        "id"
+      ],
+      "type": "object"
+    },
+    "RpcMethods": {
+      "description": "Catalog of supported RPC methods with authorization requirements and parameter schemas.",
+      "properties": {
+        "auth/revoke_token": {
+          "authScope": "Admin",
+          "description": "Revoke an authentication token.",
+          "params": {
+            "properties": {
+              "token_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "token_id"
+            ],
+            "type": "object"
+          },
+          "result": {
+            "properties": {
+              "revoked": {
+                "type": "boolean"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "auth/rotate_token": {
+          "authScope": "Admin",
+          "description": "Rotate an authentication token and invalidate previous secret.",
+          "params": {
+            "properties": {
+              "token_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "token_id"
+            ],
+            "type": "object"
+          },
+          "result": {
+            "properties": {
+              "new_token": {
+                "type": "string"
+              },
+              "scope": {
+                "type": "string"
+              },
+              "token_id": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "auth/stream_ticket": {
+          "authScope": "Read",
+          "description": "Issue a short-lived single-use ticket for authenticating SSE event streams.",
+          "params": {
+            "properties": {
+              "thread_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "thread_id"
+            ],
+            "type": "object"
+          },
+          "requiresThreadOwnership": true,
+          "result": {
+            "properties": {
+              "expires_in_sec": {
+                "type": "integer"
+              },
+              "thread_id": {
+                "type": "string"
+              },
+              "ticket": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "config/read": {
+          "authScope": "Read",
+          "description": "Read sanitized configuration properties (all secrets and tokens redacted).",
+          "params": {
+            "type": "object"
+          },
+          "result": {
+            "properties": {
+              "config": {
+                "type": "object"
+              },
+              "redacted_secrets": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "initialize": {
+          "authScope": "Public",
+          "description": "Handshake to establish protocol capabilities and client identity.",
+          "params": {
+            "properties": {
+              "capabilities": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "client_name": {
+                "type": "string"
+              },
+              "client_version": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "result": {
+            "properties": {
+              "auth_required": {
+                "type": "boolean"
+              },
+              "capabilities": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "protocol_version": {
+                "type": "string"
+              },
+              "server_name": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "models/list": {
+          "authScope": "Read",
+          "description": "Query available LLM model catalog from configured provider backend.",
+          "params": {
+            "type": "object"
+          },
+          "result": {
+            "properties": {
+              "models": {
+                "items": {
+                  "properties": {
+                    "context_length": {
+                      "type": "integer"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "server/diagnostics": {
+          "authScope": "Read",
+          "description": "Retrieve daemon health, active threads, memory, and uptime metrics (secrets redacted).",
+          "params": {
+            "type": "object"
+          },
+          "result": {
+            "properties": {
+              "status": {
+                "type": "string"
+              },
+              "storage_connected": {
+                "type": "boolean"
+              },
+              "threads_active": {
+                "type": "integer"
+              },
+              "uptime_seconds": {
+                "type": "integer"
+              },
+              "version": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "thread/archive": {
+          "authScope": "Write",
+          "description": "Archive an existing thread.",
+          "params": {
+            "properties": {
+              "thread_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "thread_id"
+            ],
+            "type": "object"
+          },
+          "requiresThreadOwnership": true,
+          "result": {
+            "properties": {
+              "status": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "thread/create": {
+          "authScope": "Write",
+          "description": "Create a new conversation thread with authoritative ownership.",
+          "params": {
+            "properties": {
+              "title": {
+                "type": "string"
+              },
+              "workspace_path": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "result": {
+            "properties": {
+              "owner_id": {
+                "type": "string"
+              },
+              "thread_id": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "thread/delete": {
+          "authScope": "Write",
+          "description": "Permanently delete a thread.",
+          "params": {
+            "properties": {
+              "thread_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "thread_id"
+            ],
+            "type": "object"
+          },
+          "requiresThreadOwnership": true,
+          "result": {
+            "properties": {
+              "status": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "thread/fork": {
+          "authScope": "Write",
+          "description": "Fork a thread into a new branch (requires parent ownership).",
+          "params": {
+            "properties": {
+              "thread_id": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "thread_id"
+            ],
+            "type": "object"
+          },
+          "requiresThreadOwnership": true,
+          "result": {
+            "properties": {
+              "parent_thread_id": {
+                "type": "string"
+              },
+              "thread_id": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "thread/list": {
+          "authScope": "Read",
+          "description": "List conversation threads owned by or accessible to caller.",
+          "params": {
+            "type": "object"
+          },
+          "result": {
+            "properties": {
+              "threads": {
+                "items": {
+                  "properties": {
+                    "created_at_epoch_ms": {
+                      "type": "integer"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "owner_id": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "thread/read": {
+          "authScope": "Read",
+          "description": "Retrieve full thread metadata and message history.",
+          "params": {
+            "properties": {
+              "thread_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "thread_id"
+            ],
+            "type": "object"
+          },
+          "requiresThreadOwnership": true,
+          "result": {
+            "properties": {
+              "thread": {
+                "type": "object"
+              },
+              "turns": {
+                "items": {
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "thread/resume": {
+          "authScope": "Read",
+          "description": "Resume execution context for a previous thread.",
+          "params": {
+            "properties": {
+              "thread_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "thread_id"
+            ],
+            "type": "object"
+          },
+          "requiresThreadOwnership": true,
+          "result": {
+            "properties": {
+              "status": {
+                "type": "string"
+              },
+              "thread_id": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "thread/unarchive": {
+          "authScope": "Write",
+          "description": "Restore an archived thread.",
+          "params": {
+            "properties": {
+              "thread_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "thread_id"
+            ],
+            "type": "object"
+          },
+          "requiresThreadOwnership": true,
+          "result": {
+            "properties": {
+              "status": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "turn/approve": {
+          "authScope": "Execute",
+          "description": "Grant or reject interactive tool execution approval.",
+          "params": {
+            "properties": {
+              "decision": {
+                "enum": [
+                  "approve",
+                  "deny"
+                ],
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "turn_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "turn_id",
+              "decision"
+            ],
+            "type": "object"
+          },
+          "result": {
+            "properties": {
+              "acknowledged": {
+                "type": "boolean"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "turn/interrupt": {
+          "authScope": "Execute",
+          "description": "Halt an in-flight agent turn.",
+          "params": {
+            "properties": {
+              "thread_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "thread_id"
+            ],
+            "type": "object"
+          },
+          "requiresThreadOwnership": true,
+          "result": {
+            "properties": {
+              "interrupted": {
+                "type": "boolean"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "turn/start": {
+          "authScope": "Execute",
+          "description": "Dispatch an autonomous agent execution turn.",
+          "params": {
+            "properties": {
+              "model": {
+                "type": "string"
+              },
+              "plan_mode": {
+                "type": "boolean"
+              },
+              "prompt": {
+                "type": "string"
+              },
+              "sandbox_mode": {
+                "type": "string"
+              },
+              "thread_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "thread_id",
+              "prompt"
+            ],
+            "type": "object"
+          },
+          "requiresThreadOwnership": true,
+          "result": {
+            "properties": {
+              "status": {
+                "type": "string"
+              },
+              "turn_id": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "workspace/trust_grant": {
+          "authScope": "Admin",
+          "description": "Grant security authorization to execute commands in workspace directory.",
+          "params": {
+            "properties": {
+              "path": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "path"
+            ],
+            "type": "object"
+          },
+          "result": {
+            "properties": {
+              "granted": {
+                "type": "boolean"
+              }
+            },
+            "type": "object"
+          }
+        }
+      },
+      "type": "object"
+    }
+  },
+  "description": "JSON-RPC 2.0 and SSE event streaming protocol specification for the M31A autonomous coding agent daemon.",
+  "title": "M31A App Server JSON-RPC Protocol Schema",
+  "type": "object"
+}

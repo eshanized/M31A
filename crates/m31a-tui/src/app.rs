@@ -129,6 +129,17 @@ pub enum TuiEvent {
         model: String,
         state: crate::model_selector::ModelHealthState,
     },
+    ModelActivationResult {
+        slug: String,
+        candidate_client: ProviderClient,
+        result: std::result::Result<(), String>,
+    },
+    SessionResumeResult {
+        thread_id: String,
+        client: ProviderClient,
+        thread: m31a_storage::db::ThreadRecord,
+        result: std::result::Result<(), String>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -249,6 +260,42 @@ pub struct App {
     pub session_drafts: std::collections::HashMap<String, String>,
     /// Preserved transcript scroll position per session ID
     pub session_scrolls: std::collections::HashMap<String, usize>,
+}
+
+fn classify_connectivity_error(err_str: &str) -> crate::modals::ConnectivityStatus {
+    let lower = err_str.to_lowercase();
+    if lower.contains("401")
+        || lower.contains("403")
+        || lower.contains("unauthorized")
+        || lower.contains("forbidden")
+        || lower.contains("invalid api key")
+        || lower.contains("authentication")
+        || lower.contains("bad api key")
+        || lower.contains("missing api key")
+        || lower.contains("api key required")
+    {
+        crate::modals::ConnectivityStatus::AuthenticationFailed
+    } else if lower.contains("404")
+        || lower.contains("not found")
+        || lower.contains("model not found")
+        || lower.contains("unknown model")
+        || lower.contains("unsupported model")
+        || lower.contains("does not exist")
+    {
+        crate::modals::ConnectivityStatus::ModelUnsupported
+    } else if lower.contains("timeout") || lower.contains("timed out") || lower.contains("deadline") {
+        crate::modals::ConnectivityStatus::TimedOut
+    } else if lower.contains("connection refused")
+        || lower.contains("dns")
+        || lower.contains("resolve")
+        || lower.contains("unreachable")
+        || lower.contains("network is down")
+        || lower.contains("failed to connect")
+    {
+        crate::modals::ConnectivityStatus::Unreachable
+    } else {
+        crate::modals::ConnectivityStatus::Failed
+    }
 }
 
 impl App {
@@ -1039,12 +1086,14 @@ impl App {
             };
 
             if let Err(e) = m31a_provider::validate_provider_config(&provider_config) {
+                let err_msg = format!("Invalid configuration: {e}");
+                let status = classify_connectivity_error(&err_msg);
                 let _ = event_tx
                     .send(TuiEvent::SetupConnectivityResult {
                         generation,
-                        status: crate::modals::ConnectivityStatus::Failed,
+                        status,
                         details: None,
-                        error: Some(format!("Invalid configuration: {e}")),
+                        error: Some(err_msg),
                     })
                     .await;
                 return;
@@ -1053,12 +1102,14 @@ impl App {
             let client = match m31a_provider::ProviderBuilder::build_client(provider_config) {
                 Ok(c) => c,
                 Err(e) => {
+                    let err_msg = format!("Client construction failed: {e}");
+                    let status = classify_connectivity_error(&err_msg);
                     let _ = event_tx
                         .send(TuiEvent::SetupConnectivityResult {
                             generation,
-                            status: crate::modals::ConnectivityStatus::Failed,
+                            status,
                             details: None,
-                            error: Some(format!("Client construction failed: {e}")),
+                            error: Some(err_msg),
                         })
                         .await;
                     return;
@@ -1084,7 +1135,7 @@ impl App {
                     let _ = event_tx
                         .send(TuiEvent::SetupConnectivityResult {
                             generation,
-                            status: crate::modals::ConnectivityStatus::Failed,
+                            status: crate::modals::ConnectivityStatus::TimedOut,
                             details: None,
                             error: Some("Connection check timed out after 8s".to_string()),
                         })
@@ -1092,12 +1143,14 @@ impl App {
                     return;
                 }
                 Ok(Err(e)) => {
+                    let err_msg = format!("Endpoint connection failed: {e}");
+                    let status = classify_connectivity_error(&err_msg);
                     let _ = event_tx
                         .send(TuiEvent::SetupConnectivityResult {
                             generation,
-                            status: crate::modals::ConnectivityStatus::Failed,
+                            status,
                             details: None,
-                            error: Some(format!("Endpoint connection failed: {e}")),
+                            error: Some(err_msg),
                         })
                         .await;
                     return;
@@ -1127,7 +1180,7 @@ impl App {
                     let _ = event_tx
                         .send(TuiEvent::SetupConnectivityResult {
                             generation,
-                            status: crate::modals::ConnectivityStatus::Connected,
+                            status: crate::modals::ConnectivityStatus::TimedOut,
                             details: Some(crate::modals::ConnectivityDetails {
                                 endpoint_verified: true,
                                 model_verified: false,
@@ -1135,7 +1188,7 @@ impl App {
                                 latency_ms: Some(latency_ms),
                                 message: "Endpoint connected, but model availability check timed out (8s)".to_string(),
                             }),
-                            error: Some("Model availability check timed out".to_string()),
+                            error: Some("Model availability check timed out after 8s".to_string()),
                         })
                         .await;
                 }
@@ -1160,7 +1213,8 @@ impl App {
                 }
                 Ok(Err(e)) => {
                     let err_str = e.to_string();
-                    if err_str.contains("not supported") || err_str.contains("unsupported") {
+                    let lower = err_str.to_lowercase();
+                    if lower.contains("not supported") || lower.contains("unsupported") {
                         let _ = event_tx
                             .send(TuiEvent::SetupConnectivityResult {
                                 generation,
@@ -1178,10 +1232,11 @@ impl App {
                             })
                             .await;
                     } else {
+                        let status = classify_connectivity_error(&err_str);
                         let _ = event_tx
                             .send(TuiEvent::SetupConnectivityResult {
                                 generation,
-                                status: crate::modals::ConnectivityStatus::Failed,
+                                status,
                                 details: Some(crate::modals::ConnectivityDetails {
                                     endpoint_verified: true,
                                     model_verified: false,
@@ -1346,7 +1401,8 @@ impl App {
     }
 
     pub fn update_status_badges(&mut self) {
-        self.bottom_pane.todo_summary = m31a_tools::get_todo_badge();
+        self.bottom_pane.todo_summary =
+            m31a_tools::get_todo_badge_for_session(&self.session_id);
         if let Ok(Some(g)) = self.storage.get_goal(&self.session_id) {
             let label = if g.status == "active" {
                 format!("\"{}\"", g.objective)
@@ -2480,7 +2536,7 @@ impl App {
                         "flagship" | "default" => "nvidia/nemotron-3.5-lightning-30b-a3b",
                         _ => parts[1],
                     };
-                    if let Err(e) = self.switch_model(target_slug) {
+                    if let Err(e) = self.switch_model_async(target_slug) {
                         self.provider_status_message = Some(format!("Model switch failed: {e}"));
                     }
                 } else {
@@ -4584,12 +4640,12 @@ impl App {
                 Err(e) => return Err(anyhow::anyhow!("Failed to build runtime for probe: {e}")),
             };
             rt.block_on(async {
-                tokio::time::timeout(std::time::Duration::from_secs(10), async {
+                tokio::time::timeout(std::time::Duration::from_secs(5), async {
                     candidate_for_probe.test_model_availability().await?;
                     Ok::<(), anyhow::Error>(())
                 })
                 .await
-                .map_err(|_| anyhow::anyhow!("Connectivity probe timed out after 10s"))?
+                .map_err(|_| anyhow::anyhow!("Connectivity probe timed out after 5s"))?
             })
         })
         .join();
@@ -4620,7 +4676,188 @@ impl App {
             }
         }
 
-        // 6. Prepare complete replacement runtime
+        self.commit_model_switch(&target_slug, candidate_client)
+    }
+
+    /// Asynchronous, non-blocking model activation for interactive TUI operations.
+    pub fn switch_model_async(&mut self, slug: &str) -> Result<()> {
+        if self.turn_state.is_active() || self.current_turn_id.is_some() {
+            let err_msg = "Cannot switch model while a turn or agent execution is active.";
+            self.transcript.push(TranscriptItem::notice(
+                err_msg.to_string(),
+                NoticeLevel::Error,
+            ));
+            self.sync_virtualizer();
+            if self.auto_scroll {
+                self.scroll_to_bottom();
+            }
+            anyhow::bail!("{err_msg}");
+        }
+
+        let trimmed_slug = slug.trim();
+        if trimmed_slug.is_empty() {
+            let err_msg = "Model identifier cannot be empty.";
+            self.transcript.push(TranscriptItem::notice(
+                err_msg.to_string(),
+                NoticeLevel::Error,
+            ));
+            self.sync_virtualizer();
+            anyhow::bail!("{err_msg}");
+        }
+
+        let matched_slug = self
+            .available_models
+            .iter()
+            .find(|m| m.slug == trimmed_slug)
+            .map(|m| m.slug.clone())
+            .or_else(|| {
+                self.available_models
+                    .iter()
+                    .find(|m| m.slug.eq_ignore_ascii_case(trimmed_slug))
+                    .map(|m| m.slug.clone())
+            })
+            .or_else(|| {
+                m31a_provider::models::find_canonical_model(trimmed_slug).map(|c| c.id.clone())
+            });
+
+        let target_slug = match matched_slug {
+            Some(s) => s,
+            None => {
+                match ProviderType::resolve(
+                    self.config.model_provider.as_deref(),
+                    trimmed_slug,
+                    Some(&self.config.api_base),
+                ) {
+                    Ok(_) => trimmed_slug.to_string(),
+                    Err(e) => {
+                        let err_msg = format!("Unrecognized model '{}': {}", trimmed_slug, e);
+                        self.transcript
+                            .push(TranscriptItem::notice(err_msg.clone(), NoticeLevel::Error));
+                        self.sync_virtualizer();
+                        if self.auto_scroll {
+                            self.scroll_to_bottom();
+                        }
+                        anyhow::bail!("{err_msg}");
+                    }
+                }
+            }
+        };
+
+        let provider_type = match ProviderType::resolve(
+            self.config.model_provider.as_deref(),
+            &target_slug,
+            Some(&self.config.api_base),
+        ) {
+            Ok(pt) => pt,
+            Err(e) => {
+                let err_msg = format!(
+                    "Failed to resolve provider for model '{}': {}",
+                    target_slug, e
+                );
+                self.transcript
+                    .push(TranscriptItem::notice(err_msg.clone(), NoticeLevel::Error));
+                self.sync_virtualizer();
+                if self.auto_scroll {
+                    self.scroll_to_bottom();
+                }
+                anyhow::bail!("{err_msg}");
+            }
+        };
+
+        let provider_config = ProviderConfig {
+            provider_type,
+            api_base: Some(self.config.api_base.clone()),
+            api_key: self.config.api_key.clone().filter(|k| !k.trim().is_empty()),
+            model: target_slug.clone(),
+            extra: std::collections::HashMap::new(),
+        };
+
+        if let Err(e) = m31a_provider::validate_provider_config(&provider_config) {
+            let err_msg = format!(
+                "Configuration validation failed for model '{}': {}",
+                target_slug, e
+            );
+            self.transcript
+                .push(TranscriptItem::notice(err_msg.clone(), NoticeLevel::Error));
+            self.sync_virtualizer();
+            if self.auto_scroll {
+                self.scroll_to_bottom();
+            }
+            anyhow::bail!("{err_msg}");
+        }
+
+        let current_effort = self.nim_client.reasoning_effort().map(|s| s.to_string());
+        let candidate_client = match ProviderBuilder::build_client(provider_config) {
+            Ok(client) => client.with_reasoning_effort(current_effort),
+            Err(e) => {
+                let err_msg = format!(
+                    "Failed to build provider client for '{}': {}",
+                    target_slug, e
+                );
+                self.transcript
+                    .push(TranscriptItem::notice(err_msg.clone(), NoticeLevel::Error));
+                self.sync_virtualizer();
+                if self.auto_scroll {
+                    self.scroll_to_bottom();
+                }
+                anyhow::bail!("{err_msg}");
+            }
+        };
+
+        self.provider_status_message = Some(format!("Connecting to {}...", target_slug));
+        self.transcript.push(TranscriptItem::notice(
+            format!("Validating connectivity for model '{target_slug}'..."),
+            NoticeLevel::Info,
+        ));
+        self.sync_virtualizer();
+
+        let candidate_for_probe = candidate_client.clone();
+        let slug_for_probe = target_slug.clone();
+        let event_tx = self.event_tx.clone();
+        let task = async move {
+            let probe_res = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                candidate_for_probe.test_model_availability().await?;
+                Ok::<(), anyhow::Error>(())
+            })
+            .await;
+
+            let result = match probe_res {
+                Ok(Ok(())) => Ok(()),
+                Ok(Err(e)) => Err(e.to_string()),
+                Err(_) => Err("Connectivity probe timed out after 5s".to_string()),
+            };
+
+            let _ = event_tx
+                .send(TuiEvent::ModelActivationResult {
+                    slug: slug_for_probe,
+                    candidate_client: candidate_for_probe,
+                    result,
+                })
+                .await;
+        };
+
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn(task);
+        } else {
+            std::thread::spawn(move || {
+                if let Ok(rt) = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                {
+                    rt.block_on(task);
+                }
+            });
+        }
+
+        Ok(())
+    }
+
+    /// Atomically commits a validated candidate model client to application state.
+    pub fn commit_model_switch(
+        &mut self,
+        target_slug: &str,
+        candidate_client: ProviderClient,
+    ) -> Result<String> {
         let new_engine_runtime = Arc::new(
             m31a_agent_engine::agents::EngineAgentRuntime::new(
                 candidate_client.clone(),
@@ -4634,11 +4871,10 @@ impl App {
             )
             .with_trust_store(self.trust_store.clone()),
         );
-        let new_guardian = Arc::new(GuardianReviewer::new(&target_slug));
+        let new_guardian = Arc::new(GuardianReviewer::new(target_slug));
 
-        // 7. Atomic persistent configuration commit
         let mut candidate_config = self.config.clone();
-        candidate_config.model = target_slug.clone();
+        candidate_config.model = target_slug.to_string();
         if let Err(e) = candidate_config.save() {
             let err_msg = format!("Failed to persist model configuration for '{target_slug}': {e}");
             self.transcript
@@ -4650,17 +4886,16 @@ impl App {
             anyhow::bail!("{err_msg}");
         }
 
-        // 8. Single-commit state transition
         self.config = candidate_config;
-        self.active_model = target_slug.clone();
-        self.bottom_pane.active_model = target_slug.clone();
+        self.active_model = target_slug.to_string();
+        self.bottom_pane.active_model = target_slug.to_string();
         self.nim_client = candidate_client;
         self.tools.set_agent_runtime(new_engine_runtime.clone());
         self.engine_runtime = new_engine_runtime.clone();
         self.agent_runtime = new_engine_runtime;
         self.guardian = new_guardian;
         if let Some(ref mut ms) = self.models_screen_state {
-            ms.set_active_model(target_slug.clone());
+            ms.set_active_model(target_slug.to_string());
         }
         self.refresh_system_prompt();
         self.transcript.push(TranscriptItem::notice(
@@ -4672,13 +4907,12 @@ impl App {
             self.scroll_to_bottom();
         }
 
-        Ok(target_slug)
+        Ok(target_slug.to_string())
     }
 
     pub fn resume_session(&mut self, thread_id: &str) -> Result<()> {
         self.save_current_session_draft();
         if let Some(thread) = self.storage.get_thread(thread_id)? {
-            // Check provider resolution and build client FIRST before mutating self.active_model or self.session_id!
             let api_key = self.config.api_key.clone().filter(|k| !k.trim().is_empty());
             let provider_type = ProviderType::resolve(
                 self.config.model_provider.as_deref(),
@@ -4696,7 +4930,6 @@ impl App {
             let client = ProviderBuilder::build_client(provider_config)?
                 .with_reasoning_effort(self.config.reasoning_effort.clone());
 
-            // Probe client connectivity (bounded 5s)
             let candidate_for_probe = client.clone();
             let probe_res = std::thread::spawn(move || {
                 let rt = match tokio::runtime::Builder::new_current_thread()
@@ -4709,12 +4942,12 @@ impl App {
                     }
                 };
                 rt.block_on(async {
-                    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+                    tokio::time::timeout(std::time::Duration::from_secs(5), async {
                         candidate_for_probe.test_model_availability().await?;
                         Ok::<(), anyhow::Error>(())
                     })
                     .await
-                    .map_err(|_| anyhow::anyhow!("Connectivity probe timed out after 10s"))?
+                    .map_err(|_| anyhow::anyhow!("Connectivity probe timed out after 5s"))?
                 })
             })
             .join();
@@ -4735,81 +4968,165 @@ impl App {
                 }
             }
 
-            // Only AFTER candidate client is validated, tear down active turn and commit resumed state
-            if let Some(token) = self.cancel_token.take() {
-                token.cancel();
-            }
-            if let Some(ref turn_id) = self.current_turn_id.take() {
-                let _ = self.turn_state.transition_cancellation_requested(turn_id);
-                let _ = self.turn_state.transition_cancelling(turn_id);
-            }
-            self.turn_state.force_idle();
-            self.session_epoch += 1;
-            self.current_turn_id = None;
-            self.steer_tx = None;
-            self.chat_widget.turn_state = crate::chatwidget::TurnExecutionState::Idle;
-
-            self.session_id = thread.id.clone();
-            self.active_model = thread.model.clone();
-            self.bottom_pane.active_model = thread.model.clone();
-            self.nim_client = client;
-
-            let new_engine_runtime = Arc::new(
-                m31a_agent_engine::agents::EngineAgentRuntime::new(
-                    self.nim_client.clone(),
-                    self.tools.clone(),
-                    self.storage.clone(),
-                    self.exec_policy.clone(),
-                    self.cwd.clone(),
-                    Some(self.hooks.clone()),
-                    self.config.model_context_window,
-                    self.config.agents.max_depth as u32,
-                )
-                .with_trust_store(self.trust_store.clone()),
-            );
-            self.tools.set_agent_runtime(new_engine_runtime.clone());
-            self.engine_runtime = new_engine_runtime.clone();
-            self.agent_runtime = new_engine_runtime;
-            if let Some(ref mut ms) = self.models_screen_state {
-                ms.set_active_model(thread.model.clone());
-            }
-            self.guardian = Arc::new(GuardianReviewer::new(&thread.model));
-
-            // Re-evaluate workspace trust
-            let _ = self.trust_store.lock().unwrap().evaluate(&self.cwd);
-
-            self.transcript.clear();
-            self.chat_history.clear();
-            self.transcript.push(TranscriptItem::notice(
-                format!("Resumed session '{}' ({})", thread.title, thread.id),
-                NoticeLevel::Success,
-            ));
-
-            let items = self.storage.list_items(thread_id)?;
-            for (item_type, content, _id) in items {
-                match item_type.as_str() {
-                    "user" => {
-                        self.chat_history.push(ChatMessage::user(content.clone()));
-                        self.transcript.push(TranscriptItem::user(content));
-                    }
-                    "assistant" => {
-                        self.chat_history
-                            .push(ChatMessage::assistant(Some(content.clone()), None));
-                        self.transcript.push(TranscriptItem::assistant(content));
-                    }
-                    _ => {}
-                }
-            }
-            self.refresh_system_prompt();
-            self.sync_virtualizer();
-            self.restore_session_draft(thread_id);
-            self.current_screen = crate::screens::Screen::Chat;
-            if self.auto_scroll {
-                self.scroll_to_bottom();
-            }
+            self.commit_session_resume(thread_id, client, thread)
         } else {
             anyhow::bail!("Session thread '{}' not found", thread_id);
         }
+    }
+
+    /// Asynchronous, non-blocking session resume for interactive TUI operations.
+    pub fn resume_session_async(&mut self, thread_id: &str) -> Result<()> {
+        self.save_current_session_draft();
+        if let Some(thread) = self.storage.get_thread(thread_id)? {
+            let api_key = self.config.api_key.clone().filter(|k| !k.trim().is_empty());
+            let provider_type = ProviderType::resolve(
+                self.config.model_provider.as_deref(),
+                &thread.model,
+                Some(&self.config.api_base),
+            )?;
+            let provider_config = ProviderConfig {
+                provider_type,
+                api_base: Some(self.config.api_base.clone()),
+                api_key,
+                model: thread.model.clone(),
+                extra: std::collections::HashMap::new(),
+            };
+            m31a_provider::validate_provider_config(&provider_config)?;
+            let client = ProviderBuilder::build_client(provider_config)?
+                .with_reasoning_effort(self.config.reasoning_effort.clone());
+
+            self.provider_status_message = Some(format!("Resuming session {}...", thread_id));
+            self.transcript.push(TranscriptItem::notice(
+                format!("Verifying connectivity to resume session '{thread_id}' with model '{}'...", thread.model),
+                NoticeLevel::Info,
+            ));
+            self.sync_virtualizer();
+
+            let candidate_for_probe = client.clone();
+            let tid = thread_id.to_string();
+            let thread_record = thread.clone();
+            let event_tx = self.event_tx.clone();
+            let task = async move {
+                let probe_res = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                    candidate_for_probe.test_model_availability().await?;
+                    Ok::<(), anyhow::Error>(())
+                })
+                .await;
+
+                let result = match probe_res {
+                    Ok(Ok(())) => Ok(()),
+                    Ok(Err(e)) => Err(e.to_string()),
+                    Err(_) => Err("Connectivity probe timed out after 5s".to_string()),
+                };
+
+                let _ = event_tx
+                    .send(TuiEvent::SessionResumeResult {
+                        thread_id: tid,
+                        client: candidate_for_probe,
+                        thread: thread_record,
+                        result,
+                    })
+                    .await;
+            };
+
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                handle.spawn(task);
+            } else {
+                std::thread::spawn(move || {
+                    if let Ok(rt) = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                    {
+                        rt.block_on(task);
+                    }
+                });
+            }
+
+            Ok(())
+        } else {
+            anyhow::bail!("Session thread '{}' not found", thread_id);
+        }
+    }
+
+    /// Atomically commits a validated candidate session resume to application state.
+    pub fn commit_session_resume(
+        &mut self,
+        thread_id: &str,
+        client: ProviderClient,
+        thread: m31a_storage::db::ThreadRecord,
+    ) -> Result<()> {
+        if let Some(token) = self.cancel_token.take() {
+            token.cancel();
+        }
+        if let Some(ref turn_id) = self.current_turn_id.take() {
+            let _ = self.turn_state.transition_cancellation_requested(turn_id);
+            let _ = self.turn_state.transition_cancelling(turn_id);
+        }
+        self.turn_state.force_idle();
+        self.session_epoch += 1;
+        self.current_turn_id = None;
+        self.steer_tx = None;
+        self.chat_widget.turn_state = crate::chatwidget::TurnExecutionState::Idle;
+
+        self.session_id = thread.id.clone();
+        self.active_model = thread.model.clone();
+        self.bottom_pane.active_model = thread.model.clone();
+        self.nim_client = client;
+
+        let new_engine_runtime = Arc::new(
+            m31a_agent_engine::agents::EngineAgentRuntime::new(
+                self.nim_client.clone(),
+                self.tools.clone(),
+                self.storage.clone(),
+                self.exec_policy.clone(),
+                self.cwd.clone(),
+                Some(self.hooks.clone()),
+                self.config.model_context_window,
+                self.config.agents.max_depth as u32,
+            )
+            .with_trust_store(self.trust_store.clone()),
+        );
+        self.tools.set_agent_runtime(new_engine_runtime.clone());
+        self.engine_runtime = new_engine_runtime.clone();
+        self.agent_runtime = new_engine_runtime;
+        if let Some(ref mut ms) = self.models_screen_state {
+            ms.set_active_model(thread.model.clone());
+        }
+        self.guardian = Arc::new(GuardianReviewer::new(&thread.model));
+
+        // Re-evaluate workspace trust
+        let _ = self.trust_store.lock().unwrap().evaluate(&self.cwd);
+
+        self.transcript.clear();
+        self.chat_history.clear();
+        self.transcript.push(TranscriptItem::notice(
+            format!("Resumed session '{}' ({})", thread.title, thread.id),
+            NoticeLevel::Success,
+        ));
+
+        let items = self.storage.list_items(thread_id)?;
+        for (item_type, content, _id) in items {
+            match item_type.as_str() {
+                "user" => {
+                    self.chat_history.push(ChatMessage::user(content.clone()));
+                    self.transcript.push(TranscriptItem::user(content));
+                }
+                "assistant" => {
+                    self.chat_history
+                        .push(ChatMessage::assistant(Some(content.clone()), None));
+                    self.transcript.push(TranscriptItem::assistant(content));
+                }
+                _ => {}
+            }
+        }
+        self.refresh_system_prompt();
+        self.sync_virtualizer();
+        self.restore_session_draft(thread_id);
+        self.current_screen = crate::screens::Screen::Chat;
+        if self.auto_scroll {
+            self.scroll_to_bottom();
+        }
+
         Ok(())
     }
 
@@ -5344,6 +5661,61 @@ impl App {
                 }) = self.current_modal_mut()
                 {
                     picker_state.set_health(model, state);
+                }
+            }
+            TuiEvent::ModelActivationResult {
+                slug,
+                candidate_client,
+                result,
+            } => {
+                self.provider_status_message = None;
+                match result {
+                    Ok(()) => {
+                        if let Err(e) = self.commit_model_switch(&slug, candidate_client) {
+                            self.transcript.push(TranscriptItem::notice(
+                                format!("Failed to commit model switch to '{slug}': {e}"),
+                                NoticeLevel::Error,
+                            ));
+                        }
+                    }
+                    Err(e) => {
+                        self.transcript.push(TranscriptItem::notice(
+                            format!("Connectivity validation failed for model '{slug}': {e}"),
+                            NoticeLevel::Error,
+                        ));
+                    }
+                }
+                self.sync_virtualizer();
+                if self.auto_scroll {
+                    self.scroll_to_bottom();
+                }
+            }
+            TuiEvent::SessionResumeResult {
+                thread_id,
+                client,
+                thread,
+                result,
+            } => {
+                self.provider_status_message = None;
+                match result {
+                    Ok(()) => {
+                        if let Err(e) = self.commit_session_resume(&thread_id, client, thread) {
+                            self.transcript.push(TranscriptItem::notice(
+                                format!("Failed to commit resumed session '{thread_id}': {e}"),
+                                NoticeLevel::Error,
+                            ));
+                        }
+                    }
+                    Err(e) => {
+                        self.transcript.push(TranscriptItem::notice(
+                            format!("Cannot resume thread '{thread_id}': connectivity check failed: {e}"),
+                            NoticeLevel::Error,
+                        ));
+                    }
+                }
+                self.sync_virtualizer();
+                if self.auto_scroll {
+                    self.scroll_to_bottom();
                 }
             }
         }
