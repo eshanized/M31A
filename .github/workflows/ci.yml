@@ -1,0 +1,101 @@
+name: Rust CI
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+    branches: [main, master, develop]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  lint-and-format:
+    name: Lint & Format Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target/
+          key: ${{ runner.os }}-cargo-lint-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-lint-
+
+      - name: Verify workspace formatting
+        run: cargo fmt --all -- --check
+
+      - name: Verify workspace clippy with -D warnings
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+  test-suite:
+    name: Genuine Workspace Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target/
+          key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-test-
+
+      - name: Run full workspace test execution
+        run: env -u NVIDIA_API_KEY cargo test --workspace
+
+      - name: Run workspace trust verification suite
+        run: cargo test -p m31a-trust
+
+      - name: Run slash-command consistency and keybinding suite
+        run: cargo test -p m31a-composer -p m31a-tui
+
+      - name: Run integrity verification test suite
+        run: cargo test -p m31a-verify
+
+      - name: Run architectural maturity e2e test
+        run: cargo test -p m31a-agent-engine --test architectural_maturity_e2e_test
+
+  live-nvidia-suite:
+    name: Live NVIDIA NIM Verification Suite
+    needs: test-suite
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && secrets.NVIDIA_API_KEY != '')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run live provider integration tests
+        env:
+          M31A_RUN_LIVE_NVIDIA_TESTS: "1"
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+        run: |
+          cargo test -p m31a-provider --features live-nvidia-tests --test live_provider_test -- --ignored --test-threads=1
+          cargo test -p m31a-agent-engine --features live-nvidia-tests --test live_nvidia_e2e -- --ignored --test-threads=1
+          cargo test -p m31a-cli --features live-nvidia-tests --test live_nvidia_cli -- --ignored --test-threads=1
+          cargo test -p m31a-tui --features live-nvidia-tests --test live_nvidia_activation -- --ignored --test-threads=1

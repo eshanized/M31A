@@ -1,18 +1,44 @@
-name: Bug Report
-description: File a bug report to help us improve M31A
-title: "[Bug]: "
-labels: ["bug", "needs-triage"]
+name: "Bug Report"
+description: "File a reproducible bug or unexpected error in M31A"
+title: "[BUG]: "
+labels: ["bug", "triage"]
 body:
   - type: markdown
     attributes:
       value: |
-        Thanks for taking the time to report an issue! Please provide as much detail as possible so we can reproduce and fix it.
-  - type: input
-    id: version
+        Thank you for reporting an issue! Before submitting, please check if a similar issue already exists.
+  - type: textarea
+    id: description
     attributes:
-      label: M31A Version
-      description: What version of M31A are you running? (Run `m31a --version`)
-      placeholder: "m31a 0.1.0"
+      label: Bug Description
+      description: A clear and concise description of what the bug is.
+      placeholder: Describe the problem...
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: Exact steps or command sequence to reproduce the behavior.
+      placeholder: |
+        1. Run 'm31a "..."'
+        2. Press 'Ctrl+M'
+        3. See error...
+    validations:
+      required: true
+  - type: textarea
+    id: doctor_output
+    attributes:
+      label: Output of `m31a doctor`
+      description: Please paste the full output of `m31a doctor`.
+      render: shell
+    validations:
+      required: false
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: A clear description of what you expected to happen.
     validations:
       required: true
   - type: dropdown
@@ -21,31 +47,27 @@ body:
       label: Operating System
       options:
         - Linux (x86_64)
-        - macOS (Intel - x86_64)
-        - Windows (x86_64)
+        - Linux (aarch64 / ARM)
+        - Linux (WSL2)
+        - macOS (Apple Silicon M-series)
+        - macOS (Intel)
+        - Windows
     validations:
       required: true
-  - type: textarea
-    id: description
+  - type: dropdown
+    id: model
     attributes:
-      label: Describe the Bug
-      description: A clear and concise description of what the bug is.
-    validations:
-      required: true
-  - type: textarea
-    id: reproduction
-    attributes:
-      label: Steps to Reproduce
-      description: Steps to reproduce the behavior.
-      placeholder: |
-        1. Run `m31a mission run "..."`
-        2. Inspect output
-        3. See error
-    validations:
-      required: true
+      label: NVIDIA NIM Model Used
+      options:
+        - nvidia/nemotron-3.5-lightning-30b-a3b (default)
+        - nvidia/nemotron-3.5-bolt-e4b
+        - deepseek-ai/deepseek-v4.1-flash
+        - mistralai/codestral-22b-instruct-v0.1
+        - nvidia/llama-3.1-nemotron-70b-instruct
+        - Other (specify in description)
   - type: textarea
     id: logs
     attributes:
-      label: Logs or CLI Output
-      description: Please copy and paste any relevant logs, terminal output, or stack traces.
+      label: Relevant Log Output or Crash Traces
+      description: Paste any error messages, backtraces (with RUST_BACKTRACE=1), or logs.
       render: shell

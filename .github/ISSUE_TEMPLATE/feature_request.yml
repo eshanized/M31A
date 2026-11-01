@@ -1,12 +1,12 @@
-name: Feature Request
-description: Suggest an idea or enhancement for M31A
-title: "[Feature]: "
+name: "Feature Request"
+description: "Suggest an idea or enhancement for M31A"
+title: "[FEATURE]: "
 labels: ["enhancement"]
 body:
   - type: markdown
     attributes:
       value: |
-        Thank you for suggesting a feature or improvement! Please describe the use case and how it fits into M31A's runtime governance architecture.
+        We love feedback and ideas! Tell us what you want to see improved or added to M31A.
   - type: textarea
     id: problem
     attributes:
@@ -18,17 +18,29 @@ body:
   - type: textarea
     id: solution
     attributes:
-      label: Proposed Solution or Behavior
+      label: Describe the Solution You'd Like
       description: A clear and concise description of what you want to happen.
     validations:
       required: true
   - type: textarea
     id: alternatives
     attributes:
-      label: Alternatives Considered
-      description: A clear and concise description of any alternative solutions or features you've considered.
-  - type: textarea
-    id: additional-context
+      label: Describe Alternatives You've Considered
+      description: Any alternative solutions or features you've considered.
+  - type: dropdown
+    id: component
     attributes:
-      label: Additional Context
-      description: Add any other context, architecture considerations, or screenshots about the feature request here.
+      label: Affected Subsystem / Component
+      options:
+        - CLI / Subcommands
+        - TUI (Terminal User Interface)
+        - Agent Engine / Vibe Loop / Speculative Arena
+        - NVIDIA NIM Provider / Model Integration
+        - Sandbox / ExecPolicy / Security
+        - App Server / JSON-RPC Protocol
+        - TypeScript SDK (@m31a/sdk)
+        - Python SDK (m31a)
+        - Tool Suite / Patch Engine
+        - Other
+    validations:
+      required: true

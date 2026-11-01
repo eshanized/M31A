@@ -1,0 +1,33 @@
+name: "Model / Provider Request"
+description: "Request support or optimization for an NVIDIA NIM model slug or provider feature"
+title: "[MODEL]: "
+labels: ["model-support"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        M31A connects with NVIDIA NIM frontier intelligence. Use this template to request dedicated support, benchmark validations, or special parameter handling for specific model slugs.
+  - type: input
+    id: model_slug
+    attributes:
+      label: Model Slug / Identifier
+      description: Exact model slug on build.nvidia.com (e.g. 'nvidia/nemotron-4-340b-instruct')
+      placeholder: "org/model-name"
+    validations:
+      required: true
+  - type: textarea
+    id: use_case
+    attributes:
+      label: Use Case & Motivation
+      description: What makes this model desirable for autonomous coding, reasoning, or tool-calling?
+    validations:
+      required: true
+  - type: checkboxes
+    id: capabilities
+    attributes:
+      label: Required Model Capabilities
+      options:
+        - label: Multi-step Tool Calling (Function Calling)
+        - label: Thinking / Reasoning Stream (DeepSeek R1 style)
+        - label: Extended Context (> 64k tokens)
+        - label: Code Infilling / FIM (Fill-in-the-Middle)
