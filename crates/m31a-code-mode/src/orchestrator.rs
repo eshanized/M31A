@@ -243,8 +243,14 @@ mod tests {
             await tools.read_file({"path": "Cargo.toml", "start_line": 1, "end_line": 3})
         "#;
 
+        let policy = if m31a_sandbox::SandboxRunner::new().has_bwrap() {
+            SandboxPolicy::WorkspaceWrite
+        } else {
+            SandboxPolicy::DangerFullAccess
+        };
+
         let res = orch
-            .execute_batch(script, &registry, &cwd, SandboxPolicy::WorkspaceWrite)
+            .execute_batch(script, &registry, &cwd, policy)
             .await
             .unwrap();
         assert!(res.contains("Starting orchestration..."));
