@@ -92,6 +92,10 @@ impl WorkspaceScanner {
             };
 
             for entry in entries.flatten() {
+                if candidates.len() >= max_entries {
+                    break;
+                }
+
                 let path = entry.path();
                 let file_name = entry.file_name();
                 let name_str = file_name.to_string_lossy();

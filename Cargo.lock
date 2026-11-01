@@ -1619,6 +1619,7 @@ dependencies = [
  "prost 0.13.5",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.21",
  "tokio",
  "tonic 0.12.3",
@@ -1688,6 +1689,7 @@ dependencies = [
  "m31a-trust",
  "ratatui",
  "serde",
+ "tempfile",
  "unicode-segmentation",
  "unicode-width 0.2.0",
  "uuid",
@@ -1731,6 +1733,7 @@ dependencies = [
  "m31a-term",
  "ratatui",
  "serde",
+ "serde_json",
  "similar",
  "unicode-width 0.2.0",
 ]
@@ -1805,6 +1808,7 @@ dependencies = [
  "anyhow",
  "regex",
  "serde",
+ "serde_json",
  "tempfile",
  "unicode-segmentation",
 ]

@@ -519,12 +519,9 @@ impl TelemetryReducer {
                 total_tokens,
                 ..
             } => {
-                if let Some(stats) = self.session_stats.remove(session_id) {
+                if let Some(_stats) = self.session_stats.remove(session_id) {
                     self.global_stats.total_turns += total_turns;
                     self.global_stats.total_tokens += total_tokens;
-                    self.global_stats.total_tool_invocations +=
-                        stats.tool_invocations.values().sum::<usize>();
-                    self.global_stats.total_errors += stats.errors;
                 }
             }
             TelemetryEvent::TurnEnd {
@@ -547,6 +544,7 @@ impl TelemetryReducer {
                     *stats.tool_invocations.entry(tool_name.clone()).or_insert(0) += 1;
                     if !success {
                         stats.errors += 1;
+                        self.global_stats.total_errors += 1;
                     }
                 }
                 self.global_stats.total_tool_invocations += 1;

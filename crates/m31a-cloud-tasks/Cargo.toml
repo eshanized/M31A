@@ -26,3 +26,6 @@ tonic-build = "0.12"
 [features]
 default = []
 mock = []
+
+[dev-dependencies]
+tempfile = { workspace = true }

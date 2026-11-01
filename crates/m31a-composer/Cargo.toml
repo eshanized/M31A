@@ -16,3 +16,6 @@ uuid = { workspace = true }
 m31a-fuzzy = { workspace = true }
 m31a-term = { workspace = true }
 m31a-trust = { path = "../m31a-trust" }
+
+[dev-dependencies]
+tempfile = { workspace = true }

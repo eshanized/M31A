@@ -970,6 +970,7 @@ impl FeatureFlagManager {
         })
         .await;
 
+        drop(flags);
         self.save_to_storage().await?;
         Ok(())
     }
@@ -1011,6 +1012,7 @@ impl FeatureFlagManager {
         })
         .await;
 
+        drop(flags);
         self.save_to_storage().await?;
         Ok(())
     }
@@ -1052,6 +1054,7 @@ impl FeatureFlagManager {
         })
         .await;
 
+        drop(flags);
         self.save_to_storage().await?;
         Ok(())
     }
