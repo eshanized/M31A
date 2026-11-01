@@ -1,70 +1,34 @@
-<p align="center">
-  <img src="../assets/M31A.svg" alt="M31 Autonomous Logo" width="96" height="96">
-</p>
+# M31A Documentation Hub
 
-# Documentation Index
+Welcome to the official documentation hub for **M31A**, the high-performance, autonomous agentic coding assistant powered by NVIDIA NIM frontier intelligence.
 
-Welcome to the documentation for **M31 Autonomous (M31A)**, a Rust-native autonomous software-engineering runtime.
+---
 
-> **The model proposes. The runtime decides.**
+## Documentation Index
 
-M31A is under active development. For security-sensitive, platform-specific, and release-critical behavior, prefer executable source, tests, CI evidence, and the current release metadata over informal descriptions.
+### 📘 User Guides
+- [**Getting Started Walkthrough**](GETTING_STARTED.md): Step-by-step installation, NVIDIA NIM credential setup, first interactive session, and essential workflows.
+- [**Terminal User Interface (TUI) User Guide**](TUI_GUIDE.md): Interactive features, keyboard shortcuts, modal dialogs, and slash commands.
+- [**Configuration Guide**](CONFIGURATION.md): In-depth guide to `~/.m31a/config.toml`, profiles, feature flags, and approval presets.
+- [**CLI Command Reference**](CLI_REFERENCE.md): Complete exhaustive reference of all 54 CLI subcommands, options, and shell environment variables.
+- [**Extensions, Skills & MCP Integration**](EXTENSIONS_AND_SKILLS.md): Authoring custom skills with YAML frontmatter, instruction templates, and integrating external Model Context Protocol (MCP) servers.
 
-## Choose your path
+### 🛠️ Developer & Architecture Manuals
+- [**System Architecture**](ARCHITECTURE.md): Deep architectural manual covering the multi-turn agent engine, NVIDIA NIM SSE streaming, 18-tool suite, and the 39-crate workspace.
+- [**Sandbox & Security Architecture**](SANDBOX_SECURITY.md): Deep dive into Linux Bubblewrap namespace isolation, read-only path masks, AST/prefix ExecPolicy, and the Guardian supervisor circuit breaker.
+- [**App Server & JSON-RPC Protocol**](APP_SERVER_RPC.md): Specification of the 40+ JSON-RPC 2.0 methods and notification events for IDE extensions and external orchestrators.
+- [**Multi-Agent Swarm & Distributed Mesh**](SWARM_AND_MULTI_AGENT.md): Multi-agent swarms with specialized roles (`Architect`, `Coder`, `Tester`, `Guardian`), cross-agent message boards, and path concurrency locks.
+- [**Crates Directory Catalog**](../crates/README.md): Exhaustive index and architectural map of all 39 crates in the Cargo workspace.
 
-### I want to use M31A
-- [Installation](getting-started/installation.md) — obtain a binary or build from source.
-- [Quickstart](getting-started/quickstart.md) — initialize a workspace, configure a model, and run an execution.
-- [CLI reference](subsystems/CLI.md) — command hierarchy, options, output formats, and exit behavior.
-- [Configuration](subsystems/CONFIGURATION.md) — config locations, precedence, profiles, model selection, and settings authority.
-- [Platform support](PLATFORM-SUPPORT.md) — distinguish supported platforms from integrated or compile-checked targets.
-- [Deployment and channels](DEPLOYMENT.md) — production/development separation, installation, update, and rollback behavior.
-- [Troubleshooting](operations/troubleshooting.md) — common setup, model, runtime, TUI, persistence, and update failures.
+### 🖥️ TUI Architecture & Developer Specifications
+- [**TUI Architecture Specification**](tui/TUI-ARCHITECTURE.md): Event loops, Ratatui render pipelines, and widget trees.
+- [**Transcript Rendering Architecture**](tui/TRANSCRIPT-RENDERING-ARCHITECTURE.md): Streaming markdown rendering and collapsible DeepSeek R1 reasoning paths.
+- [**Model Selector Specification**](tui/MODEL-SELECTOR-SPEC.md): Dynamic modal dialog querying `/v1/models` on NVIDIA NIM.
+- [**Approval Interaction Specification**](tui/APPROVAL-INTERACTION-SPEC.md): Human-in-the-loop modal dialogs for mutating tool executions.
+- [**TUI State Machines**](tui/TUI-STATE-MACHINES.md): Formal state machines governing mode switches, modal overlays, and event channels.
+- [**TUI Session Lifecycle**](tui/TUI-SESSION-LIFECYCLE.md): Session lifecycle from launch through turn execution and shutdown.
+- [**TUI Interaction Matrix**](tui/TUI-INTERACTION-MATRIX.md): Action dispatch matrix mapping keyboard and mouse events to state transitions.
 
-### I want to understand how it works
-- [Runtime architecture](architecture/ARCHITECTURE.md) — layers, roles, capability families, and execution stages.
-- [Runtime authority model](architecture/RUNTIME-AUTHORITY.md) — which components own state and non-delegable decisions.
-- [Prompt authority](architecture/PROMPT-AUTHORITY.md) — trust boundaries and untrusted model/repository input.
-- [Autonomy subsystem](subsystems/AUTONOMY.md) — execution-loop and completion controls.
-- [Policy subsystem](subsystems/POLICY.md) — authorization decisions and approvals.
-- [Security subsystem](subsystems/SECURITY.md) — security boundaries, threat controls, and limitations.
-- [Tools subsystem](subsystems/TOOLS.md) — available tools and their behavior.
-- [Recovery subsystem](subsystems/RECOVERY.md) — checkpoints, interruption, recovery, and replanning.
-- [Testing subsystem](subsystems/TESTING.md) — tests and acceptance evaluation.
-- [Deployment](DEPLOYMENT.md) and [release engineering](RELEASE.md) — artifact lifecycle and release gates.
-
-### I want to contribute
-- [Contributing guide](../CONTRIBUTING.md) — contribution workflow and project conventions.
-- [Agent instructions](../AGENTS.md) — architectural invariants and implementation guardrails for humans and coding agents.
-- [Documentation roadmap](DOCUMENTATION-ROADMAP.md) — planned documentation improvements and acceptance criteria.
-- [Wiring remediation audit](audits/M31A-WIRING-REMEDIATION.md) — a historical audit; verify its findings against current source before treating them as current state.
-
-## Existing subsystem references
-
-| Area | Guide |
-|---|---|
-| CLI, commands, telemetry | [CLI.md](subsystems/CLI.md) |
-| Configuration authority and profiles | [CONFIGURATION.md](subsystems/CONFIGURATION.md) |
-| Tools and capabilities | [TOOLS.md](subsystems/TOOLS.md) |
-| Policy decisions and approvals | [POLICY.md](subsystems/POLICY.md) |
-| Security and hardening | [SECURITY.md](subsystems/SECURITY.md) |
-| Autonomous execution | [AUTONOMY.md](subsystems/AUTONOMY.md) |
-| Recovery and checkpoints | [RECOVERY.md](subsystems/RECOVERY.md) |
-| Test strategy and evaluations | [TESTING.md](subsystems/TESTING.md) |
-| Plugin and process confinement model | [PLUGIN.md](subsystems/PLUGIN.md) |
-| User-defined slash commands | [USER-DEFINED-SLASH-COMMANDS.md](subsystems/USER-DEFINED-SLASH-COMMANDS.md) |
-
-## Reference and operational policies
-
-- [Platform support](PLATFORM-SUPPORT.md)
-- [Deployment and update channels](DEPLOYMENT.md)
-- [Release procedure](RELEASE.md)
-- [Security reporting](../SECURITY.md)
-- [Contributing](../CONTRIBUTING.md)
-- [Code of Conduct](../CODE_OF_CONDUCT.md)
-
-## Documentation quality rules
-
-Documentation must describe current implemented behavior and state its evidence level. Distinguish **implemented**, **tested**, **CI-verified**, **release-qualified**, and **planned**. A published binary does not automatically mean that its target platform is fully supported. A defined live integration test does not prove that the integration is currently passing.
-
-See the [Documentation Roadmap](DOCUMENTATION-ROADMAP.md) for the proposed target structure, priorities, and definition of done.
+### 📦 Client SDKs
+- [**Python SDK (`m31a`)**](../sdk/python/README.md): Native async and synchronous Python client with zero external dependencies.
+- [**TypeScript SDK (`@m31a/sdk`)**](../sdk/typescript/README.md): Strongly typed Node.js and browser client supporting streaming events and multiple transports.

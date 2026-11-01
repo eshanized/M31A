@@ -1,0 +1,43 @@
+# M31A Configuration Example
+# Place this at ~/.m31a/config.toml or pass via -c / -p
+
+# NVIDIA NIM Model (Dynamic Discovery supports any custom or hosted model slug)
+# Options:
+# - "nvidia/nemotron-3.5-lightning-30b-a3b" (Default frontier workhorse with reasoning support)
+# - "nvidia/nemotron-3.5-bolt-e4b" (High-speed efficient generation)
+# - "deepseek-ai/deepseek-v4.1-flash" (Advanced reasoning with thinking stream)
+# - "mistralai/codestral-22b-instruct-v0.1" (Code-specialized model)
+# - "nvidia/llama-3.1-nemotron-70b-instruct" (High tool-calling precision)
+model = "nvidia/nemotron-3.5-lightning-30b-a3b"
+
+# NVIDIA NIM Base URL
+api_base = "https://integrate.api.nvidia.com/v1"
+
+# NVIDIA NIM API Key (or export NVIDIA_API_KEY in your shell environment)
+# api_key = "nvapi-..."
+
+# Sandbox Policy: "read-only", "workspace-write", "danger-full-access"
+sandbox = "workspace-write"
+
+# Approval Policy:
+# - "on-request": Model decides when to ask for human approval for mutating actions
+# - "never": Never ask for approval; errors return directly to model
+# - "approve-for-me": Automated review supervisor (Guardian) validates actions
+approval = "on-request"
+
+# Background daemon auto-start for app-server
+auto_start_daemon = true
+
+[features]
+# Keys must match real `FeatureKey` names (see `m31a features list`); unknown keys are warned about and ignored.
+code_mode = true
+guardian_v2 = true
+apply_patch_streaming = true
+unified_exec = true
+worktree_management = true
+multi_agent_v2 = true
+
+# External MCP Servers configuration
+# [mcp_servers.filesystem]
+# command = "npx"
+# args = ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/dir"]

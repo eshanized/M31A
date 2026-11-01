@@ -1,119 +1,253 @@
-# Contributing to M31 Autonomous (M31A)
+# Contributing to M31A
 
-Thank you for your interest in contributing to M31A! We welcome bug reports, documentation improvements, architectural proposals, and pull requests.
+Thank you for your interest in contributing to **M31A**! We welcome contributions from developers, researchers, and systems engineers worldwide.
 
-M31A is an autonomous software-engineering runtime built on high-assurance design principles:
-
-> **"The model proposes. The runtime decides."**
-
-To maintain system reliability, security boundaries, and deterministic behavior, all contributions must adhere to the engineering guidelines detailed below.
+This document outlines the guidelines, development setup, and workflow for contributing to the M31A monorepo.
 
 ---
 
-## Non-Negotiable Architectural Invariants
+## Table of Contents
 
-Before writing or refactoring code, please review these fundamental rules:
-
-1. **Single Crate Architecture**: Do NOT split M31A into a Cargo workspace. Module boundaries (`pub(crate)`) must enforce domain encapsulation.
-2. **Pure Rust Core**: No Python, Node.js, or GPU runtime dependencies are permitted for the core runtime or tests.
-3. **Policy Supremacy**: Every side effect (filesystem, process, git, network) MUST pass through the Layer 1 Policy Gate. No "internal" or "debug" bypasses are allowed.
-4. **TUI is a Pure Projection**: The Ratatui terminal cockpit is strictly a read-only projection of authoritative SQLite state; it must never maintain authoritative execution state.
-5. **No Fake Success or Placeholders**: Do not introduce mock returns, TODO-only implementations, or silent fallbacks. Unimplemented or blocked paths must return explicit typed errors.
-6. **Completion Requires Evidence**: No mission, task, or verification target may be marked complete without deterministic execution evidence.
-7. **Bounded Execution**: Every loop, retry counter, process spawn, and memory allocation must be bounded. Never introduce unbounded background operations.
-8. **Real Cancellation**: All asynchronous tasks and supervised processes must support instant, clean cancellation and signal escalation.
-9. **External Data is Untrusted**: Prompt inputs, repository contents, model outputs, and plugin payloads are untrusted and must pass through trust envelopes and input sanitization.
-10. **Layer Dependency Discipline**: Architecture layers (L0 through L9) depend downward only. A lower layer (e.g. L1 Security) may never import or depend on a higher layer (e.g. L8 Autonomy or L9 CLI).
+- [Code of Conduct](#code-of-conduct)
+- [Monorepo Architecture](#monorepo-architecture)
+- [Prerequisites & Development Setup](#prerequisites--development-setup)
+- [Building the Project](#building-the-project)
+- [Running Tests](#running-tests)
+- [Code Style & Quality Standards](#code-style--quality-standards)
+- [Commit Message Conventions](#commit-message-conventions)
+- [Submitting a Pull Request](#submitting-a-pull-request)
+- [Reporting Bugs & Suggesting Features](#reporting-bugs--suggesting-features)
 
 ---
 
-## Development Setup
+## Code of Conduct
 
-### Prerequisites
+All contributors and maintainers are expected to abide by our [Code of Conduct](CODE_OF_CONDUCT.md). Please report unacceptable behavior to `security@tonmoyinfrastructure.org`.
 
-- **Rust**: 1.85+ (stable toolchain, per Cargo.toml `rust-version`)
-- **Git**: 2.30+
-- **Platform**: Linux (x86_64), macOS (Intel x86_64), or Windows (x86_64)
+---
 
-### Clone & Build
+## Monorepo Architecture
 
-```bash
-git clone https://github.com/eshanized/M31A.git
-cd M31A
+M31A is organized as a Cargo workspace with Bazel build support, containing 39 Rust crates, official SDKs, and examples:
 
-# Validate environment and toolchain
-make bootstrap
-
-# Check compilation across all targets (both channels)
-make check
-
-# Build debug binary (production channel by default)
-make build
-
-# Or build development channel binary
-make build-dev
-
-# Install locally side-by-side (installs m31a-dev into PATH)
-make install-dev
+```
+M31A/
+├── Cargo.toml                  # Cargo workspace definition (Rust 2024 edition)
+├── BUILD.bazel / MODULE.bazel  # Multi-platform Bazel 7 configuration
+├── crates/                     # 39 modular domain crates
+│   ├── m31a-cli/               # Unified 'm31a' binary entrypoint (54 subcommands)
+│   ├── m31a-core/              # Core types, configuration, session models, skills
+│   ├── m31a-provider/          # NVIDIA NIM SSE streaming, models catalog, reasoning
+│   ├── m31a-agent-engine/      # Autonomous vibe coding, spec arena, turn execution
+│   ├── m31a-tui/               # Ratatui/Crossterm terminal UI
+│   ├── m31a-tools/             # 18-tool suite & Codex multi-file patch engine
+│   ├── m31a-sandbox/           # Linux Bubblewrap isolation & protection masks
+│   ├── m31a-execpolicy/        # Starlark/prefix execution policy engine
+│   ├── m31a-guardian/          # Supervisor review engine & circuit breaker
+│   ├── m31a-storage/           # SQLite threads, checkpoints, pub-sub board
+│   ├── m31a-app-server/        # JSON-RPC 2.0 daemon (stdio / UDS / HTTP)
+│   └── ...                     # Additional specialized subsystem crates
+├── sdk/
+│   ├── python/                 # Official Python SDK (async & sync client)
+│   └── typescript/             # Official TypeScript SDK (@m31a/sdk)
+├── examples/                   # Reference implementations & architectural examples
+│   └── distributed_task_mesh/  # Distributed multi-agent task orchestration demo
+└── docs/                       # Technical specs, architecture docs, and reports
 ```
 
-Channel notes (see `docs/DEPLOYMENT.md`): build profiles (`dev`/`release`)
-are compiler settings, not the deployment channel. The channel is the
-compile-time `development` cargo feature (production = default). A
-development build is never a policy/sandbox bypass — both channels enforce
-identical security controls.
+For a comprehensive explanation of each crate's responsibilities, consult [`crates/README.md`](crates/README.md) and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ---
 
-## Verification Pipeline
+## Prerequisites & Development Setup
 
-Before submitting a pull request, run the canonical verification suite:
+### System Requirements
+
+- **Linux** (x86_64 or aarch64) or **macOS** (Apple Silicon or Intel).
+  - *Linux note*: `bubblewrap` (`bwrap`) is required for sandbox execution:
+    ```bash
+    sudo apt install bubblewrap   # Debian/Ubuntu
+    sudo dnf install bubblewrap   # Fedora/RHEL
+    sudo pacman -S bubblewrap     # Arch Linux
+    ```
+- **Rust Toolchain**: Rust stable (version 1.85+ / 2024 edition recommended)
+  ```bash
+  rustup default stable
+  rustup component add clippy rustfmt
+  ```
+- **Bazel (Optional)**: Bazel 7.4+ or Bazelisk (`bazel-contrib/setup-bazel`).
+- **Python (Optional for Python SDK)**: Python >= 3.10
+- **Node.js (Optional for TypeScript SDK)**: Node.js >= 18 and npm
+
+---
+
+## Building the Project
+
+### Using Cargo
+
+To compile the entire workspace in debug mode:
 
 ```bash
-make verify
+cargo build --workspace
 ```
 
-`make verify` executes all 4 canonical quality gates in order:
-1. Format check (`make fmt-check`)
-2. Configuration authority and secret guards (`make config-guard`, `make secret-scan`)
-3. Type checks across both channels (`make check`)
-4. Channel mutual exclusion check (`make check-channels`)
-5. Linter checks across both channels (`make clippy`)
-6. Full deterministic test suite (`make test`)
-
-### Targeted Verification Commands
+To compile the release binary:
 
 ```bash
-# Run unit tests only (fast, bounded resources)
-make test-unit
+cargo build --release -p m31a-cli
+# Resulting binary: target/release/m31a
+```
 
-# Run all TUI & onboarding regression suites
-make test-tui
+To run the binary directly:
 
-# Run real POSIX pseudo-terminal (PTY) lifecycle tests
-make test-pty
+```bash
+cargo run -p m31a-cli -- doctor
+```
 
-# Run critical smoke verification suite (unit, contracts, PTY)
-make smoke
+### Using Bazel
 
-# Run individual integration test targets
-cargo test --test docs_contract
-cargo test --test runtime_kernel_events_and_ids
-cargo test --test golden_tui_pty_scenario
+To build the release binary with Bazel:
+
+```bash
+bazel build //bazel:m31a
 ```
 
 ---
 
-## Pull Request Guidelines
+## Running Tests
 
-1. **Focused Commits**: Keep changes atomic and well-documented with clear conventional commit messages (`feat:`, `fix:`, `docs:`, `chore:`, `refactor:`).
-2. **Add Tests Alongside Stateful Changes**: Any modification to policies, sandboxes, process management, or task transitions must include accompanying automated tests.
-3. **Preserve Documentation Parity**: If you add or modify a CLI subcommand, tool, agent role, profile, or budget dimension, ensure corresponding subsystem docs in `docs/` are updated to keep `docs_contract` passing.
-4. **All CI Checks Must Pass Green**: Every PR must pass all matrix checks (Linux x86_64, macOS, Windows, CodeQL, deterministic gates).
+### Workspace Rust Tests
+
+We maintain an uncompromising testing standard. Run the complete test suite:
+
+```bash
+# Run full workspace test execution (no API key needed for standard suite)
+cargo test --workspace
+```
+
+Run crate-specific test suites:
+
+```bash
+cargo test -p m31a-tools
+cargo test -p m31a-tui
+cargo test -p m31a-execpolicy
+cargo test -p m31a-sandbox
+cargo test -p m31a-agent-engine
+```
+
+### Live NVIDIA NIM Tests (Optional)
+
+If you have a valid NVIDIA NIM API key and wish to run live inference validation:
+
+```bash
+export NVIDIA_API_KEY="nvapi-..."
+export M31A_RUN_LIVE_NVIDIA_TESTS="1"
+cargo test -p m31a-provider --features live-nvidia-tests --test live_provider_test -- --ignored --test-threads=1
+cargo test -p m31a-agent-engine --features live-nvidia-tests --test live_nvidia_e2e -- --ignored --test-threads=1
+```
+
+### Python SDK Tests
+
+```bash
+cd sdk/python
+python3 -m unittest discover -s tests
+```
+
+### TypeScript SDK Tests
+
+```bash
+cd sdk/typescript
+npm install
+npm test
+```
 
 ---
 
-## Reporting Issues
+## Code Style & Quality Standards
 
-- For bug reports or feature suggestions, please use the structured issue templates in [GitHub Issues](https://github.com/eshanized/M31A/issues).
-- For security vulnerabilities, please refer to [SECURITY.md](SECURITY.md) and do NOT file a public issue.
+All pull requests must pass automated formatting and linting checks in CI.
+
+### Rust Formatting & Linting
+
+Run `rustfmt` across all crates:
+```bash
+cargo fmt --all -- --check
+```
+Auto-format your changes:
+```bash
+cargo fmt --all
+```
+
+Run `clippy` with strict warnings:
+```bash
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+```
+
+### Core Architectural Principles
+
+- **No Mocks Policy**: Unit and integration tests should exercise real components, real SQLite in-memory databases, and real filesystem sandboxes wherever feasible. Mocks are restricted solely to offline simulated network endpoints.
+- **Fail-Safe Defaults**: Security checks in `m31a-sandbox`, `m31a-execpolicy`, and `m31a-guardian` default to denying or prompting when ambiguous.
+- **Error Propagation**: Use `thiserror` for library crate error enumerations and `anyhow` for top-level application orchestration. Preserve full causal chains with `.context(...)`.
+
+---
+
+## Commit Message Conventions
+
+We enforce [Conventional Commits](https://www.conventionalcommits.org/) format:
+
+```
+<type>(<scope>): <subject>
+
+[optional body]
+
+[optional footer(s)]
+```
+
+### Allowed Types
+
+- `feat`: A new feature or capability.
+- `fix`: A bug fix.
+- `docs`: Documentation improvements or updates.
+- `refactor`: Code change that neither fixes a bug nor adds a feature.
+- `perf`: A code change that improves performance.
+- `test`: Adding missing tests or correcting existing tests.
+- `chore`: Changes to build process, dependency upgrades, or tooling.
+
+### Examples
+
+```
+feat(tui): add collapsible DeepSeek R1 reasoning view
+fix(patch): handle unicode non-breaking spaces in fuzzy seek
+docs(cli): document all 54 CLI subcommands and options
+refactor(storage): streamline thread turn pagination queries
+```
+
+---
+
+## Submitting a Pull Request
+
+1. **Fork the repository** on GitHub and clone your fork locally.
+2. **Create a topic branch** from `master` or `main`:
+   ```bash
+   git checkout -b feat/my-new-feature
+   ```
+3. **Make your changes**, keeping them focused and atomic.
+4. **Run formatting, lints, and tests**:
+   ```bash
+   cargo fmt --all
+   cargo clippy --workspace --all-targets --all-features -- -D warnings
+   cargo test --workspace
+   ```
+5. **Commit your changes** with descriptive commit messages following Conventional Commits.
+6. **Push to your fork** and submit a Pull Request to the `main` branch.
+7. Fill out the provided [Pull Request Template](.github/PULL_REQUEST_TEMPLATE.md).
+
+Maintainers will review your PR, provide constructive feedback, and guide it to merge.
+
+---
+
+## Reporting Bugs & Suggesting Features
+
+- **Bugs**: Use the [Bug Report template](.github/ISSUE_TEMPLATE/bug_report.yml). Provide clear reproduction steps and include output from `m31a doctor`.
+- **Feature Requests**: Use the [Feature Request template](.github/ISSUE_TEMPLATE/feature_request.yml) to describe the problem and proposed solution.
+- **Security Vulnerabilities**: Follow our [Security Policy](SECURITY.md) and disclose privately.

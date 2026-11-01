@@ -1,0 +1,19 @@
+cff-version: 1.2.0
+message: "If you use M31A in your research, software engineering workflows, or benchmarks, please cite it as below."
+authors:
+  - family-names: "Roy"
+    given-names: "Eshan"
+title: "M31A: Autonomous Agentic Coding Assistant Powered by NVIDIA NIM"
+version: 0.1.13
+date-released: 2026-11-01
+url: "https://m31a.tonmoyinfrastructure.org/"
+repository-code: "https://github.com/eshanized/M31A"
+license: MIT
+keywords:
+  - autonomous-agents
+  - ai-coding-assistant
+  - nvidia-nim
+  - rust
+  - ratatui
+  - sandboxing
+  - code-repair

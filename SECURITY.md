@@ -1,51 +1,80 @@
-# M31A Security Policy
+# Security Policy
 
-The security and containment of autonomous agent operations is the primary foundation of the M31A runtime.
-
----
-
-## Reporting a Vulnerability
-
-If you discover a security vulnerability, sandbox escape, prompt injection boundary compromise, or policy bypass in M31A, **please do not open a public issue.**
-
-Instead, report it confidentially via GitHub Private Vulnerability Reporting:
-- Navigate to the **Security** tab of this repository.
-- Click **"Report a vulnerability"**.
-- Provide details, reproduction steps, and impact assessment.
-
-Alternatively, contact the security maintainers directly at:
-- **Email**: `security@m31a.dev` (or author: `m.eshanized@gmail.com`)
-
-### Vulnerability Response SLA
-
-- **Initial Response**: Within 24 hours acknowledging receipt.
-- **Triage & Reproduction**: Within 72 hours.
-- **Fix & Disclosure**: Coordinated security patch released within 14 days, with public CVE advisory published following release deployment.
+M31A is an autonomous agentic coding assistant designed with defence-in-depth safety boundaries, isolating autonomous code execution and workspace mutation. We take the security of M31A and the developers using it seriously.
 
 ---
 
 ## Supported Versions
 
-Only the latest release receives active security fixes.
+We provide security updates and patches for the following versions:
 
-| Version | Supported |
-|:---|:---|
-| `v0.1.x` | :white_check_mark: Yes |
-| `< v0.1.0` | :x: No (Legacy alpha / deprecated) |
+| Version | Supported          | Security Patches |
+| ------- | ------------------ | ---------------- |
+| 0.1.x   | :white_check_mark: | Active           |
+| < 0.1.0 | :x:                | End of life      |
 
 ---
 
-## Security Invariants & Threat Mitigation
+## Security Architecture & Threat Model
 
-M31A implements the canonical 11-threat hardening matrix, ASVS L1 compliance, and root-scoped workspace confinement:
+M31A incorporates several architectural layers designed to safeguard developer machines:
 
-1. **Filesystem Confinement**: Strict lexical and canonical path sanitization preventing `../` path traversal, symlink escapes, and null-byte injection (`SEC-02`).
-2. **Protected Repositories**: Non-bypassable protection for `.git` and `.m31a` directories preventing tampering by agent tools (`SEC-02`).
-3. **Command Execution Safety**: Direct argument vector execution (`argv`) bypassing shell interpreters, preventing argument injection and command concatenation attacks (`SEC-03`).
-4. **Secret Scrubbing**: Zero-leak redaction of API keys, tokens, and authorization credentials before logging, persistent storage, or telemetry export (`SEC-04`).
-5. **Untrusted Content Sanitization**: Repository files, commit logs, and model inputs are wrapped in structured XML `<trust_envelope>` blocks to prevent indirect prompt injection (`SEC-05`).
-6. **Policy Engine Primacy**: An 11-stage policy gate with immutable veto power over every mutating tool call (`SEC-06`).
-7. **Process Tree Containment**: Multi-stage signal escalation (`SIGTERM` -> `SIGKILL` or Windows Job Object termination) preventing zombie child leaks (`SEC-03`).
-8. **Crash-Resilient State**: Two-phase atomic checkpoints and SQLite foreign-key write ahead logs preventing state tampering (`SEC-01`).
+1. **Linux Bubblewrap Sandbox (`m31a-sandbox`)**:
+   - Isolates execution using unprivileged Linux namespaces (`PID`, `IPC`, `UTS`, `Mount`).
+   - Root filesystem is mounted read-only (`ro-bind`).
+   - Workspace paths are mounted writable only when `workspace-write` policy is active.
+   - Sensitive subpaths are strictly protected by read-only masks (`.git`, `.m31a`, `.codex`, `.ssh`, `.env`, `*.key`, `*.pem`).
+   - Optional network namespace unsharing (`--unshare-net`) for air-gapped environments.
 
-For the complete technical threat modeling specification, see [docs/subsystems/SECURITY.md](docs/subsystems/SECURITY.md).
+2. **Prefix & AST ExecPolicy Engine (`m31a-execpolicy`)**:
+   - Static analysis and prefix pattern token matching over CLI commands prior to dispatch.
+   - Network destination guards limiting outbound socket calls by host, protocol, and port.
+   - Tri-state decisions: `allow`, `prompt`, or `deny` with explicit human-readable rationales.
+
+3. **Guardian Autonomous Review Supervisor (`m31a-guardian`)**:
+   - Out-of-band evaluation of mutating operations and destructive commands.
+   - Sliding-window circuit breaker (`AUTO_REVIEW_DENIAL_WINDOW_SIZE = 5`, `MAX_DENIALS_BEFORE_TRIP = 3`) trips session into immediate freeze if anomalous destructive sequences occur.
+
+4. **Hardened Local Proxy & Credential Isolation (`m31a-cli responses-proxy`)**:
+   - Memory-locked API credential storage preventing token exfiltration via memory dumps or shell process inspection.
+
+---
+
+## Reporting a Vulnerability
+
+**Please do not report security vulnerabilities through public GitHub issues.**
+
+If you discover a security vulnerability, sandbox escape, or unexpected privilege escalation in M31A, report it responsibly:
+
+### Disclosure Channels
+
+1. **GitHub Private Vulnerability Reporting (Preferred)**:
+   - Navigate to the **Security** tab of the M31A GitHub repository.
+   - Click **Report a vulnerability** to submit a private draft.
+2. **Security Email**:
+   - Send an encrypted or plain text email to: **security@tonmoyinfrastructure.org**
+   - If desired, request our PGP public key before transmitting sensitive proof-of-concept material.
+
+### Information to Include
+
+To help us triage and reproduce the issue rapidly, please include:
+- A detailed description of the vulnerability.
+- Affected component or crate (e.g. `m31a-sandbox`, `m31a-execpolicy`, `m31a-app-server`).
+- Steps to reproduce or proof-of-concept (PoC) script.
+- Operating system, kernel version, and container/WSL details.
+- Potential impact or attack scenario.
+
+---
+
+## Response Timeline
+
+- **Initial Acknowledgment**: Within 48 hours of report submission.
+- **Triage & Assessment**: Within 5 business days, confirming vulnerability scope and severity score (CVSS).
+- **Patch Development & Testing**: Priority resolution with private backports.
+- **Public Disclosure**: Coordinated release with CVE assignment where applicable, typically 30 days after patch verification or by mutual agreement.
+
+---
+
+## Hall of Fame & Responsible Disclosure
+
+We appreciate the security research community. Researchers who report valid security vulnerabilities in accordance with this policy will be credited in our release notes and Security Hall of Fame (unless anonymity is requested).
