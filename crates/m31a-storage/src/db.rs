@@ -517,8 +517,11 @@ impl Storage {
 
     pub fn get_thread_owner(&self, thread_id: &str) -> Result<Option<String>> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT owner_client_id FROM thread_ownership WHERE thread_id = ?1")?;
-        let res = stmt.query_row(params![thread_id], |row| row.get(0)).optional()?;
+        let mut stmt =
+            conn.prepare("SELECT owner_client_id FROM thread_ownership WHERE thread_id = ?1")?;
+        let res = stmt
+            .query_row(params![thread_id], |row| row.get(0))
+            .optional()?;
         Ok(res)
     }
 
@@ -537,7 +540,10 @@ impl Storage {
     pub fn save_session_todos(&self, thread_id: &str, todos: &[SessionTodoRecord]) -> Result<()> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction()?;
-        tx.execute("DELETE FROM session_todos WHERE thread_id = ?1", params![thread_id])?;
+        tx.execute(
+            "DELETE FROM session_todos WHERE thread_id = ?1",
+            params![thread_id],
+        )?;
         let now = chrono::Utc::now().timestamp_millis();
         for (idx, item) in todos.iter().enumerate() {
             tx.execute(

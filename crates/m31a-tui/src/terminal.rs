@@ -3324,7 +3324,8 @@ pub fn handle_screen_key_event(app: &mut App, key: crossterm::event::KeyEvent) {
                 if let Some(slug) = model_to_switch {
                     match app.switch_model_async(&slug) {
                         Ok(_) => {
-                            app.provider_status_message = Some(format!("Activating model: {slug}..."));
+                            app.provider_status_message =
+                                Some(format!("Activating model: {slug}..."));
                         }
                         Err(e) => {
                             app.provider_status_message =

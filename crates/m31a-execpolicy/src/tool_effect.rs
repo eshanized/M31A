@@ -40,17 +40,23 @@ impl ToolEffect {
 /// Error returned when a tool invocation violates Plan Mode restrictions.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum PlanModeViolation {
-    #[error("Tool '{tool_name}' is blocked in Plan Mode: Workspace mutation not permitted ({effect:?})")]
+    #[error(
+        "Tool '{tool_name}' is blocked in Plan Mode: Workspace mutation not permitted ({effect:?})"
+    )]
     WorkspaceMutationBlocked {
         tool_name: String,
         effect: ToolEffect,
     },
-    #[error("Tool '{tool_name}' is blocked in Plan Mode: External side effects not permitted ({effect:?})")]
+    #[error(
+        "Tool '{tool_name}' is blocked in Plan Mode: External side effects not permitted ({effect:?})"
+    )]
     ExternalSideEffectBlocked {
         tool_name: String,
         effect: ToolEffect,
     },
-    #[error("Tool '{tool_name}' is blocked in Plan Mode: Privileged operation not permitted ({effect:?})")]
+    #[error(
+        "Tool '{tool_name}' is blocked in Plan Mode: Privileged operation not permitted ({effect:?})"
+    )]
     PrivilegedOperationBlocked {
         tool_name: String,
         effect: ToolEffect,
@@ -263,7 +269,11 @@ fn classify_shell_command(args_raw: &str) -> ToolEffect {
     }
 
     // Check for subshells, backticks, process substitutions
-    if trimmed.contains("$(") || trimmed.contains('`') || trimmed.contains("<(") || trimmed.contains(">(") {
+    if trimmed.contains("$(")
+        || trimmed.contains('`')
+        || trimmed.contains("<(")
+        || trimmed.contains(">(")
+    {
         return ToolEffect::WorkspaceMutation;
     }
 
@@ -342,7 +352,10 @@ fn is_strictly_readonly_program(prog: &str, args: &[String]) -> bool {
                 return false;
             }
             let subcmd = &args[0];
-            matches!(subcmd.as_str(), "check" | "clippy" | "metadata" | "verify-project" | "tree")
+            matches!(
+                subcmd.as_str(),
+                "check" | "clippy" | "metadata" | "verify-project" | "tree"
+            )
         }
 
         // Python/Node/Ruby/etc. interpreters: NEVER read-only when evaluated via shell
@@ -437,10 +450,7 @@ mod tests {
         assert_eq!(effect, ToolEffect::WorkspaceMutation);
 
         // Append redirection
-        let effect = classify_tool(
-            "exec_command",
-            Some(r#"{"command": "ls >> /tmp/log.txt"}"#),
-        );
+        let effect = classify_tool("exec_command", Some(r#"{"command": "ls >> /tmp/log.txt"}"#));
         assert_eq!(effect, ToolEffect::WorkspaceMutation);
     }
 
@@ -469,25 +479,16 @@ mod tests {
         );
         assert_eq!(effect, ToolEffect::WorkspaceMutation);
 
-        let effect = classify_tool(
-            "exec_command",
-            Some(r#"{"command": "`echo rm` -rf src"}"#),
-        );
+        let effect = classify_tool("exec_command", Some(r#"{"command": "`echo rm` -rf src"}"#));
         assert_eq!(effect, ToolEffect::WorkspaceMutation);
     }
 
     #[test]
     fn test_shell_command_benign_readonly_allowed() {
-        let effect = classify_tool(
-            "exec_command",
-            Some(r#"{"command": "git status"}"#),
-        );
+        let effect = classify_tool("exec_command", Some(r#"{"command": "git status"}"#));
         assert_eq!(effect, ToolEffect::ReadOnly);
 
-        let effect = classify_tool(
-            "exec_command",
-            Some(r#"{"command": "git diff HEAD~1"}"#),
-        );
+        let effect = classify_tool("exec_command", Some(r#"{"command": "git diff HEAD~1"}"#));
         assert_eq!(effect, ToolEffect::ReadOnly);
 
         let effect = classify_tool(

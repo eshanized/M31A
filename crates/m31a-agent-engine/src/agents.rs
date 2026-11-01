@@ -233,7 +233,10 @@ impl EngineAgentRuntime {
     }
 
     /// Attach an approval request channel for asynchronous parent supervision.
-    pub fn with_approval_channel(mut self, tx: mpsc::UnboundedSender<ChildApprovalRequest>) -> Self {
+    pub fn with_approval_channel(
+        mut self,
+        tx: mpsc::UnboundedSender<ChildApprovalRequest>,
+    ) -> Self {
         self.child_approval_tx = Some(tx);
         self
     }
@@ -1910,7 +1913,9 @@ mod tests {
             &tokens,
             None,
         );
-        assert!(transcript[0].contains("[approval denied for 'write_file': requires parent approval]"));
+        assert!(
+            transcript[0].contains("[approval denied for 'write_file': requires parent approval]")
+        );
 
         let decision = resp_rx.await.unwrap();
         assert!(matches!(

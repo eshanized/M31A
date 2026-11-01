@@ -2848,7 +2848,10 @@ fn render_setup_wizard(
                             Span::styled("[Verified]", t.style_success(true))
                         }
                     } else if state.connectivity_status.is_failure() {
-                        Span::styled(format!("[{}]", state.connectivity_status.label()), t.style_error(true))
+                        Span::styled(
+                            format!("[{}]", state.connectivity_status.label()),
+                            t.style_error(true),
+                        )
                     } else {
                         Span::styled("[Not Tested]", t.style_warning(false))
                     },

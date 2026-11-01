@@ -375,15 +375,18 @@ async fn handle_connection(
     if (path == "/api/auth/stream-ticket" || path == "/auth/stream-ticket") && method == "POST" {
         let target_thread = query_params.get("thread_id").cloned();
         if let Some(ref tid) = target_thread {
-            if let Err(e) = server.auth_manager.require_thread_access(tid, &client_identity) {
-                return send_forbidden(&mut write_half, &e.to_string(), allowed_origin.as_deref()).await;
+            if let Err(e) = server
+                .auth_manager
+                .require_thread_access(tid, &client_identity)
+            {
+                return send_forbidden(&mut write_half, &e.to_string(), allowed_origin.as_deref())
+                    .await;
             }
         }
-        let ticket = server.auth_manager.issue_stream_ticket(
-            &client_identity,
-            target_thread.as_deref(),
-            60,
-        );
+        let ticket =
+            server
+                .auth_manager
+                .issue_stream_ticket(&client_identity, target_thread.as_deref(), 60);
         let resp = serde_json::json!({
             "ticket": ticket,
             "expires_in_secs": 60

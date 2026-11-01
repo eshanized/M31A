@@ -54,10 +54,7 @@ pub enum SandboxCommand {
     /// A shell command line to be evaluated by the shell (e.g., `bash -c "..."` or `cmd /c "..."`).
     Shell(String),
     /// An executable program with exact argument vector, preserving quotes, spaces, and empty strings.
-    Exec {
-        program: String,
-        args: Vec<String>,
-    },
+    Exec { program: String, args: Vec<String> },
 }
 
 impl SandboxCommand {
@@ -81,11 +78,8 @@ impl SandboxCommand {
                 v.extend(args.clone());
                 v
             }
-            Self::Shell(cmd) => {
-                shlex::split(cmd).unwrap_or_else(|| {
-                    vec!["bash".to_string(), "-c".to_string(), cmd.clone()]
-                })
-            }
+            Self::Shell(cmd) => shlex::split(cmd)
+                .unwrap_or_else(|| vec!["bash".to_string(), "-c".to_string(), cmd.clone()]),
         }
     }
 }
@@ -360,26 +354,24 @@ impl SandboxRunner {
                     timed_out: false,
                 })
             }
-            SandboxBackend::Bubblewrap => {
-                match &command {
-                    SandboxCommand::Exec { program, args } => {
-                        let args_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-                        let cmd = self.build_bwrap_process_with_env(
-                            program,
-                            &args_refs,
-                            cwd,
-                            policy,
-                            &hardened_env,
-                        )?;
-                        let cmd_display = format!("{} {}", program, args.join(" "));
-                        spawn_and_wait(cmd, "bwrap", &cmd_display, timeout).await
-                    }
-                    SandboxCommand::Shell(cmd_str) => {
-                        self.execute_bwrap(cmd_str, cwd, policy, timeout, &hardened_env)
-                            .await
-                    }
+            SandboxBackend::Bubblewrap => match &command {
+                SandboxCommand::Exec { program, args } => {
+                    let args_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+                    let cmd = self.build_bwrap_process_with_env(
+                        program,
+                        &args_refs,
+                        cwd,
+                        policy,
+                        &hardened_env,
+                    )?;
+                    let cmd_display = format!("{} {}", program, args.join(" "));
+                    spawn_and_wait(cmd, "bwrap", &cmd_display, timeout).await
                 }
-            }
+                SandboxCommand::Shell(cmd_str) => {
+                    self.execute_bwrap(cmd_str, cwd, policy, timeout, &hardened_env)
+                        .await
+                }
+            },
             SandboxBackend::Process => {
                 // Process-level isolation fallback (Landlock/seccomp on Linux).
                 match &command {
@@ -396,12 +388,8 @@ impl SandboxRunner {
                         spawn_and_wait(cmd, "process", &cmd_display, timeout).await
                     }
                     SandboxCommand::Shell(cmd_str) => {
-                        let cmd = build_process_fallback_command(
-                            cmd_str,
-                            cwd,
-                            policy,
-                            &hardened_env,
-                        )?;
+                        let cmd =
+                            build_process_fallback_command(cmd_str, cwd, policy, &hardened_env)?;
                         spawn_and_wait(cmd, "process", cmd_str, timeout).await
                     }
                 }
@@ -849,7 +837,9 @@ mod tests {
 
     #[test]
     fn test_sandbox_command_token_parsing() {
-        let cmd = SandboxCommand::shell("git commit -m \"fix(security): resolve issues\" --author=\"Test <test@m31a.local>\"");
+        let cmd = SandboxCommand::shell(
+            "git commit -m \"fix(security): resolve issues\" --author=\"Test <test@m31a.local>\"",
+        );
         let tokens = cmd.to_tokens();
         assert_eq!(tokens[0], "git");
         assert_eq!(tokens[1], "commit");
@@ -882,6 +872,10 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(output.exit_code, 0);
-        assert!(output.stdout.contains("hello world with spaces and 'quotes' and \"double quotes\""));
+        assert!(
+            output
+                .stdout
+                .contains("hello world with spaces and 'quotes' and \"double quotes\"")
+        );
     }
 }

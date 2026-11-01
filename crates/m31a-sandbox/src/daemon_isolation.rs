@@ -39,7 +39,9 @@ impl DaemonIsolation {
         let abs_workspace = if workspace_cwd.is_absolute() {
             workspace_cwd.to_path_buf()
         } else {
-            std::env::current_dir().unwrap_or_default().join(workspace_cwd)
+            std::env::current_dir()
+                .unwrap_or_default()
+                .join(workspace_cwd)
         };
         let abs_workspace = std::fs::canonicalize(&abs_workspace).unwrap_or(abs_workspace);
         let workspace_cwd = &abs_workspace;

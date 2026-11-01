@@ -283,7 +283,8 @@ fn classify_connectivity_error(err_str: &str) -> crate::modals::ConnectivityStat
         || lower.contains("does not exist")
     {
         crate::modals::ConnectivityStatus::ModelUnsupported
-    } else if lower.contains("timeout") || lower.contains("timed out") || lower.contains("deadline") {
+    } else if lower.contains("timeout") || lower.contains("timed out") || lower.contains("deadline")
+    {
         crate::modals::ConnectivityStatus::TimedOut
     } else if lower.contains("connection refused")
         || lower.contains("dns")
@@ -1401,8 +1402,7 @@ impl App {
     }
 
     pub fn update_status_badges(&mut self) {
-        self.bottom_pane.todo_summary =
-            m31a_tools::get_todo_badge_for_session(&self.session_id);
+        self.bottom_pane.todo_summary = m31a_tools::get_todo_badge_for_session(&self.session_id);
         if let Ok(Some(g)) = self.storage.get_goal(&self.session_id) {
             let label = if g.status == "active" {
                 format!("\"{}\"", g.objective)
@@ -4997,7 +4997,10 @@ impl App {
 
             self.provider_status_message = Some(format!("Resuming session {}...", thread_id));
             self.transcript.push(TranscriptItem::notice(
-                format!("Verifying connectivity to resume session '{thread_id}' with model '{}'...", thread.model),
+                format!(
+                    "Verifying connectivity to resume session '{thread_id}' with model '{}'...",
+                    thread.model
+                ),
                 NoticeLevel::Info,
             ));
             self.sync_virtualizer();
@@ -5708,7 +5711,9 @@ impl App {
                     }
                     Err(e) => {
                         self.transcript.push(TranscriptItem::notice(
-                            format!("Cannot resume thread '{thread_id}': connectivity check failed: {e}"),
+                            format!(
+                                "Cannot resume thread '{thread_id}': connectivity check failed: {e}"
+                            ),
                             NoticeLevel::Error,
                         ));
                     }

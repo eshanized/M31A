@@ -3295,12 +3295,9 @@ impl ToolRegistry {
                 let todo_args: crate::todo::TodoArgs = serde_json::from_value(args.clone())
                     .context("Failed to deserialize 'todowrite' tool arguments")?;
                 let sess = self.session_id.as_deref().unwrap_or("default");
-                let res = crate::todo::execute_todowrite_scoped(
-                    sess,
-                    &todo_args,
-                    self.storage.as_ref(),
-                )
-                .await?;
+                let res =
+                    crate::todo::execute_todowrite_scoped(sess, &todo_args, self.storage.as_ref())
+                        .await?;
                 Ok(serde_json::to_string_pretty(&res)?)
             }
             "schedule" => {

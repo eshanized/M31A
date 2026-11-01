@@ -13,7 +13,10 @@ fn main() -> Result<()> {
         PathBuf::from("schemas/app_server/schema.json")
     };
 
-    println!("Generating M31A App Server schema to {}...", out_path.display());
+    println!(
+        "Generating M31A App Server schema to {}...",
+        out_path.display()
+    );
     write_protocol_schema(&out_path)?;
     println!("Schema successfully generated at {}", out_path.display());
     Ok(())

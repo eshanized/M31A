@@ -489,13 +489,12 @@ mod tests {
     fn test_generate_and_validate_protocol_schema() {
         let schema = generate_protocol_schema();
         assert_eq!(schema["$schema"], "http://json-schema.org/draft-07/schema#");
-        assert_eq!(
-            schema["title"],
-            "M31A App Server JSON-RPC Protocol Schema"
-        );
+        assert_eq!(schema["title"], "M31A App Server JSON-RPC Protocol Schema");
 
         // Verify definitions exist
-        let defs = schema["definitions"].as_object().expect("definitions object");
+        let defs = schema["definitions"]
+            .as_object()
+            .expect("definitions object");
         assert!(defs.contains_key("JsonRpcRequest"));
         assert!(defs.contains_key("JsonRpcResponse"));
         assert!(defs.contains_key("JsonRpcError"));

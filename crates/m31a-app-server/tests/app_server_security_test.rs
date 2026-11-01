@@ -610,7 +610,10 @@ async fn test_13_scope_escalation_prevented() {
     .to_string();
     let req = format!(
         "POST /api/rpc HTTP/1.1\r\nHost: {}\r\nAuthorization: Bearer {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
-        addr, read_token, body.len(), body
+        addr,
+        read_token,
+        body.len(),
+        body
     );
     client.write_all(req.as_bytes()).await.unwrap();
     let mut resp = String::new();
@@ -635,7 +638,10 @@ async fn test_13_scope_escalation_prevented() {
     .to_string();
     let req = format!(
         "POST /api/rpc HTTP/1.1\r\nHost: {}\r\nAuthorization: Bearer {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
-        addr, write_token, body.len(), body
+        addr,
+        write_token,
+        body.len(),
+        body
     );
     client.write_all(req.as_bytes()).await.unwrap();
     let mut resp = String::new();
@@ -676,7 +682,10 @@ async fn test_14_thread_operations_enforce_ownership_for_modify_fork_delete() {
     let body = serde_json::json!({ "cwd": "/tmp" }).to_string();
     let req_a = format!(
         "POST /api/threads HTTP/1.1\r\nHost: {}\r\nAuthorization: Bearer {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
-        addr, token_a, body.len(), body
+        addr,
+        token_a,
+        body.len(),
+        body
     );
     client_a.write_all(req_a.as_bytes()).await.unwrap();
     let mut resp_a = String::new();
@@ -696,7 +705,10 @@ async fn test_14_thread_operations_enforce_ownership_for_modify_fork_delete() {
     .to_string();
     let req_b = format!(
         "POST /api/rpc HTTP/1.1\r\nHost: {}\r\nAuthorization: Bearer {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
-        addr, token_b, body.len(), body
+        addr,
+        token_b,
+        body.len(),
+        body
     );
     client_b.write_all(req_b.as_bytes()).await.unwrap();
     let mut resp_b = String::new();
@@ -715,7 +727,10 @@ async fn test_14_thread_operations_enforce_ownership_for_modify_fork_delete() {
     .to_string();
     let req_b = format!(
         "POST /api/rpc HTTP/1.1\r\nHost: {}\r\nAuthorization: Bearer {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
-        addr, token_b, body.len(), body
+        addr,
+        token_b,
+        body.len(),
+        body
     );
     client_b.write_all(req_b.as_bytes()).await.unwrap();
     let mut resp_b = String::new();
@@ -746,8 +761,7 @@ async fn test_15_thread_ownership_persistence_across_server_restart() {
     // 2. Simulate complete server shutdown & reboot: reopen storage from disk
     {
         let reopened_storage = Storage::open(&db_path).unwrap();
-        let rebooted_auth_mgr =
-            m31a_app_server::auth::AuthManager::with_storage(reopened_storage);
+        let rebooted_auth_mgr = m31a_app_server::auth::AuthManager::with_storage(reopened_storage);
 
         // Verification: ownership survived daemon reboot!
         assert_eq!(
@@ -766,8 +780,16 @@ async fn test_15_thread_ownership_persistence_across_server_restart() {
             scopes: [AuthScope::Read, AuthScope::Write].into_iter().collect(),
         };
 
-        assert!(rebooted_auth_mgr.require_thread_access(thread_id, &owner_identity).is_ok());
-        assert!(rebooted_auth_mgr.require_thread_access(thread_id, &intruder_identity).is_err());
+        assert!(
+            rebooted_auth_mgr
+                .require_thread_access(thread_id, &owner_identity)
+                .is_ok()
+        );
+        assert!(
+            rebooted_auth_mgr
+                .require_thread_access(thread_id, &intruder_identity)
+                .is_err()
+        );
     }
 }
 
@@ -828,9 +850,15 @@ async fn test_16_query_param_token_rejected_and_stream_ticket_works() {
         "GET /events?ticket={} HTTP/1.1\r\nHost: {}\r\n\r\n",
         ticket, addr
     );
-    replay_client.write_all(req_replay.as_bytes()).await.unwrap();
+    replay_client
+        .write_all(req_replay.as_bytes())
+        .await
+        .unwrap();
     let mut replay_resp = String::new();
-    replay_client.read_to_string(&mut replay_resp).await.unwrap();
+    replay_client
+        .read_to_string(&mut replay_resp)
+        .await
+        .unwrap();
     assert!(replay_resp.contains("HTTP/1.1 401 Unauthorized"));
 }
 
@@ -855,7 +883,10 @@ async fn test_17_sanitized_config_redacts_secrets_and_mcp_credentials() {
     .to_string();
     let req = format!(
         "POST /api/rpc HTTP/1.1\r\nHost: {}\r\nAuthorization: Bearer {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
-        addr, admin_token, body.len(), body
+        addr,
+        admin_token,
+        body.len(),
+        body
     );
     client.write_all(req.as_bytes()).await.unwrap();
     let mut resp = String::new();

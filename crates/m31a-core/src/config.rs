@@ -612,12 +612,16 @@ impl Config {
             if let Some(mcp) = obj.get_mut("mcp_servers").and_then(|v| v.as_object_mut()) {
                 for (_name, server_val) in mcp.iter_mut() {
                     if let Some(srv_obj) = server_val.as_object_mut() {
-                        if let Some(env_obj) = srv_obj.get_mut("env").and_then(|v| v.as_object_mut()) {
+                        if let Some(env_obj) =
+                            srv_obj.get_mut("env").and_then(|v| v.as_object_mut())
+                        {
                             for (_env_k, env_v) in env_obj.iter_mut() {
                                 *env_v = serde_json::json!("[REDACTED]");
                             }
                         }
-                        if let Some(hdr_obj) = srv_obj.get_mut("headers").and_then(|v| v.as_object_mut()) {
+                        if let Some(hdr_obj) =
+                            srv_obj.get_mut("headers").and_then(|v| v.as_object_mut())
+                        {
                             for (_hdr_k, hdr_v) in hdr_obj.iter_mut() {
                                 *hdr_v = serde_json::json!("[REDACTED]");
                             }

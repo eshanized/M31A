@@ -487,9 +487,7 @@ pub enum AuthError {
         client_id: String,
     },
     #[error("Access denied: thread '{thread_id}' has no recorded owner (admin required)")]
-    LegacyThreadRestricted {
-        thread_id: String,
-    },
+    LegacyThreadRestricted { thread_id: String },
     #[error("Access denied: unknown or unclassified RPC method '{0}'")]
     UnknownMethod(String),
     #[error("Access denied: stream ticket invalid, expired, or already used")]
@@ -737,7 +735,9 @@ impl AuthManager {
     /// Consumes a single-use stream ticket. Fails if invalid, expired, or previously consumed.
     pub fn consume_stream_ticket(&self, ticket: &str) -> Result<ClientIdentity, AuthError> {
         let mut tickets = self.tickets.lock().unwrap();
-        let item = tickets.get_mut(ticket).ok_or(AuthError::InvalidStreamTicket)?;
+        let item = tickets
+            .get_mut(ticket)
+            .ok_or(AuthError::InvalidStreamTicket)?;
 
         if item.used {
             return Err(AuthError::InvalidStreamTicket);
@@ -768,7 +768,10 @@ impl AuthManager {
             Some(client_id),
             "thread_ownership_registered",
             true,
-            &format!("Client '{}' registered ownership of thread '{}'", client_id, thread_id),
+            &format!(
+                "Client '{}' registered ownership of thread '{}'",
+                client_id, thread_id
+            ),
         );
     }
 
@@ -778,7 +781,11 @@ impl AuthManager {
                 return Some(owner);
             }
         }
-        self.in_memory_owners.lock().unwrap().get(thread_id).cloned()
+        self.in_memory_owners
+            .lock()
+            .unwrap()
+            .get(thread_id)
+            .cloned()
     }
 
     pub fn is_thread_owner(&self, thread_id: &str, client_id: &str) -> bool {

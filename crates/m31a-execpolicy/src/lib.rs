@@ -43,4 +43,4 @@ pub use policy::{
 pub use presets::{ApprovalPreset, ApprovalPresetKind};
 pub use proxy::{NetworkProxyServer, ProxyConfig};
 pub use tcp_tunnel::{TcpTunnelInfo, TcpTunnelManager};
-pub use tool_effect::{classify_tool, evaluate_plan_mode, PlanModeViolation, ToolEffect};
+pub use tool_effect::{PlanModeViolation, ToolEffect, classify_tool, evaluate_plan_mode};

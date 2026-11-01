@@ -577,7 +577,9 @@ fn test_explicit_connectivity_status_predicates_and_labels() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_async_model_switch_lifecycle() {
-    let wire_server = m31a_provider::wire_server::LocalWireServer::start().await.expect("wire server start");
+    let wire_server = m31a_provider::wire_server::LocalWireServer::start()
+        .await
+        .expect("wire server start");
     let temp = tempfile::tempdir().unwrap();
 
     let initial_model = "nvidia/nemotron-3.5-lightning-30b-a3b";
@@ -594,7 +596,10 @@ async fn test_async_model_switch_lifecycle() {
     // Call switch_model_async
     let target = "meta/llama-3.3-70b-instruct";
     let async_res = app.switch_model_async(target);
-    assert!(async_res.is_ok(), "switch_model_async must initiate without blocking");
+    assert!(
+        async_res.is_ok(),
+        "switch_model_async must initiate without blocking"
+    );
 
     // Provider status message should indicate activation in progress
     assert!(app.provider_status_message.is_some());

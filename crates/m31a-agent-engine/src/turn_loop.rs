@@ -96,7 +96,6 @@ fn is_mutating_shell_command(cmd_args: &str) -> bool {
     m31a_execpolicy::evaluate_plan_mode("exec_command", Some(cmd_args)).is_err()
 }
 
-
 /// Guardian reviews every sequential dispatch only when the user opted into
 /// automated supervision (`ApproveForMe`) and a reviewer is configured.
 fn guardian_required_for_call(
@@ -1621,9 +1620,10 @@ impl AgentEngine {
 
                                 // §CollaborationModes: Plan Mode enforcement
                                 if self.collaboration_mode == CollaborationMode::Plan {
-                                    if let Err(violation) =
-                                        m31a_execpolicy::evaluate_plan_mode(&fn_name, Some(&fn_args))
-                                    {
+                                    if let Err(violation) = m31a_execpolicy::evaluate_plan_mode(
+                                        &fn_name,
+                                        Some(&fn_args),
+                                    ) {
                                         let blocked_reason = format!(
                                             "Tool '{}' is blocked: Agent is in Plan Mode. {violation}. Call 'update_plan' to document proposed execution steps or switch to Default/Code Mode.",
                                             fn_name
@@ -1769,11 +1769,12 @@ impl AgentEngine {
                                     args: fn_args.clone(),
                                 });
 
-                                let effective_sandbox = if self.collaboration_mode == CollaborationMode::Plan {
-                                    SandboxPolicy::ReadOnly
-                                } else {
-                                    self.sandbox_policy
-                                };
+                                let effective_sandbox =
+                                    if self.collaboration_mode == CollaborationMode::Plan {
+                                        SandboxPolicy::ReadOnly
+                                    } else {
+                                        self.sandbox_policy
+                                    };
                                 let res = self
                                     .tools
                                     .execute(&fn_name, &fn_args, &self.cwd, effective_sandbox)
@@ -1963,8 +1964,8 @@ impl AgentEngine {
 
                             if is_retryable && stream_attempt < 3 {
                                 let tier = classify_task_tier(&last_user_text(&history), None);
-                                if let Some(fallback_cfg) =
-                                    router.fallback_for_failure_tier(turn_client.model(), Some(tier))
+                                if let Some(fallback_cfg) = router
+                                    .fallback_for_failure_tier(turn_client.model(), Some(tier))
                                 {
                                     let backoff_ms = (stream_attempt + 1) * 1000;
                                     let _ = event_tx.send(EngineEvent::Notice(
@@ -2395,7 +2396,9 @@ mod tests {
         assert!(is_mutating_shell_command("echo 'foo' > /tmp/evil"));
         assert!(is_mutating_shell_command("cat < /dev/null >> test.txt"));
         assert!(is_mutating_shell_command("$(whoami)"));
-        assert!(is_mutating_shell_command("python3 -c 'import os; os.remove(\"foo\")'"));
+        assert!(is_mutating_shell_command(
+            "python3 -c 'import os; os.remove(\"foo\")'"
+        ));
     }
 
     #[test]
