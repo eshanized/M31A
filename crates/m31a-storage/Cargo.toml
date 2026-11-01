@@ -1,0 +1,25 @@
+[package]
+name = "m31a-storage"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+m31a-core = { path = "../m31a-core" }
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+chrono.workspace = true
+directories.workspace = true
+uuid.workspace = true
+sha2.workspace = true
+tokio.workspace = true
+rand.workspace = true
+git2 = "0.21.0"
+
+[dev-dependencies]
+tempfile.workspace = true

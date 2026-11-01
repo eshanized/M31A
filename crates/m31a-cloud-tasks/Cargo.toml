@@ -1,0 +1,28 @@
+[package]
+name = "m31a-cloud-tasks"
+version.workspace = true
+edition = "2024"
+authors.workspace = true
+license.workspace = true
+description = "Cloud Tasks client for remote agent execution"
+
+[dependencies]
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+m31a-core = { path = "../m31a-core" }
+prost = "0.13"
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tonic = { version = "0.12", features = ["tls", "transport"] }
+uuid = { workspace = true }
+chrono = { workspace = true }
+
+[build-dependencies]
+tonic-build = "0.12"
+
+[features]
+default = []
+mock = []

@@ -1,0 +1,23 @@
+[package]
+name = "m31a-proc"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+m31a-core = { path = "../m31a-core" }
+m31a-execpolicy = { path = "../m31a-execpolicy" }
+m31a-sandbox = { path = "../m31a-sandbox" }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+libc = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

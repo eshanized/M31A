@@ -1,0 +1,18 @@
+[package]
+name = "m31a-composer"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+anyhow = { workspace = true }
+ratatui = { workspace = true }
+crossterm = { workspace = true }
+unicode-width = { workspace = true }
+unicode-segmentation = { workspace = true }
+uuid = { workspace = true }
+m31a-fuzzy = { workspace = true }
+m31a-term = { workspace = true }
+m31a-trust = { path = "../m31a-trust" }

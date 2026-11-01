@@ -1,0 +1,34 @@
+[package]
+name = "m31a-provider"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+m31a-core = { path = "../m31a-core" }
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+futures.workspace = true
+futures-util.workspace = true
+async-trait.workspace = true
+tokio.workspace = true
+sha2.workspace = true
+uuid.workspace = true
+
+[features]
+default = []
+test-support = []
+live-nvidia-tests = []
+
+[[test]]
+name = "live_provider_test"
+required-features = ["live-nvidia-tests"]
+
+[dev-dependencies]
+tempfile.workspace = true
+m31a-provider = { path = ".", features = ["test-support"] }

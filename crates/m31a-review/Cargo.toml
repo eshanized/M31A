@@ -1,0 +1,22 @@
+[package]
+name = "m31a-review"
+version.workspace = true
+edition = "2024"
+authors.workspace = true
+license.workspace = true
+description = "Industrial automated code review, security vulnerability detection, and diff analysis engine for M31A"
+
+[dependencies]
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+similar = { workspace = true }
+regex = { workspace = true }
+tracing = { workspace = true }
+colored = { workspace = true }
+tokio = { workspace = true }
+reqwest = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

@@ -1,0 +1,30 @@
+[package]
+name = "m31a-mcp"
+version.workspace = true
+edition = "2024"
+authors.workspace = true
+license.workspace = true
+description = "Advanced Model Context Protocol (MCP) client, OAuth elicitation, manifests, and network policies for M31A"
+
+[dependencies]
+anyhow = { workspace = true }
+base64 = { version = "0.22", features = ["std"] }
+chrono = { workspace = true }
+m31a-core = { path = "../m31a-core" }
+m31a-storage = { path = "../m31a-storage" }
+async-trait = { workspace = true }
+futures = { workspace = true }
+rand = { version = "0.8", features = ["std"] }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { version = "0.10", features = ["std"] }
+sha1 = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+urlencoding = "2.1"
+uuid = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

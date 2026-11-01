@@ -1,0 +1,34 @@
+[package]
+name = "m31a-app-server"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+m31a-core = { path = "../m31a-core" }
+m31a-provider = { path = "../m31a-provider" }
+m31a-tools = { path = "../m31a-tools" }
+m31a-storage = { path = "../m31a-storage" }
+m31a-agent-engine = { path = "../m31a-agent-engine" }
+m31a-execpolicy = { path = "../m31a-execpolicy" }
+m31a-guardian = { path = "../m31a-guardian" }
+m31a-hooks = { path = "../m31a-hooks" }
+m31a-code-mode = { path = "../m31a-code-mode" }
+m31a-trust = { path = "../m31a-trust" }
+m31a-elicitation = { workspace = true }
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+chacha20poly1305.workspace = true
+rand.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+m31a-provider = { path = "../m31a-provider", features = ["test-support"] }

@@ -1,0 +1,20 @@
+[package]
+name = "m31a-guardian"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+m31a-core = { path = "../m31a-core" }
+m31a-provider = { path = "../m31a-provider" }
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+regex.workspace = true
+reqwest = { workspace = true }

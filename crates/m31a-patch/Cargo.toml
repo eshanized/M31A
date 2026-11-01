@@ -1,0 +1,20 @@
+[package]
+name = "m31a-patch"
+version.workspace = true
+edition = "2024"
+authors.workspace = true
+license.workspace = true
+description = "Industrial fuzzy patch engine with unified diff parsing, indentation preservation, and atomic rollback transactions for M31A"
+
+[dependencies]
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+similar = { workspace = true }
+regex = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

@@ -1,0 +1,22 @@
+[package]
+name = "m31a-shell"
+version.workspace = true
+edition = "2024"
+authors.workspace = true
+license.workspace = true
+description = "Stateful persistent pseudo-terminal (PTY) shell session and environment snapshot manager for M31A"
+
+[dependencies]
+m31a-core = { path = "../m31a-core" }
+m31a-sandbox = { path = "../m31a-sandbox" }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+libc = { workspace = true }
+which = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

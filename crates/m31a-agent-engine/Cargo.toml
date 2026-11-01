@@ -1,0 +1,54 @@
+[package]
+name = "m31a-agent-engine"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+futures = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+tracing = { workspace = true }
+m31a-core = { workspace = true }
+m31a-provider = { workspace = true }
+m31a-tools = { workspace = true }
+m31a-guardian = { workspace = true }
+m31a-execpolicy = { workspace = true }
+m31a-storage = { workspace = true }
+m31a-code-mode = { workspace = true }
+m31a-hooks = { workspace = true }
+m31a-verify = { path = "../m31a-verify" }
+m31a-ast = { path = "../m31a-ast" }
+m31a-sandbox = { workspace = true }
+m31a-term = { workspace = true }
+m31a-elicitation = { workspace = true }
+m31a-compaction = { path = "../m31a-compaction" }
+m31a-telemetry = { path = "../m31a-telemetry" }
+m31a-prompts = { path = "../m31a-prompts" }
+m31a-watcher = { path = "../m31a-watcher" }
+m31a-review = { path = "../m31a-review" }
+m31a-trust = { path = "../m31a-trust" }
+unicode-segmentation = { workspace = true }
+
+[features]
+default = []
+test-support = []
+live-nvidia-tests = ["m31a-provider/live-nvidia-tests"]
+
+[[test]]
+name = "live_nvidia_e2e"
+required-features = ["live-nvidia-tests"]
+
+[dev-dependencies]
+tempfile = { workspace = true }
+git2 = "0.21.0"
+m31a-review = { path = "../m31a-review" }
+m31a-provider = { path = "../m31a-provider", features = ["test-support"] }

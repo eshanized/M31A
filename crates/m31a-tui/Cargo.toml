@@ -1,0 +1,63 @@
+[package]
+name = "m31a-tui"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+m31a-core = { path = "../m31a-core" }
+m31a-provider = { path = "../m31a-provider" }
+m31a-sandbox = { path = "../m31a-sandbox" }
+m31a-execpolicy = { path = "../m31a-execpolicy" }
+m31a-tools = { path = "../m31a-tools" }
+m31a-storage = { path = "../m31a-storage" }
+m31a-guardian = { path = "../m31a-guardian" }
+m31a-term = { path = "../m31a-term" }
+m31a-fuzzy = { path = "../m31a-fuzzy" }
+m31a-diff = { path = "../m31a-diff" }
+m31a-composer = { path = "../m31a-composer" }
+m31a-elicitation = { path = "../m31a-elicitation" }
+m31a-analytics = { path = "../m31a-analytics" }
+m31a-agent-engine = { path = "../m31a-agent-engine" }
+m31a-code-mode = { path = "../m31a-code-mode" }
+m31a-hooks = { path = "../m31a-hooks" }
+m31a-verify = { path = "../m31a-verify" }
+m31a-patch = { path = "../m31a-patch" }
+m31a-review = { path = "../m31a-review" }
+m31a-ast = { path = "../m31a-ast" }
+m31a-trust = { path = "../m31a-trust" }
+m31a-proc = { path = "../m31a-proc" }
+m31a-watcher = { path = "../m31a-watcher" }
+m31a-mcp = { path = "../m31a-mcp" }
+m31a-collaboration-templates = { path = "../m31a-collaboration-templates" }
+
+tokio.workspace = true
+tokio-util.workspace = true
+ratatui.workspace = true
+crossterm.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+chrono.workspace = true
+futures-util.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+shlex.workspace = true
+base64 = "0.22"
+unicode-width.workspace = true
+unicode-segmentation.workspace = true
+
+[features]
+default = []
+test-support = []
+live-nvidia-tests = ["m31a-provider/live-nvidia-tests"]
+
+[[test]]
+name = "live_nvidia_activation"
+required-features = ["live-nvidia-tests"]
+
+[dev-dependencies]
+tempfile = { workspace = true }
+libc = { workspace = true }
+m31a-provider = { path = "../m31a-provider", features = ["test-support"] }

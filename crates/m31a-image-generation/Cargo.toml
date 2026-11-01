@@ -1,0 +1,29 @@
+[package]
+name = "m31a-image-generation"
+version.workspace = true
+edition = "2024"
+authors.workspace = true
+license.workspace = true
+description = "Image generation extension for M31A"
+
+[dependencies]
+anyhow = { workspace = true }
+base64 = { version = "0.22", features = ["std"] }
+m31a-core = { path = "../m31a-core" }
+rand = { version = "0.8", features = ["std"] }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { version = "0.10", features = ["std"] }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+uuid = { workspace = true }
+hex = "0.4"
+
+[features]
+default = []
+test-support = []
+
+[dev-dependencies]
+tempfile = { workspace = true }
+m31a-image-generation = { path = ".", features = ["test-support"] }

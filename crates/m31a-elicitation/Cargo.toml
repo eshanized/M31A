@@ -1,0 +1,16 @@
+[package]
+name = "m31a-elicitation"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+uuid = { workspace = true }
+ratatui = { workspace = true }
+crossterm = { workspace = true }
+m31a-term = { workspace = true }
+m31a-diff = { workspace = true }

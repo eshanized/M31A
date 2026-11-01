@@ -1,0 +1,26 @@
+[package]
+name = "m31a-verify"
+version.workspace = true
+edition = "2024"
+authors.workspace = true
+license.workspace = true
+description = "Autonomous compiler, linter, and test verification engine with structured diagnostics and self-healing for M31A"
+
+[dependencies]
+m31a-core = { path = "../m31a-core" }
+m31a-sandbox = { path = "../m31a-sandbox" }
+m31a-ast = { path = "../m31a-ast" }
+m31a-browser = { path = "../m31a-browser" }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+regex = { workspace = true }
+shlex = { workspace = true }
+chrono = { workspace = true }
+libc = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

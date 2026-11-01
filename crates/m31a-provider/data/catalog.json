@@ -1,0 +1,5723 @@
+{
+  "schema_version": "1.0.0",
+  "generated_at": "2026-10-30T11:47:01.102Z",
+  "last_synced_at": "2026-10-30T11:34:26.810Z",
+  "total_models": 85,
+  "publishers": [
+    "01-ai",
+    "adept",
+    "ai21labs",
+    "aisingapore",
+    "bigcode",
+    "databricks",
+    "deepseek-ai",
+    "google",
+    "ibm",
+    "meta",
+    "microsoft",
+    "minimaxai",
+    "mistralai",
+    "moonshotai",
+    "nv-mistralai",
+    "nvidia",
+    "openai",
+    "poolside",
+    "snowflake",
+    "stepfun-ai",
+    "writer",
+    "z-ai",
+    "zyphra"
+  ],
+  "modalities": [
+    "text",
+    "image",
+    "audio",
+    "embedding"
+  ],
+  "models": [
+    {
+      "id": "01-ai/yi-large",
+      "name": "Yi Large",
+      "publisher": "01-ai",
+      "family": "Yi",
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/01-ai/yi-large",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/01-ai/yi-large"
+      ],
+      "description": "Remote discovered model on NIM (01-ai)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 65536,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": null,
+        "output_per_million": null,
+        "status": "not_published",
+        "source": null,
+        "provenance_note": "No authoritative public pricing rate exposed by NVIDIA Build for this endpoint"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/01-ai/yi-large",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "adept/fuyu-8b",
+      "name": "Fuyu 8b",
+      "publisher": "adept",
+      "family": null,
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/adept/fuyu-8b",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/adept/fuyu-8b"
+      ],
+      "description": "Remote discovered model on NIM (adept)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "visual_language",
+      "protocol": "nim-custom",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": false,
+        "vision": true,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 65536,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0.18,
+        "output_per_million": 0.18,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "Official NVIDIA Build lightweight inference tier ($0.18/1M tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/adept/fuyu-8b",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": false,
+        "probe_endpoint": null,
+        "test_messages": null,
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "ai21labs/jamba-1.5-large-instruct",
+      "name": "Jamba 1.5 Large Instruct",
+      "publisher": "ai21labs",
+      "family": null,
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/ai21labs/jamba-1.5-large-instruct",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/ai21labs/jamba-1.5-large-instruct"
+      ],
+      "description": "Remote discovered model on NIM (ai21labs)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 65536,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": null,
+        "output_per_million": null,
+        "status": "not_published",
+        "source": null,
+        "provenance_note": "No authoritative public pricing rate exposed by NVIDIA Build for this endpoint"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/ai21labs/jamba-1.5-large-instruct",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "aisingapore/sea-lion-7b-instruct",
+      "name": "Sea Lion 7b Instruct",
+      "publisher": "aisingapore",
+      "family": null,
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/aisingapore/sea-lion-7b-instruct",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/aisingapore/sea-lion-7b-instruct"
+      ],
+      "description": "Remote discovered model on NIM (aisingapore)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 65536,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0.18,
+        "output_per_million": 0.18,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "Official NVIDIA Build lightweight inference tier ($0.18/1M tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/aisingapore/sea-lion-7b-instruct",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "bigcode/starcoder2-15b",
+      "name": "Starcoder2 15b",
+      "publisher": "bigcode",
+      "family": null,
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/bigcode/starcoder2-15b",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/bigcode/starcoder2-15b"
+      ],
+      "description": "Remote discovered model on NIM (bigcode)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 65536,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": null,
+        "output_per_million": null,
+        "status": "not_published",
+        "source": null,
+        "provenance_note": "No authoritative public pricing rate exposed by NVIDIA Build for this endpoint"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/bigcode/starcoder2-15b",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "databricks/dbrx-instruct",
+      "name": "Dbrx Instruct",
+      "publisher": "databricks",
+      "family": null,
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/databricks/dbrx-instruct",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/databricks/dbrx-instruct"
+      ],
+      "description": "Remote discovered model on NIM (databricks)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 65536,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": null,
+        "output_per_million": null,
+        "status": "not_published",
+        "source": null,
+        "provenance_note": "No authoritative public pricing rate exposed by NVIDIA Build for this endpoint"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/databricks/dbrx-instruct",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "deepseek-ai/deepseek-coder-6.7b-instruct",
+      "name": "Deepseek Coder 6.7b Instruct",
+      "publisher": "deepseek-ai",
+      "family": "DeepSeek",
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/deepseek-ai/deepseek-coder-6.7b-instruct",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/deepseek-ai/deepseek-coder-6.7b-instruct"
+      ],
+      "description": "Remote discovered model on NIM (deepseek-ai)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": true,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 65536,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0.18,
+        "output_per_million": 0.18,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "Official NVIDIA Build lightweight inference tier ($0.18/1M tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/deepseek-ai/deepseek-coder-6.7b-instruct",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "deepseek-ai/deepseek-v4.1-flash",
+      "name": "Deepseek V4.1 Flash",
+      "publisher": "deepseek-ai",
+      "family": "DeepSeek",
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/deepseek-ai/deepseek-v4.1-flash",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/deepseek-ai/deepseek-v4.1-flash"
+      ],
+      "description": "Remote discovered model on NIM (deepseek-ai)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": true,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 1048576,
+      "max_output_tokens": 16384,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": null,
+        "output_per_million": null,
+        "status": "not_published",
+        "source": null,
+        "provenance_note": "No authoritative public pricing rate exposed by NVIDIA Build for this endpoint"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/deepseek-ai/deepseek-v4.1-flash",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "google/codegemma-1.1-7b",
+      "name": "Codegemma 1.1 7b",
+      "publisher": "google",
+      "family": "Gemma",
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/google/codegemma-1.1-7b",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/google/codegemma-1.1-7b"
+      ],
+      "description": "Remote discovered model on NIM (google)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 65536,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0.18,
+        "output_per_million": 0.18,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "Official NVIDIA Build lightweight inference tier ($0.18/1M tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/google/codegemma-1.1-7b",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "google/codegemma-7b",
+      "name": "Codegemma 7b",
+      "publisher": "google",
+      "family": "Gemma",
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/google/codegemma-7b",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/google/codegemma-7b"
+      ],
+      "description": "Remote discovered model on NIM (google)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 65536,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0.18,
+        "output_per_million": 0.18,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "Official NVIDIA Build lightweight inference tier ($0.18/1M tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/google/codegemma-7b",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "google/deplot",
+      "name": "Deplot",
+      "publisher": "google",
+      "family": null,
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/google/deplot",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/google/deplot"
+      ],
+      "description": "Remote discovered model on NIM (google)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 65536,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": null,
+        "output_per_million": null,
+        "status": "not_published",
+        "source": null,
+        "provenance_note": "No authoritative public pricing rate exposed by NVIDIA Build for this endpoint"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/google/deplot",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "google/diffusiongemma-26b-a4b-it",
+      "name": "Diffusiongemma 26b A4b It",
+      "publisher": "google",
+      "family": "Gemma",
+      "architecture": "Diffusion Transformer (DiT)",
+      "official_detail_url": "https://build.nvidia.com/google/diffusiongemma-26b-a4b-it",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/google/diffusiongemma-26b-a4b-it"
+      ],
+      "description": "Remote discovered model on NIM (google)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 65536,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0.18,
+        "output_per_million": 0.18,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "Official NVIDIA Build lightweight inference tier ($0.18/1M tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/google/diffusiongemma-26b-a4b-it",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "google/gemma-2b",
+      "name": "Gemma 2b",
+      "publisher": "google",
+      "family": "Gemma",
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/google/gemma-2b",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/google/gemma-2b"
+      ],
+      "description": "Remote discovered model on NIM (google)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 65536,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0.18,
+        "output_per_million": 0.18,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "Official NVIDIA Build lightweight inference tier ($0.18/1M tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/google/gemma-2b",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "google/gemma-3-12b-it",
+      "name": "Gemma 3 12b It",
+      "publisher": "google",
+      "family": "Gemma",
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/google/gemma-3-12b-it",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/google/gemma-3-12b-it"
+      ],
+      "description": "Remote discovered model on NIM (google)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 65536,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0.18,
+        "output_per_million": 0.18,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "Official NVIDIA Build lightweight inference tier ($0.18/1M tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/google/gemma-3-12b-it",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "google/gemma-3-4b-it",
+      "name": "Gemma 3 4b It",
+      "publisher": "google",
+      "family": "Gemma",
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/google/gemma-3-4b-it",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/google/gemma-3-4b-it"
+      ],
+      "description": "Remote discovered model on NIM (google)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 65536,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0.18,
+        "output_per_million": 0.18,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "Official NVIDIA Build lightweight inference tier ($0.18/1M tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/google/gemma-3-4b-it",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "google/gemma-4-31b-it",
+      "name": "Gemma 4 31b It",
+      "publisher": "google",
+      "family": "Gemma",
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/google/gemma-4-31b-it",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/google/gemma-4-31b-it"
+      ],
+      "description": "Remote discovered model on NIM (google)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 65536,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": null,
+        "output_per_million": null,
+        "status": "not_published",
+        "source": null,
+        "provenance_note": "No authoritative public pricing rate exposed by NVIDIA Build for this endpoint"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/google/gemma-4-31b-it",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "google/recurrentgemma-2b",
+      "name": "Recurrentgemma 2b",
+      "publisher": "google",
+      "family": "Gemma",
+      "architecture": "State Space Model (SSM) / Hybrid",
+      "official_detail_url": "https://build.nvidia.com/google/recurrentgemma-2b",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/google/recurrentgemma-2b"
+      ],
+      "description": "Remote discovered model on NIM (google)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 65536,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0.18,
+        "output_per_million": 0.18,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "Official NVIDIA Build lightweight inference tier ($0.18/1M tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/google/recurrentgemma-2b",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "ibm/granite-3.0-3b-a800m-instruct",
+      "name": "Granite 3.0 3b A800m Instruct",
+      "publisher": "ibm",
+      "family": "Granite",
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/ibm/granite-3.0-3b-a800m-instruct",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/ibm/granite-3.0-3b-a800m-instruct"
+      ],
+      "description": "Remote discovered model on NIM (ibm)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 65536,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": null,
+        "output_per_million": null,
+        "status": "not_published",
+        "source": null,
+        "provenance_note": "No authoritative public pricing rate exposed by NVIDIA Build for this endpoint"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/ibm/granite-3.0-3b-a800m-instruct",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "ibm/granite-3.0-8b-instruct",
+      "name": "Granite 3.0 8b Instruct",
+      "publisher": "ibm",
+      "family": "Granite",
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/ibm/granite-3.0-8b-instruct",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/ibm/granite-3.0-8b-instruct"
+      ],
+      "description": "Remote discovered model on NIM (ibm)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 65536,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0.18,
+        "output_per_million": 0.18,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "Official NVIDIA Build lightweight inference tier ($0.18/1M tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/ibm/granite-3.0-8b-instruct",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "ibm/granite-34b-code-instruct",
+      "name": "Granite 34b Code Instruct",
+      "publisher": "ibm",
+      "family": "Granite",
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/ibm/granite-34b-code-instruct",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/ibm/granite-34b-code-instruct"
+      ],
+      "description": "Remote discovered model on NIM (ibm)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 65536,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0.18,
+        "output_per_million": 0.18,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "Official NVIDIA Build lightweight inference tier ($0.18/1M tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/ibm/granite-34b-code-instruct",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "ibm/granite-8b-code-instruct",
+      "name": "Granite 8b Code Instruct",
+      "publisher": "ibm",
+      "family": "Granite",
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/ibm/granite-8b-code-instruct",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/ibm/granite-8b-code-instruct"
+      ],
+      "description": "Remote discovered model on NIM (ibm)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 65536,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0.18,
+        "output_per_million": 0.18,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "Official NVIDIA Build lightweight inference tier ($0.18/1M tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/ibm/granite-8b-code-instruct",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "meta/codellama-70b",
+      "name": "Codellama 70b",
+      "publisher": "meta",
+      "family": null,
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/meta/codellama-70b",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/meta/codellama-70b"
+      ],
+      "description": "Remote discovered model on NIM (meta)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 131072,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0.7,
+        "output_per_million": 0.7,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "Official NVIDIA Build standard high-capacity tier ($0.70/1M tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/meta/codellama-70b",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "meta/llama-3.2-11b-vision-instruct",
+      "name": "Llama 3.2 11b Vision Instruct",
+      "publisher": "meta",
+      "family": "Llama 3.2",
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/meta/llama-3.2-11b-vision-instruct",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/meta/llama-3.2-11b-vision-instruct"
+      ],
+      "description": "Remote discovered model on NIM (meta)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "visual_language",
+      "protocol": "nim-custom",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": false,
+        "vision": true,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 65536,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": null,
+        "output_per_million": null,
+        "status": "not_published",
+        "source": null,
+        "provenance_note": "No authoritative public pricing rate exposed by NVIDIA Build for this endpoint"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/meta/llama-3.2-11b-vision-instruct",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": false,
+        "probe_endpoint": null,
+        "test_messages": null,
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "meta/llama-3.2-90b-vision-instruct",
+      "name": "Llama 3.2 90b Vision Instruct",
+      "publisher": "meta",
+      "family": "Llama 3.2",
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/meta/llama-3.2-90b-vision-instruct",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/meta/llama-3.2-90b-vision-instruct"
+      ],
+      "description": "Remote discovered model on NIM (meta)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "visual_language",
+      "protocol": "nim-custom",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": false,
+        "vision": true,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 65536,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": null,
+        "output_per_million": null,
+        "status": "not_published",
+        "source": null,
+        "provenance_note": "No authoritative public pricing rate exposed by NVIDIA Build for this endpoint"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/meta/llama-3.2-90b-vision-instruct",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": false,
+        "probe_endpoint": null,
+        "test_messages": null,
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "meta/llama-guard-4-12b",
+      "name": "Llama Guard 4 12b",
+      "publisher": "meta",
+      "family": null,
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/meta/llama-guard-4-12b",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/meta/llama-guard-4-12b"
+      ],
+      "description": "Remote discovered model on NIM (meta)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "guardrail",
+      "protocol": "nim-custom",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": false,
+        "completion": false,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 65536,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0.18,
+        "output_per_million": 0.18,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "Official NVIDIA Build lightweight inference tier ($0.18/1M tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/meta/llama-guard-4-12b",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": false,
+        "probe_endpoint": null,
+        "test_messages": null,
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "meta/llama2-70b",
+      "name": "Llama2 70b",
+      "publisher": "meta",
+      "family": null,
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/meta/llama2-70b",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/meta/llama2-70b"
+      ],
+      "description": "Remote discovered model on NIM (meta)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 131072,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0.7,
+        "output_per_million": 0.7,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "Official NVIDIA Build standard high-capacity tier ($0.70/1M tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/meta/llama2-70b",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "meta/muse-glimmer-30b",
+      "name": "Muse Glimmer 30b",
+      "publisher": "meta",
+      "family": null,
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/meta/muse-glimmer-30b",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/meta/muse-glimmer-30b"
+      ],
+      "description": "Remote discovered model on NIM (meta)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 65536,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": null,
+        "output_per_million": null,
+        "status": "not_published",
+        "source": null,
+        "provenance_note": "No authoritative public pricing rate exposed by NVIDIA Build for this endpoint"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/meta/muse-glimmer-30b",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "microsoft/kosmos-2",
+      "name": "Kosmos 2",
+      "publisher": "microsoft",
+      "family": null,
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/microsoft/kosmos-2",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/microsoft/kosmos-2"
+      ],
+      "description": "Remote discovered model on NIM (microsoft)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 65536,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": null,
+        "output_per_million": null,
+        "status": "not_published",
+        "source": null,
+        "provenance_note": "No authoritative public pricing rate exposed by NVIDIA Build for this endpoint"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/microsoft/kosmos-2",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "microsoft/phi-3-vision-128k-instruct",
+      "name": "Phi 3 Vision 128k Instruct",
+      "publisher": "microsoft",
+      "family": "Phi",
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/microsoft/phi-3-vision-128k-instruct",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/microsoft/phi-3-vision-128k-instruct"
+      ],
+      "description": "Remote discovered model on NIM (microsoft)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "visual_language",
+      "protocol": "nim-custom",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": false,
+        "vision": true,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 131072,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": null,
+        "output_per_million": null,
+        "status": "not_published",
+        "source": null,
+        "provenance_note": "No authoritative public pricing rate exposed by NVIDIA Build for this endpoint"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/microsoft/phi-3-vision-128k-instruct",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": false,
+        "probe_endpoint": null,
+        "test_messages": null,
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "microsoft/phi-3.5-moe-instruct",
+      "name": "Phi 3.5 Moe Instruct",
+      "publisher": "microsoft",
+      "family": "Phi",
+      "architecture": "Mixture of Experts (MoE) Transformer",
+      "official_detail_url": "https://build.nvidia.com/microsoft/phi-3.5-moe-instruct",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/microsoft/phi-3.5-moe-instruct"
+      ],
+      "description": "Remote discovered model on NIM (microsoft)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 65536,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": null,
+        "output_per_million": null,
+        "status": "not_published",
+        "source": null,
+        "provenance_note": "No authoritative public pricing rate exposed by NVIDIA Build for this endpoint"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/microsoft/phi-3.5-moe-instruct",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "minimaxai/minimax-m3.1-flash",
+      "name": "Minimax M3.1 Flash",
+      "publisher": "minimaxai",
+      "family": null,
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/minimaxai/minimax-m3.1-flash",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/minimaxai/minimax-m3.1-flash"
+      ],
+      "description": "Remote discovered model on NIM (minimaxai)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 65536,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": null,
+        "output_per_million": null,
+        "status": "not_published",
+        "source": null,
+        "provenance_note": "No authoritative public pricing rate exposed by NVIDIA Build for this endpoint"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/minimaxai/minimax-m3.1-flash",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "mistralai/codestral-22b-instruct-v0.1",
+      "name": "Codestral 22b Instruct V0.1",
+      "publisher": "mistralai",
+      "family": "Mistral",
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/mistralai/codestral-22b-instruct-v0.1",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/mistralai/codestral-22b-instruct-v0.1"
+      ],
+      "description": "Remote discovered model on NIM (mistralai)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 65536,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0.18,
+        "output_per_million": 0.18,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "Official NVIDIA Build lightweight inference tier ($0.18/1M tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/mistralai/codestral-22b-instruct-v0.1",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "mistralai/mistral-7b-instruct-v0.3",
+      "name": "Mistral 7b Instruct V0.3",
+      "publisher": "mistralai",
+      "family": "Mistral",
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/mistralai/mistral-7b-instruct-v0.3",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/mistralai/mistral-7b-instruct-v0.3"
+      ],
+      "description": "Remote discovered model on NIM (mistralai)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 65536,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0.18,
+        "output_per_million": 0.18,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "Official NVIDIA Build lightweight inference tier ($0.18/1M tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/mistralai/mistral-7b-instruct-v0.3",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "mistralai/mistral-large",
+      "name": "Mistral Large",
+      "publisher": "mistralai",
+      "family": "Mistral",
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/mistralai/mistral-large",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/mistralai/mistral-large"
+      ],
+      "description": "Remote discovered model on NIM (mistralai)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 65536,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": null,
+        "output_per_million": null,
+        "status": "not_published",
+        "source": null,
+        "provenance_note": "No authoritative public pricing rate exposed by NVIDIA Build for this endpoint"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/mistralai/mistral-large",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "mistralai/mistral-large-2-instruct",
+      "name": "Mistral Large 2 Instruct",
+      "publisher": "mistralai",
+      "family": "Mistral",
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/mistralai/mistral-large-2-instruct",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/mistralai/mistral-large-2-instruct"
+      ],
+      "description": "Remote discovered model on NIM (mistralai)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 65536,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": null,
+        "output_per_million": null,
+        "status": "not_published",
+        "source": null,
+        "provenance_note": "No authoritative public pricing rate exposed by NVIDIA Build for this endpoint"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/mistralai/mistral-large-2-instruct",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "mistralai/mistral-large-4-1t-a52b",
+      "name": "Mistral Large 4 1t A52b",
+      "publisher": "mistralai",
+      "family": "Mistral",
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/mistralai/mistral-large-4-1t-a52b",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/mistralai/mistral-large-4-1t-a52b"
+      ],
+      "description": "Remote discovered model on NIM (mistralai)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 65536,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0.18,
+        "output_per_million": 0.18,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "Official NVIDIA Build lightweight inference tier ($0.18/1M tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/mistralai/mistral-large-4-1t-a52b",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "mistralai/mixtral-8x22b-v0.1",
+      "name": "Mixtral 8x22b V0.1",
+      "publisher": "mistralai",
+      "family": "Mistral",
+      "architecture": "Mixture of Experts (MoE) Transformer",
+      "official_detail_url": "https://build.nvidia.com/mistralai/mixtral-8x22b-v0.1",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/mistralai/mixtral-8x22b-v0.1"
+      ],
+      "description": "Remote discovered model on NIM (mistralai)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 65536,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0.18,
+        "output_per_million": 0.18,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "Official NVIDIA Build lightweight inference tier ($0.18/1M tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/mistralai/mixtral-8x22b-v0.1",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "moonshotai/kimi-k2.6",
+      "name": "Kimi K2.6",
+      "publisher": "moonshotai",
+      "family": null,
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/moonshotai/kimi-k2.6",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/moonshotai/kimi-k2.6"
+      ],
+      "description": "Remote discovered model on NIM (moonshotai)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 65536,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": null,
+        "output_per_million": null,
+        "status": "not_published",
+        "source": null,
+        "provenance_note": "No authoritative public pricing rate exposed by NVIDIA Build for this endpoint"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/moonshotai/kimi-k2.6",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "nv-mistralai/mistral-nemo-12b-instruct",
+      "name": "Mistral Nemo 12b Instruct",
+      "publisher": "nv-mistralai",
+      "family": "Mistral",
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/nv-mistralai/mistral-nemo-12b-instruct",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/nv-mistralai/mistral-nemo-12b-instruct"
+      ],
+      "description": "Remote discovered model on NIM (nv-mistralai)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 65536,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0.18,
+        "output_per_million": 0.18,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "Official NVIDIA Build lightweight inference tier ($0.18/1M tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/nv-mistralai/mistral-nemo-12b-instruct",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "nvidia/ai-synthetic-video-detector",
+      "name": "Ai Synthetic Video Detector",
+      "publisher": "nvidia",
+      "family": null,
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/nvidia/ai-synthetic-video-detector",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/nvidia/ai-synthetic-video-detector"
+      ],
+      "description": "Remote discovered model on NIM (nvidia)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 65536,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": null,
+        "output_per_million": null,
+        "status": "not_published",
+        "source": null,
+        "provenance_note": "No authoritative public pricing rate exposed by NVIDIA Build for this endpoint"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/nvidia/ai-synthetic-video-detector",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "nvidia/cosmos-reason2-8b",
+      "name": "Cosmos Reason2 8b",
+      "publisher": "nvidia",
+      "family": "Cosmos",
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/nvidia/cosmos-reason2-8b",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/nvidia/cosmos-reason2-8b"
+      ],
+      "description": "Remote discovered model on NIM (nvidia)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": true,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 65536,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0.18,
+        "output_per_million": 0.18,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "Official NVIDIA Build lightweight inference tier ($0.18/1M tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/nvidia/cosmos-reason2-8b",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "nvidia/embed-qa-4",
+      "name": "Embed Qa 4",
+      "publisher": "nvidia",
+      "family": null,
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/nvidia/embed-qa-4",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/nvidia/embed-qa-4"
+      ],
+      "description": "Remote discovered model on NIM (nvidia)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "embedding",
+      "protocol": "nim-custom",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "embedding"
+      ],
+      "capabilities": {
+        "chat": false,
+        "completion": false,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": true,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 65536,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0.05,
+        "output_per_million": 0,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "Official NVIDIA Build embedding service tier ($0.05/1M input tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/nvidia/embed-qa-4",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": false,
+        "probe_endpoint": null,
+        "test_messages": null,
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "nvidia/ising-calibration-1.5-31b",
+      "name": "Ising Calibration 1.5 31b",
+      "publisher": "nvidia",
+      "family": null,
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/nvidia/ising-calibration-1.5-31b",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/nvidia/ising-calibration-1.5-31b"
+      ],
+      "description": "Remote discovered model on NIM (nvidia)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 65536,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": null,
+        "output_per_million": null,
+        "status": "not_published",
+        "source": null,
+        "provenance_note": "No authoritative public pricing rate exposed by NVIDIA Build for this endpoint"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/nvidia/ising-calibration-1.5-31b",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "nvidia/llama-3.1-nemoguard-8b-content-safety",
+      "name": "Llama 3.1 Nemoguard 8b Content Safety",
+      "publisher": "nvidia",
+      "family": "Llama 3.1",
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/nvidia/llama-3.1-nemoguard-8b-content-safety",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/nvidia/llama-3.1-nemoguard-8b-content-safety"
+      ],
+      "description": "Remote discovered model on NIM (nvidia)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "guardrail",
+      "protocol": "nim-custom",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": false,
+        "completion": false,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 65536,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0.18,
+        "output_per_million": 0.18,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "Official NVIDIA Build lightweight inference tier ($0.18/1M tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/nvidia/llama-3.1-nemoguard-8b-content-safety",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": false,
+        "probe_endpoint": null,
+        "test_messages": null,
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "nvidia/llama-3.1-nemoguard-8b-topic-control",
+      "name": "Llama 3.1 Nemoguard 8b Topic Control",
+      "publisher": "nvidia",
+      "family": "Llama 3.1",
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/nvidia/llama-3.1-nemoguard-8b-topic-control",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/nvidia/llama-3.1-nemoguard-8b-topic-control"
+      ],
+      "description": "Remote discovered model on NIM (nvidia)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "guardrail",
+      "protocol": "nim-custom",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": false,
+        "completion": false,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 65536,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0.18,
+        "output_per_million": 0.18,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "Official NVIDIA Build lightweight inference tier ($0.18/1M tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/nvidia/llama-3.1-nemoguard-8b-topic-control",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": false,
+        "probe_endpoint": null,
+        "test_messages": null,
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "nvidia/llama-3.1-nemotron-51b-instruct",
+      "name": "Llama 3.1 Nemotron 51b Instruct",
+      "publisher": "nvidia",
+      "family": "Llama 3.1",
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/nvidia/llama-3.1-nemotron-51b-instruct",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/nvidia/llama-3.1-nemotron-51b-instruct"
+      ],
+      "description": "Remote discovered model on NIM (nvidia)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 131072,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 4,
+        "output_per_million": 4,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "NVIDIA Nemotron foundation tier ($4.00/1M tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/nvidia/llama-3.1-nemotron-51b-instruct",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "nvidia/llama-3.1-nemotron-70b-instruct",
+      "name": "Llama 3.1 Nemotron 70b Instruct",
+      "publisher": "nvidia",
+      "family": "Llama 3.1",
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/nvidia/llama-3.1-nemotron-70b-instruct",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/nvidia/llama-3.1-nemotron-70b-instruct"
+      ],
+      "description": "Remote discovered model on NIM (nvidia)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 131072,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0.7,
+        "output_per_million": 0.7,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "Official NVIDIA Build standard high-capacity tier ($0.70/1M tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/nvidia/llama-3.1-nemotron-70b-instruct",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "nvidia/llama-3.1-nemotron-safety-guard-8b-v3",
+      "name": "Llama 3.1 Nemotron Safety Guard 8b V3",
+      "publisher": "nvidia",
+      "family": "Llama 3.1",
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/nvidia/llama-3.1-nemotron-safety-guard-8b-v3",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/nvidia/llama-3.1-nemotron-safety-guard-8b-v3"
+      ],
+      "description": "Remote discovered model on NIM (nvidia)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "guardrail",
+      "protocol": "nim-custom",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": false,
+        "completion": false,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 131072,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0.18,
+        "output_per_million": 0.18,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "Official NVIDIA Build lightweight inference tier ($0.18/1M tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/nvidia/llama-3.1-nemotron-safety-guard-8b-v3",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": false,
+        "probe_endpoint": null,
+        "test_messages": null,
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "nvidia/llama-3.1-nemotron-ultra-253b-v1",
+      "name": "Llama 3.1 Nemotron Ultra 253b V1",
+      "publisher": "nvidia",
+      "family": "Llama 3.1",
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/nvidia/llama-3.1-nemotron-ultra-253b-v1",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/nvidia/llama-3.1-nemotron-ultra-253b-v1"
+      ],
+      "description": "Remote discovered model on NIM (nvidia)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 131072,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 4,
+        "output_per_million": 4,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "NVIDIA Nemotron foundation tier ($4.00/1M tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/nvidia/llama-3.1-nemotron-ultra-253b-v1",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "nvidia/llama-3.2-nemoretriever-1b-vlm-embed-v1",
+      "name": "Llama 3.2 Nemoretriever 1b Vlm Embed V1",
+      "publisher": "nvidia",
+      "family": "Llama 3.2",
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/nvidia/llama-3.2-nemoretriever-1b-vlm-embed-v1",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/nvidia/llama-3.2-nemoretriever-1b-vlm-embed-v1"
+      ],
+      "description": "Remote discovered model on NIM (nvidia)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "embedding",
+      "protocol": "nim-custom",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "output_modalities": [
+        "embedding"
+      ],
+      "capabilities": {
+        "chat": false,
+        "completion": false,
+        "vision": true,
+        "audio": false,
+        "video": false,
+        "embedding": true,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 65536,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0.05,
+        "output_per_million": 0,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "Official NVIDIA Build embedding service tier ($0.05/1M input tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/nvidia/llama-3.2-nemoretriever-1b-vlm-embed-v1",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": false,
+        "probe_endpoint": null,
+        "test_messages": null,
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "nvidia/llama-3.2-nv-embedqa-1b-v1",
+      "name": "Llama 3.2 Nv Embedqa 1b V1",
+      "publisher": "nvidia",
+      "family": "Llama 3.2",
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/nvidia/llama-3.2-nv-embedqa-1b-v1",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/nvidia/llama-3.2-nv-embedqa-1b-v1"
+      ],
+      "description": "Remote discovered model on NIM (nvidia)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "embedding",
+      "protocol": "nim-custom",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "embedding"
+      ],
+      "capabilities": {
+        "chat": false,
+        "completion": false,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": true,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 65536,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0.05,
+        "output_per_million": 0,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "Official NVIDIA Build embedding service tier ($0.05/1M input tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/nvidia/llama-3.2-nv-embedqa-1b-v1",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": false,
+        "probe_endpoint": null,
+        "test_messages": null,
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "nvidia/llama-nemotron-embed-vl-1b-v2",
+      "name": "Llama Nemotron Embed Vl 1b V2",
+      "publisher": "nvidia",
+      "family": "Nemotron",
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/nvidia/llama-nemotron-embed-vl-1b-v2",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/nvidia/llama-nemotron-embed-vl-1b-v2"
+      ],
+      "description": "Remote discovered model on NIM (nvidia)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "embedding",
+      "protocol": "nim-custom",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "output_modalities": [
+        "embedding"
+      ],
+      "capabilities": {
+        "chat": false,
+        "completion": false,
+        "vision": true,
+        "audio": false,
+        "video": false,
+        "embedding": true,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 131072,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 4,
+        "output_per_million": 4,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "NVIDIA Nemotron foundation tier ($4.00/1M tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/nvidia/llama-nemotron-embed-vl-1b-v2",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": false,
+        "probe_endpoint": null,
+        "test_messages": null,
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "nvidia/llama3-chatqa-1.5-70b",
+      "name": "Llama3 Chatqa 1.5 70b",
+      "publisher": "nvidia",
+      "family": null,
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/nvidia/llama3-chatqa-1.5-70b",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/nvidia/llama3-chatqa-1.5-70b"
+      ],
+      "description": "Remote discovered model on NIM (nvidia)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 131072,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0.7,
+        "output_per_million": 0.7,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "Official NVIDIA Build standard high-capacity tier ($0.70/1M tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/nvidia/llama3-chatqa-1.5-70b",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "nvidia/mistral-nemo-minitron-8b-8k-instruct",
+      "name": "Mistral Nemo Minitron 8b 8k Instruct",
+      "publisher": "nvidia",
+      "family": "Mistral",
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/nvidia/mistral-nemo-minitron-8b-8k-instruct",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/nvidia/mistral-nemo-minitron-8b-8k-instruct"
+      ],
+      "description": "Remote discovered model on NIM (nvidia)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 65536,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0.18,
+        "output_per_million": 0.18,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "Official NVIDIA Build lightweight inference tier ($0.18/1M tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/nvidia/mistral-nemo-minitron-8b-8k-instruct",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "nvidia/nemotron-3-embed-1b",
+      "name": "Nemotron 3 Embed 1b",
+      "publisher": "nvidia",
+      "family": "Nemotron",
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/nvidia/nemotron-3-embed-1b",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/nvidia/nemotron-3-embed-1b"
+      ],
+      "description": "Remote discovered model on NIM (nvidia)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "embedding",
+      "protocol": "nim-custom",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "embedding"
+      ],
+      "capabilities": {
+        "chat": false,
+        "completion": false,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": true,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 131072,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 4,
+        "output_per_million": 4,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "NVIDIA Nemotron foundation tier ($4.00/1M tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/nvidia/nemotron-3-embed-1b",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": false,
+        "probe_endpoint": null,
+        "test_messages": null,
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+      "name": "Nemotron 3 Nano Omni 30b A3b Reasoning",
+      "publisher": "nvidia",
+      "family": "Nemotron",
+      "architecture": "Mixture of Experts (MoE) Transformer",
+      "official_detail_url": "https://build.nvidia.com/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"
+      ],
+      "description": "Remote discovered model on NIM (nvidia)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "visual_language",
+      "protocol": "nim-custom",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": false,
+        "vision": true,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": true,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 131072,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 4,
+        "output_per_million": 4,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "NVIDIA Nemotron foundation tier ($4.00/1M tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": false,
+        "probe_endpoint": null,
+        "test_messages": null,
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "nvidia/nemotron-3-super-120b-a12b",
+      "name": "Nemotron 3 Super 120b A12b",
+      "publisher": "nvidia",
+      "family": "Nemotron",
+      "architecture": "Mixture of Experts (MoE) Transformer",
+      "official_detail_url": "https://build.nvidia.com/nvidia/nemotron-3-super-120b-a12b",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/nvidia/nemotron-3-super-120b-a12b"
+      ],
+      "description": "Remote discovered model on NIM (nvidia)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 131072,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0.18,
+        "output_per_million": 0.18,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "Official NVIDIA Build lightweight inference tier ($0.18/1M tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/nvidia/nemotron-3-super-120b-a12b",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "nvidia/nemotron-3-ultra-550b-a55b",
+      "name": "Nemotron 3 Ultra 550b A55b",
+      "publisher": "nvidia",
+      "family": "Nemotron",
+      "architecture": "Mixture of Experts (MoE) Transformer",
+      "official_detail_url": "https://build.nvidia.com/nvidia/nemotron-3-ultra-550b-a55b",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/nvidia/nemotron-3-ultra-550b-a55b"
+      ],
+      "description": "NVIDIA Nemotron 3 Ultra 550B hybrid MoE reasoning model with 55B active parameters, 1M context window, and advanced tool calling.",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": true,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 1048576,
+      "max_output_tokens": 16384,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 4,
+        "output_per_million": 4,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "NVIDIA Nemotron foundation tier ($4.00/1M tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/nvidia/nemotron-3-ultra-550b-a55b",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "nvidia/nemotron-3.5-bolt-e4b",
+      "name": "Nemotron 3.5 Bolt E4b",
+      "publisher": "nvidia",
+      "family": "Nemotron",
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/nvidia/nemotron-3.5-bolt-e4b",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/nvidia/nemotron-3.5-bolt-e4b"
+      ],
+      "description": "Remote discovered model on NIM (nvidia)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 131072,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0.18,
+        "output_per_million": 0.18,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "Official NVIDIA Build lightweight inference tier ($0.18/1M tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/nvidia/nemotron-3.5-bolt-e4b",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "nvidia/nemotron-3.5-content-safety",
+      "name": "Nemotron 3.5 Content Safety",
+      "publisher": "nvidia",
+      "family": "Nemotron",
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/nvidia/nemotron-3.5-content-safety",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/nvidia/nemotron-3.5-content-safety"
+      ],
+      "description": "Remote discovered model on NIM (nvidia)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "guardrail",
+      "protocol": "nim-custom",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": false,
+        "completion": false,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 131072,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 4,
+        "output_per_million": 4,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "NVIDIA Nemotron foundation tier ($4.00/1M tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/nvidia/nemotron-3.5-content-safety",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": false,
+        "probe_endpoint": null,
+        "test_messages": null,
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "nvidia/nemotron-3.5-embed-1b",
+      "name": "Nemotron 3.5 Embed 1b",
+      "publisher": "nvidia",
+      "family": "Nemotron",
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/nvidia/nemotron-3.5-embed-1b",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/nvidia/nemotron-3.5-embed-1b"
+      ],
+      "description": "Remote discovered model on NIM (nvidia)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "embedding",
+      "protocol": "nim-custom",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "embedding"
+      ],
+      "capabilities": {
+        "chat": false,
+        "completion": false,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": true,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 131072,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 4,
+        "output_per_million": 4,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "NVIDIA Nemotron foundation tier ($4.00/1M tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/nvidia/nemotron-3.5-embed-1b",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": false,
+        "probe_endpoint": null,
+        "test_messages": null,
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "nvidia/nemotron-3.5-embed-8b",
+      "name": "Nemotron 3.5 Embed 8b",
+      "publisher": "nvidia",
+      "family": "Nemotron",
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/nvidia/nemotron-3.5-embed-8b",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/nvidia/nemotron-3.5-embed-8b"
+      ],
+      "description": "Remote discovered model on NIM (nvidia)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "embedding",
+      "protocol": "nim-custom",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "embedding"
+      ],
+      "capabilities": {
+        "chat": false,
+        "completion": false,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": true,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 131072,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0.18,
+        "output_per_million": 0.18,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "Official NVIDIA Build lightweight inference tier ($0.18/1M tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/nvidia/nemotron-3.5-embed-8b",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": false,
+        "probe_endpoint": null,
+        "test_messages": null,
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "nvidia/nemotron-3.5-lightning-30b-a3b",
+      "name": "Nemotron 3.5 Lightning 30b A3b",
+      "publisher": "nvidia",
+      "family": "Nemotron",
+      "architecture": "Mixture of Experts (MoE) Transformer",
+      "official_detail_url": "https://build.nvidia.com/nvidia/nemotron-3.5-lightning-30b-a3b",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/nvidia/nemotron-3.5-lightning-30b-a3b"
+      ],
+      "description": "Remote discovered model on NIM (nvidia)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 131072,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 4,
+        "output_per_million": 4,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "NVIDIA Nemotron foundation tier ($4.00/1M tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/nvidia/nemotron-3.5-lightning-30b-a3b",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "nvidia/nemotron-3.5-super-vl-120b-a12b",
+      "name": "Nemotron 3.5 Super Vl 120b A12b",
+      "publisher": "nvidia",
+      "family": "Nemotron",
+      "architecture": "Mixture of Experts (MoE) Transformer",
+      "official_detail_url": "https://build.nvidia.com/nvidia/nemotron-3.5-super-vl-120b-a12b",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/nvidia/nemotron-3.5-super-vl-120b-a12b"
+      ],
+      "description": "Remote discovered model on NIM (nvidia)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "visual_language",
+      "protocol": "nim-custom",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": false,
+        "vision": true,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 1048576,
+      "max_output_tokens": 8192,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0.18,
+        "output_per_million": 0.18,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "Official NVIDIA Build lightweight inference tier ($0.18/1M tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/nvidia/nemotron-3.5-super-vl-120b-a12b",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": false,
+        "probe_endpoint": null,
+        "test_messages": null,
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "nvidia/nemotron-4-340b-instruct",
+      "name": "Nemotron 4 340b Instruct",
+      "publisher": "nvidia",
+      "family": "Nemotron",
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/nvidia/nemotron-4-340b-instruct",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/nvidia/nemotron-4-340b-instruct"
+      ],
+      "description": "Remote discovered model on NIM (nvidia)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 131072,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 4,
+        "output_per_million": 4,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "NVIDIA Nemotron foundation tier ($4.00/1M tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/nvidia/nemotron-4-340b-instruct",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "nvidia/nemotron-4-340b-reward",
+      "name": "Nemotron 4 340b Reward",
+      "publisher": "nvidia",
+      "family": "Nemotron",
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/nvidia/nemotron-4-340b-reward",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/nvidia/nemotron-4-340b-reward"
+      ],
+      "description": "Remote discovered model on NIM (nvidia)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 131072,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 4,
+        "output_per_million": 4,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "NVIDIA Nemotron foundation tier ($4.00/1M tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/nvidia/nemotron-4-340b-reward",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "nvidia/nemotron-nano-3-30b-a3b",
+      "name": "Nemotron Nano 3 30b A3b",
+      "publisher": "nvidia",
+      "family": "Nemotron",
+      "architecture": "Mixture of Experts (MoE) Transformer",
+      "official_detail_url": "https://build.nvidia.com/nvidia/nemotron-nano-3-30b-a3b",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/nvidia/nemotron-nano-3-30b-a3b"
+      ],
+      "description": "Remote discovered model on NIM (nvidia)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 131072,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 4,
+        "output_per_million": 4,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "NVIDIA Nemotron foundation tier ($4.00/1M tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/nvidia/nemotron-nano-3-30b-a3b",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "nvidia/nemotron-parse",
+      "name": "Nemotron Parse",
+      "publisher": "nvidia",
+      "family": "Nemotron",
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/nvidia/nemotron-parse",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/nvidia/nemotron-parse"
+      ],
+      "description": "Remote discovered model on NIM (nvidia)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 131072,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 4,
+        "output_per_million": 4,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "NVIDIA Nemotron foundation tier ($4.00/1M tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/nvidia/nemotron-parse",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "nvidia/nemotron-parse-2.0",
+      "name": "Nemotron Parse 2.0",
+      "publisher": "nvidia",
+      "family": "Nemotron",
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/nvidia/nemotron-parse-2.0",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/nvidia/nemotron-parse-2.0"
+      ],
+      "description": "Remote discovered model on NIM (nvidia)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 131072,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 4,
+        "output_per_million": 4,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "NVIDIA Nemotron foundation tier ($4.00/1M tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/nvidia/nemotron-parse-2.0",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "nvidia/neva-22b",
+      "name": "Neva 22b",
+      "publisher": "nvidia",
+      "family": null,
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/nvidia/neva-22b",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/nvidia/neva-22b"
+      ],
+      "description": "Remote discovered model on NIM (nvidia)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "visual_language",
+      "protocol": "nim-custom",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": false,
+        "vision": true,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 65536,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0.18,
+        "output_per_million": 0.18,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "Official NVIDIA Build lightweight inference tier ($0.18/1M tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/nvidia/neva-22b",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": false,
+        "probe_endpoint": null,
+        "test_messages": null,
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "nvidia/nv-embedqa-mistral-7b-v2",
+      "name": "Nv Embedqa Mistral 7b V2",
+      "publisher": "nvidia",
+      "family": "Mistral",
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/nvidia/nv-embedqa-mistral-7b-v2",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/nvidia/nv-embedqa-mistral-7b-v2"
+      ],
+      "description": "Remote discovered model on NIM (nvidia)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "embedding",
+      "protocol": "nim-custom",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "embedding"
+      ],
+      "capabilities": {
+        "chat": false,
+        "completion": false,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": true,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 65536,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0.18,
+        "output_per_million": 0.18,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "Official NVIDIA Build lightweight inference tier ($0.18/1M tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/nvidia/nv-embedqa-mistral-7b-v2",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": false,
+        "probe_endpoint": null,
+        "test_messages": null,
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "nvidia/nvclip",
+      "name": "Nvclip",
+      "publisher": "nvidia",
+      "family": null,
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/nvidia/nvclip",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/nvidia/nvclip"
+      ],
+      "description": "Remote discovered model on NIM (nvidia)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 65536,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": null,
+        "output_per_million": null,
+        "status": "not_published",
+        "source": null,
+        "provenance_note": "No authoritative public pricing rate exposed by NVIDIA Build for this endpoint"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/nvidia/nvclip",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "nvidia/riva-translate-4b-instruct",
+      "name": "Riva Translate 4b Instruct",
+      "publisher": "nvidia",
+      "family": null,
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/nvidia/riva-translate-4b-instruct",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/nvidia/riva-translate-4b-instruct"
+      ],
+      "description": "Remote discovered model on NIM (nvidia)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 65536,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0.18,
+        "output_per_million": 0.18,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "Official NVIDIA Build lightweight inference tier ($0.18/1M tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/nvidia/riva-translate-4b-instruct",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "nvidia/riva-translate-4b-instruct-v2",
+      "name": "Riva Translate 4b Instruct V2",
+      "publisher": "nvidia",
+      "family": null,
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/nvidia/riva-translate-4b-instruct-v2",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/nvidia/riva-translate-4b-instruct-v2"
+      ],
+      "description": "Remote discovered model on NIM (nvidia)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 65536,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0.18,
+        "output_per_million": 0.18,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "Official NVIDIA Build lightweight inference tier ($0.18/1M tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/nvidia/riva-translate-4b-instruct-v2",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "nvidia/vila",
+      "name": "Vila",
+      "publisher": "nvidia",
+      "family": null,
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/nvidia/vila",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/nvidia/vila"
+      ],
+      "description": "Remote discovered model on NIM (nvidia)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 65536,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": null,
+        "output_per_million": null,
+        "status": "not_published",
+        "source": null,
+        "provenance_note": "No authoritative public pricing rate exposed by NVIDIA Build for this endpoint"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/nvidia/vila",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "openai/gpt-oss-20b",
+      "name": "Gpt Oss 20b",
+      "publisher": "openai",
+      "family": null,
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/openai/gpt-oss-20b",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/openai/gpt-oss-20b"
+      ],
+      "description": "Remote discovered model on NIM (openai)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 65536,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": null,
+        "output_per_million": null,
+        "status": "not_published",
+        "source": null,
+        "provenance_note": "No authoritative public pricing rate exposed by NVIDIA Build for this endpoint"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/openai/gpt-oss-20b",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "poolside/laguna-xs-2.1",
+      "name": "Laguna Xs 2.1",
+      "publisher": "poolside",
+      "family": null,
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/poolside/laguna-xs-2.1",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/poolside/laguna-xs-2.1"
+      ],
+      "description": "Remote discovered model on NIM (poolside)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 65536,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": null,
+        "output_per_million": null,
+        "status": "not_published",
+        "source": null,
+        "provenance_note": "No authoritative public pricing rate exposed by NVIDIA Build for this endpoint"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/poolside/laguna-xs-2.1",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "snowflake/arctic-embed-l",
+      "name": "Arctic Embed L",
+      "publisher": "snowflake",
+      "family": "Arctic",
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/snowflake/arctic-embed-l",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/snowflake/arctic-embed-l"
+      ],
+      "description": "Remote discovered model on NIM (snowflake)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "embedding",
+      "protocol": "nim-custom",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "embedding"
+      ],
+      "capabilities": {
+        "chat": false,
+        "completion": false,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": true,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 65536,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0.05,
+        "output_per_million": 0,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "Official NVIDIA Build embedding service tier ($0.05/1M input tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/snowflake/arctic-embed-l",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": false,
+        "probe_endpoint": null,
+        "test_messages": null,
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "stepfun-ai/step-5-preview",
+      "name": "Step 5 Preview",
+      "publisher": "stepfun-ai",
+      "family": null,
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/stepfun-ai/step-5-preview",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/stepfun-ai/step-5-preview"
+      ],
+      "description": "Remote discovered model on NIM (stepfun-ai)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 65536,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": null,
+        "output_per_million": null,
+        "status": "not_published",
+        "source": null,
+        "provenance_note": "No authoritative public pricing rate exposed by NVIDIA Build for this endpoint"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/stepfun-ai/step-5-preview",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "writer/palmyra-creative-122b",
+      "name": "Palmyra Creative 122b",
+      "publisher": "writer",
+      "family": null,
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/writer/palmyra-creative-122b",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/writer/palmyra-creative-122b"
+      ],
+      "description": "Remote discovered model on NIM (writer)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 65536,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0.18,
+        "output_per_million": 0.18,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "Official NVIDIA Build lightweight inference tier ($0.18/1M tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/writer/palmyra-creative-122b",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "writer/palmyra-fin-70b-32k",
+      "name": "Palmyra Fin 70b 32k",
+      "publisher": "writer",
+      "family": null,
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/writer/palmyra-fin-70b-32k",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/writer/palmyra-fin-70b-32k"
+      ],
+      "description": "Remote discovered model on NIM (writer)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 131072,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0.7,
+        "output_per_million": 0.7,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "Official NVIDIA Build standard high-capacity tier ($0.70/1M tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/writer/palmyra-fin-70b-32k",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "writer/palmyra-med-70b",
+      "name": "Palmyra Med 70b",
+      "publisher": "writer",
+      "family": null,
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/writer/palmyra-med-70b",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/writer/palmyra-med-70b"
+      ],
+      "description": "Remote discovered model on NIM (writer)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 131072,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0.7,
+        "output_per_million": 0.7,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "Official NVIDIA Build standard high-capacity tier ($0.70/1M tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/writer/palmyra-med-70b",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "writer/palmyra-med-70b-32k",
+      "name": "Palmyra Med 70b 32k",
+      "publisher": "writer",
+      "family": null,
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/writer/palmyra-med-70b-32k",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/writer/palmyra-med-70b-32k"
+      ],
+      "description": "Remote discovered model on NIM (writer)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 131072,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0.7,
+        "output_per_million": 0.7,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "Official NVIDIA Build standard high-capacity tier ($0.70/1M tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/writer/palmyra-med-70b-32k",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "z-ai/glm-5.3-flash",
+      "name": "Glm 5.3 Flash",
+      "publisher": "z-ai",
+      "family": null,
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/z-ai/glm-5.3-flash",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/z-ai/glm-5.3-flash"
+      ],
+      "description": "Remote discovered model on NIM (z-ai)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 65536,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": null,
+        "output_per_million": null,
+        "status": "not_published",
+        "source": null,
+        "provenance_note": "No authoritative public pricing rate exposed by NVIDIA Build for this endpoint"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/z-ai/glm-5.3-flash",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    },
+    {
+      "id": "zyphra/zamba2-7b-instruct",
+      "name": "Zamba2 7b Instruct",
+      "publisher": "zyphra",
+      "family": null,
+      "architecture": "Dense Auto-regressive Transformer",
+      "official_detail_url": "https://build.nvidia.com/zyphra/zamba2-7b-instruct",
+      "documentation_urls": [
+        "https://docs.nvidia.com/nim/",
+        "https://build.nvidia.com/zyphra/zamba2-7b-instruct"
+      ],
+      "description": "Remote discovered model on NIM (zyphra)",
+      "catalog_status": "active",
+      "first_seen_at": "2026-01-01T00:00:00.000Z",
+      "last_seen_at": "2026-10-30T11:34:26.810Z",
+      "endpoint_type": "chat",
+      "protocol": "openai-chat",
+      "access_classification": "free_endpoint",
+      "input_modalities": [
+        "text"
+      ],
+      "output_modalities": [
+        "text"
+      ],
+      "capabilities": {
+        "chat": true,
+        "completion": true,
+        "vision": false,
+        "audio": false,
+        "video": false,
+        "embedding": false,
+        "reranking": false,
+        "reasoning": false,
+        "structured_output": true,
+        "tool_calling": true
+      },
+      "context_window": 65536,
+      "max_output_tokens": 4096,
+      "pricing": {
+        "currency": "USD",
+        "input_per_million": 0.18,
+        "output_per_million": 0.18,
+        "status": "published",
+        "source": "https://build.nvidia.com/pricing",
+        "provenance_note": "Official NVIDIA Build lightweight inference tier ($0.18/1M tokens)"
+      },
+      "license": "Custom NVIDIA AI Foundation Models License or Author License",
+      "usage_restrictions": "Subject to NVIDIA API Terms of Service and Publisher License Restrictions",
+      "provenance": {
+        "source_url": "https://build.nvidia.com/zyphra/zamba2-7b-instruct",
+        "source_type": "official_directory",
+        "observed_at": "2026-10-30T11:34:26.810Z",
+        "confidence": 0.98
+      },
+      "eligibility": {
+        "probe_eligible": true,
+        "probe_endpoint": "/v1/chat/completions",
+        "test_messages": [
+          {
+            "role": "user",
+            "content": "Ping"
+          }
+        ],
+        "max_probe_tokens": 4
+      },
+      "verified_at": "2026-10-30T11:34:26.810Z",
+      "deprecation_notice": null
+    }
+  ]
+}

@@ -1,0 +1,47 @@
+[package]
+name = "m31a-tools"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+m31a-core = { path = "../m31a-core" }
+m31a-execpolicy = { path = "../m31a-execpolicy" }
+m31a-sandbox = { path = "../m31a-sandbox" }
+m31a-storage = { path = "../m31a-storage" }
+m31a-patch = { path = "../m31a-patch" }
+m31a-shell = { path = "../m31a-shell" }
+m31a-verify = { path = "../m31a-verify" }
+m31a-review = { path = "../m31a-review" }
+m31a-ast = { path = "../m31a-ast" }
+m31a-trust = { path = "../m31a-trust" }
+m31a-proc = { path = "../m31a-proc" }
+m31a-browser = { path = "../m31a-browser" }
+m31a-image-generation = { path = "../m31a-image-generation" }
+m31a-web-search = { path = "../m31a-web-search" }
+m31a-git-attribution = { path = "../m31a-git-attribution" }
+m31a-telemetry = { path = "../m31a-telemetry" }
+m31a-cloud-tasks = { path = "../m31a-cloud-tasks" }
+m31a-extension-api = { path = "../m31a-extension-api" }
+m31a-mcp = { path = "../m31a-mcp" }
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+async-trait.workspace = true
+uuid.workspace = true
+reqwest.workspace = true
+urlencoding = "2.1"
+similar = "2.7"
+walkdir = "2.5"
+regex.workspace = true
+chrono = { version = "0.4", features = ["serde"] }
+libc.workspace = true
+sha1.workspace = true
+base64 = "0.22"
+
+[dev-dependencies]
+tempfile.workspace = true

@@ -1,0 +1,21 @@
+[package]
+name = "m31a-execpolicy"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+m31a-core = { path = "../m31a-core" }
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+shlex.workspace = true
+tracing.workspace = true
+tokio.workspace = true
+uuid.workspace = true
+sha2.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

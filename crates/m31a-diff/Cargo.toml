@@ -1,0 +1,14 @@
+[package]
+name = "m31a-diff"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+anyhow = { workspace = true }
+similar = { workspace = true }
+ratatui = { workspace = true }
+m31a-term = { workspace = true }
+unicode-width = { workspace = true }

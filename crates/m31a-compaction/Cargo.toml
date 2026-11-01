@@ -1,0 +1,22 @@
+[package]
+name = "m31a-compaction"
+version.workspace = true
+edition = "2024"
+authors.workspace = true
+license.workspace = true
+description = "Session compaction and summarization for M31A"
+
+[dependencies]
+anyhow = { workspace = true }
+m31a-core = { path = "../m31a-core" }
+m31a-provider = { path = "../m31a-provider" }
+m31a-storage = { path = "../m31a-storage" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

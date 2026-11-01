@@ -1,0 +1,15 @@
+[package]
+name = "m31a-fuzzy"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+anyhow = { workspace = true }
+regex = { workspace = true }
+unicode-segmentation = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

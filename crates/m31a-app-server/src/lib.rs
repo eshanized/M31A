@@ -1,0 +1,37 @@
+//! `m31a-app-server`: JSON-RPC daemon, connection multiplexer, turn governor, and client protocol engine.
+//!
+//! Provides the sovereign background service powering M31A user interfaces (CLI, TUI, IDE extensions).
+//! Coordinates persistent threads, client sessions, event broadcasting, and execution admission.
+
+pub mod auth;
+pub mod client;
+pub mod connection_multiplexer;
+pub mod daemon_lifecycle;
+pub mod http_server;
+pub mod pairing;
+pub mod protocol;
+pub mod relay;
+pub mod test_client;
+pub mod turn_admission;
+pub mod web_assets;
+
+pub use auth::{AuthError, AuthManager, AuthScope, ClientIdentity, TokenInfo};
+pub use client::AppServerClient;
+pub use connection_multiplexer::{ClientKind, ClientMetadata, ConnectionMultiplexer};
+pub use daemon_lifecycle::{
+    DaemonLifecycleCoordinator, DaemonShutdownReport, DaemonShutdownTrigger,
+    INTERRUPTED_TURN_PREFIX, LoadedThreadsSnapshot, ThreadRecoveryReport,
+    setup_control_socket_rendezvous,
+};
+pub use http_server::{HttpServerConfig, run_http_server, run_http_server_with_listener};
+pub use pairing::{EncryptedTunnel, PairingClient, PairingCredentials, PairingHost};
+pub use protocol::{AppServer, JsonRpcError, JsonRpcNotification, JsonRpcRequest, JsonRpcResponse};
+pub use relay::stdio_to_uds;
+pub use test_client::{
+    AppServerTestHarness, CommandApprovalDecision, FileChangeApprovalDecision,
+    LocalAppServerSession,
+};
+pub use turn_admission::{
+    TurnAdmissionConfig, TurnAdmissionController, TurnAdmissionDecision, TurnAdmissionRequest,
+    TurnPriority,
+};

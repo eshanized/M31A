@@ -1,0 +1,18 @@
+[package]
+name = "m31a-git-attribution"
+version.workspace = true
+edition = "2024"
+authors.workspace = true
+license.workspace = true
+description = "Git attribution and provenance tracking for M31A"
+
+[dependencies]
+anyhow = { workspace = true }
+git2 = { version = "0.21", features = ["vendored-libgit2", "vendored-openssl"] }
+m31a-core = { path = "../m31a-core" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

@@ -1,0 +1,152 @@
+syntax = "proto3";
+
+package m31a.cloud.tasks.v1;
+
+service CloudTasks {
+    rpc ExecuteTask (ExecuteTaskRequest) returns (ExecuteTaskResponse);
+    rpc SpawnAgent (SpawnAgentRequest) returns (SpawnAgentResponse);
+    rpc GetCapabilities (GetCapabilitiesRequest) returns (GetCapabilitiesResponse);
+    rpc SendAgentInput (SendAgentInputRequest) returns (SendAgentInputResponse);
+    rpc WaitAgent (WaitAgentRequest) returns (ExecuteTaskResponse);
+    rpc CloseAgent (CloseAgentRequest) returns (CloseAgentResponse);
+    rpc ListAgents (ListAgentsRequest) returns (ListAgentsResponse);
+}
+
+enum TaskStatus {
+    TASK_STATUS_PENDING = 0;
+    TASK_STATUS_RUNNING = 1;
+    TASK_STATUS_COMPLETED = 2;
+    TASK_STATUS_FAILED = 3;
+    TASK_STATUS_CANCELLED = 4;
+}
+
+enum AgentStatus {
+    AGENT_STATUS_STARTING = 0;
+    AGENT_STATUS_READY = 1;
+    AGENT_STATUS_BUSY = 2;
+    AGENT_STATUS_COMPLETED = 3;
+    AGENT_STATUS_FAILED = 4;
+    AGENT_STATUS_TERMINATED = 5;
+}
+
+message ToolDefinition {
+    string name = 1;
+    string description = 2;
+    string parameters_json = 3;
+}
+
+message ToolCall {
+    string id = 1;
+    string name = 2;
+    string arguments_json = 3;
+}
+
+message TokenUsage {
+    uint64 prompt_tokens = 1;
+    uint64 completion_tokens = 2;
+    uint64 total_tokens = 3;
+    uint64 reasoning_tokens = 4;
+}
+
+message TaskSpec {
+    string id = 1;
+    string prompt = 2;
+    string model = 3;
+    repeated ToolDefinition tools = 4;
+    string working_dir = 5;
+    map<string, string> env_vars = 6;
+    uint32 timeout_seconds = 7;
+    uint32 max_tokens = 8;
+    float temperature = 9;
+}
+
+message ExecuteTaskRequest {
+    TaskSpec task_spec = 1;
+}
+
+message ExecuteTaskResponse {
+    string task_id = 1;
+    int32 status = 2;
+    string output = 3;
+    repeated ToolCall tool_calls = 4;
+    TokenUsage usage = 5;
+    string error = 6;
+    uint64 duration_ms = 7;
+}
+
+message SpawnAgentRequest {
+    string session_id = 1;
+    string model = 2;
+    string config = 3;
+    repeated string capabilities = 4;
+    string working_dir = 5;
+}
+
+message SpawnAgentResponse {
+    string agent_id = 1;
+    string session_id = 2;
+    int32 status = 3;
+    repeated string capabilities = 4;
+    string created_at = 5;
+}
+
+message AgentHandle {
+    string agent_id = 1;
+    string session_id = 2;
+    int32 status = 3;
+    repeated string capabilities = 4;
+    string created_at = 5;
+}
+
+message GetCapabilitiesRequest {}
+
+message GetCapabilitiesResponse {
+    bool supports_file_ops = 1;
+    bool supports_process_exec = 2;
+    bool supports_network = 3;
+    bool supports_gpu = 4;
+    uint32 max_concurrent_agents = 5;
+    uint32 max_memory_mb = 6;
+    uint32 max_cpu_cores = 7;
+    repeated string available_models = 8;
+    repeated string supported_tools = 9;
+}
+
+message ExecutionCapabilities {
+    bool supports_file_ops = 1;
+    bool supports_process_exec = 2;
+    bool supports_network = 3;
+    bool supports_gpu = 4;
+    uint32 max_concurrent_agents = 5;
+    uint32 max_memory_mb = 6;
+    uint32 max_cpu_cores = 7;
+    repeated string available_models = 8;
+    repeated string supported_tools = 9;
+}
+
+message SendAgentInputRequest {
+    string agent_id = 1;
+    string input = 2;
+}
+
+message SendAgentInputResponse {
+    bool success = 1;
+}
+
+message WaitAgentRequest {
+    string agent_id = 1;
+}
+
+message CloseAgentRequest {
+    string agent_id = 1;
+}
+
+message CloseAgentResponse {
+    bool success = 1;
+}
+
+message ListAgentsRequest {}
+
+message ListAgentsResponse {
+    repeated SpawnAgentResponse agents = 1;
+}
