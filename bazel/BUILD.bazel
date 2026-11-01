@@ -1,0 +1,179 @@
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library", "rust_test", "rust_proc_macro")
+load("@rules_rust//cargo:cargo.bzl", "cargo_crate")
+
+# M31A Core Library
+rust_library(
+    name = "m31a_core",
+    edition = "2024",
+    crate_root = "crates/m31a-core/src/lib.rs",
+    srcs = glob(["crates/m31a-core/src/**/*.rs"]),
+    deps = [
+        "@rules_rust//cargo/crate:serde",
+        "@rules_rust//cargo/crate:serde_json",
+        "@rules_rust//cargo/crate:tokio",
+        "@rules_rust//cargo/crate:anyhow",
+        "@rules_rust//cargo/crate:thiserror",
+        "@rules_rust//cargo/crate:tracing",
+        "@rules_rust//cargo/crate:clap",
+        "@rules_rust//cargo/crate:uuid",
+        "@rules_rust//cargo/crate:chrono",
+        "@rules_rust//cargo/crate:toml",
+        "@rules_rust//cargo/crate:directories",
+        "@rules_rust//cargo/crate:regex",
+        "@rules_rust//cargo/crate:semver",
+    ],
+)
+
+# M31A Provider Library
+rust_library(
+    name = "m31a_provider",
+    edition = "2024",
+    crate_root = "crates/m31a-provider/src/lib.rs",
+    srcs = glob(["crates/m31a-provider/src/**/*.rs"]),
+    deps = [
+        ":m31a_core",
+        "@rules_rust//cargo/crate:reqwest",
+        "@rules_rust//cargo/crate:futures",
+        "@rules_rust//cargo/crate:async_trait",
+    ],
+)
+
+# M31A ExecPolicy Library
+rust_library(
+    name = "m31a_execpolicy",
+    edition = "2024",
+    crate_root = "crates/m31a-execpolicy/src/lib.rs",
+    srcs = glob(["crates/m31a-execpolicy/src/**/*.rs"]),
+    deps = [
+        ":m31a_core",
+        "@rules_rust//cargo/crate:serde",
+        "@rules_rust//cargo/crate:regex",
+    ],
+)
+
+# M31A Sandbox Library
+rust_library(
+    name = "m31a_sandbox",
+    edition = "2024",
+    crate_root = "crates/m31a-sandbox/src/lib.rs",
+    srcs = glob(["crates/m31a-sandbox/src/**/*.rs"]),
+    deps = [
+        ":m31a_core",
+        "@rules_rust//cargo/crate:tokio",
+        "@rules_rust//cargo/crate:async_trait",
+    ],
+)
+
+# M31A Guardian Library
+rust_library(
+    name = "m31a_guardian",
+    edition = "2024",
+    crate_root = "crates/m31a-guardian/src/lib.rs",
+    srcs = glob(["crates/m31a-guardian/src/**/*.rs"]),
+    deps = [
+        ":m31a_core",
+        "@rules_rust//cargo/crate:serde",
+    ],
+)
+
+# M31A Tools Library
+rust_library(
+    name = "m31a_tools",
+    edition = "2024",
+    crate_root = "crates/m31a-tools/src/lib.rs",
+    srcs = glob(["crates/m31a-tools/src/**/*.rs"]),
+    deps = [
+        ":m31a_core",
+        ":m31a_execpolicy",
+        ":m31a_sandbox",
+        "@rules_rust//cargo/crate:tokio",
+        "@rules_rust//cargo/crate:async_trait",
+        "@rules_rust//cargo/crate:regex",
+        "@rules_rust//cargo/crate:similar",
+    ],
+)
+
+# M31A Code Mode Library
+rust_library(
+    name = "m31a_code_mode",
+    edition = "2024",
+    crate_root = "crates/m31a-code-mode/src/lib.rs",
+    srcs = glob(["crates/m31a-code-mode/src/**/*.rs"]),
+    deps = [
+        ":m31a_core",
+        ":m31a_tools",
+        "@rules_rust//cargo/crate:tokio",
+        "@rules_rust//cargo/crate:async_trait",
+    ],
+)
+
+# M31A Storage Library
+rust_library(
+    name = "m31a_storage",
+    edition = "2024",
+    crate_root = "crates/m31a-storage/src/lib.rs",
+    srcs = glob(["crates/m31a-storage/src/**/*.rs"]),
+    deps = [
+        ":m31a_core",
+        "@rules_rust//cargo/crate:rusqlite",
+        "@rules_rust//cargo/crate:tokio",
+        "@rules_rust//cargo/crate:async_trait",
+        "@rules_rust//cargo/crate:serde",
+        "@rules_rust//cargo/crate:uuid",
+        "@rules_rust//cargo/crate:chrono",
+    ],
+)
+
+# M31A App Server Library
+rust_library(
+    name = "m31a_app_server",
+    edition = "2024",
+    crate_root = "crates/m31a-app-server/src/lib.rs",
+    srcs = glob(["crates/m31a-app-server/src/**/*.rs"]),
+    deps = [
+        ":m31a_core",
+        ":m31a_storage",
+        ":m31a_tools",
+        "@rules_rust//cargo/crate:tokio",
+        "@rules_rust//cargo/crate:async_trait",
+        "@rules_rust//cargo/crate:serde_json",
+    ],
+)
+
+# M31A TUI Library
+rust_library(
+    name = "m31a_tui",
+    edition = "2024",
+    crate_root = "crates/m31a-tui/src/lib.rs",
+    srcs = glob(["crates/m31a-tui/src/**/*.rs"]),
+    deps = [
+        ":m31a_core",
+        ":m31a_storage",
+        ":m31a_tools",
+        ":m31a_provider",
+        "@rules_rust//cargo/crate:ratatui",
+        "@rules_rust//cargo/crate:crossterm",
+        "@rules_rust//cargo/crate:tokio",
+        "@rules_rust//cargo/crate:async_trait",
+    ],
+)
+
+# Main CLI Binary
+rust_binary(
+    name = "m31a",
+    edition = "2024",
+    crate_root = "crates/m31a-cli/src/main.rs",
+    srcs = glob(["crates/m31a-cli/src/**/*.rs"]),
+    deps = [
+        ":m31a_core",
+        ":m31a_provider",
+        ":m31a_execpolicy",
+        ":m31a_sandbox",
+        ":m31a_guardian",
+        ":m31a_tools",
+        ":m31a_code_mode",
+        ":m31a_storage",
+        ":m31a_app_server",
+        ":m31a_tui",
+    ],
+)
