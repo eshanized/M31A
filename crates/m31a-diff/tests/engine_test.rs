@@ -38,21 +38,30 @@ fn test_engine_additions_and_deletions() {
     assert_eq!(lines[0].new_line_num, Some(1));
 
     // Verify 'banana' delete
-    let del = lines.iter().find(|l| l.content == "banana").expect("deleted banana");
+    let del = lines
+        .iter()
+        .find(|l| l.content == "banana")
+        .expect("deleted banana");
     assert_eq!(del.kind, DiffLineKind::Delete);
     assert_eq!(del.old_line_num, Some(2));
     assert_eq!(del.new_line_num, None);
     assert!(del.word_spans[0].is_highlighted);
 
     // Verify 'blueberry' add
-    let add_blue = lines.iter().find(|l| l.content == "blueberry").expect("added blueberry");
+    let add_blue = lines
+        .iter()
+        .find(|l| l.content == "blueberry")
+        .expect("added blueberry");
     assert_eq!(add_blue.kind, DiffLineKind::Add);
     assert_eq!(add_blue.old_line_num, None);
     assert_eq!(add_blue.new_line_num, Some(2));
     assert!(add_blue.word_spans[0].is_highlighted);
 
     // Verify 'date' add
-    let add_date = lines.iter().find(|l| l.content == "date").expect("added date");
+    let add_date = lines
+        .iter()
+        .find(|l| l.content == "date")
+        .expect("added date");
     assert_eq!(add_date.kind, DiffLineKind::Add);
     assert_eq!(add_date.old_line_num, None);
     assert_eq!(add_date.new_line_num, Some(4));
@@ -101,15 +110,24 @@ index 3333..4444 100644
     assert_eq!(stats.lines_added, 2);
     assert_eq!(stats.lines_deleted, 1);
 
-    let hunk_headers: Vec<_> = lines.iter().filter(|l| l.kind == DiffLineKind::HunkHeader).collect();
+    let hunk_headers: Vec<_> = lines
+        .iter()
+        .filter(|l| l.kind == DiffLineKind::HunkHeader)
+        .collect();
     assert_eq!(hunk_headers.len(), 4); // 2 "diff --git" + 2 "@@"
 
-    let adds: Vec<_> = lines.iter().filter(|l| l.kind == DiffLineKind::Add).collect();
+    let adds: Vec<_> = lines
+        .iter()
+        .filter(|l| l.kind == DiffLineKind::Add)
+        .collect();
     assert_eq!(adds.len(), 2);
     assert_eq!(adds[0].content, "let a = 10;");
     assert_eq!(adds[1].content, "new bar");
 
-    let dels: Vec<_> = lines.iter().filter(|l| l.kind == DiffLineKind::Delete).collect();
+    let dels: Vec<_> = lines
+        .iter()
+        .filter(|l| l.kind == DiffLineKind::Delete)
+        .collect();
     assert_eq!(dels.len(), 1);
     assert_eq!(dels[0].content, "let a = 1;");
 }

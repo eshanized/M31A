@@ -7,8 +7,8 @@
 //! - Real SQLite storage compaction lifecycle (Zero-Mock via m31a-storage)
 
 use m31a_compaction::{
-    chunked_cache_stable_prune, prune_historic_tool_actions, CharTokenizer, CompactionStorage,
-    ConversationSummary, SubwordTokenizer, Tokenizer,
+    CharTokenizer, CompactionStorage, ConversationSummary, SubwordTokenizer, Tokenizer,
+    chunked_cache_stable_prune, prune_historic_tool_actions,
 };
 use m31a_core::types::{ChatMessage, Role, SessionMetadata};
 use m31a_storage::Storage;
@@ -34,10 +34,12 @@ fn test_tokenizers_accuracy_and_bounds() {
 
 #[test]
 fn test_prune_historic_tool_actions_retains_recent() {
-    let mut assistant1 = ChatMessage::assistant(Some("Planning to search index.".to_string()), None);
+    let mut assistant1 =
+        ChatMessage::assistant(Some("Planning to search index.".to_string()), None);
     assistant1.reasoning_content = Some("Need to verify query syntax carefully...".to_string());
 
-    let mut assistant2 = ChatMessage::assistant(Some("Planning to write results.".to_string()), None);
+    let mut assistant2 =
+        ChatMessage::assistant(Some("Planning to write results.".to_string()), None);
     assistant2.reasoning_content = Some("Need to make sure directory exists...".to_string());
 
     let tool1 = ChatMessage::tool_response("tool-call-1", "Old massive output ".repeat(100));
@@ -62,13 +64,20 @@ fn test_prune_historic_tool_actions_retains_recent() {
     let pruned_tool1 = &pruned[3];
     assert_eq!(pruned_tool1.role, Role::Tool);
     assert!(
-        pruned_tool1.content.as_ref().unwrap().contains("pruned for context efficiency")
+        pruned_tool1
+            .content
+            .as_ref()
+            .unwrap()
+            .contains("pruned for context efficiency")
     );
 
     // Most recent tool response must be retained in full
     let preserved_tool2 = &pruned[6];
     assert_eq!(preserved_tool2.role, Role::Tool);
-    assert_eq!(preserved_tool2.content.as_ref().unwrap(), "Recent essential output");
+    assert_eq!(
+        preserved_tool2.content.as_ref().unwrap(),
+        "Recent essential output"
+    );
 
     // Earlier assistant reasoning must be cleared, while latest is kept
     assert!(pruned[2].reasoning_content.is_none());
@@ -81,7 +90,10 @@ fn test_chunked_cache_stable_prune_safety_invariants() {
     messages.push(ChatMessage::system("Core system instructions"));
 
     for i in 0..12 {
-        messages.push(ChatMessage::user(format!("Turn {i}: {}", "Query".repeat(20))));
+        messages.push(ChatMessage::user(format!(
+            "Turn {i}: {}",
+            "Query".repeat(20)
+        )));
         messages.push(ChatMessage::tool_response(
             format!("tool-{i}"),
             format!("Output: {}", "Data".repeat(30)),
@@ -94,11 +106,18 @@ fn test_chunked_cache_stable_prune_safety_invariants() {
 
     // Invariant 1: System prompt is preserved
     assert_eq!(pruned[0].role, Role::System);
-    assert_eq!(pruned[0].content.as_deref().unwrap(), "Core system instructions");
+    assert_eq!(
+        pruned[0].content.as_deref().unwrap(),
+        "Core system instructions"
+    );
 
     // Invariant 2: At least 5 recent tool entries are preserved
     let tool_count = pruned.iter().filter(|m| m.role == Role::Tool).count();
-    assert!(tool_count >= 5, "Expected >= 5 tool outputs, found {}", tool_count);
+    assert!(
+        tool_count >= 5,
+        "Expected >= 5 tool outputs, found {}",
+        tool_count
+    );
 
     // Invariant 3: The final turn is preserved
     assert_eq!(
@@ -132,11 +151,16 @@ fn test_real_sqlite_storage_compaction_integration() {
         ChatMessage::assistant(Some("299,792,458 m/s.".to_string()), None),
     ];
 
-    storage.replace_history(session_id, history.clone()).unwrap();
+    storage
+        .replace_history(session_id, history.clone())
+        .unwrap();
 
     let retrieved = storage.get_history(session_id).unwrap();
     assert_eq!(retrieved.len(), 2);
-    assert_eq!(retrieved[0].content.as_deref().unwrap(), "What is the speed of light?");
+    assert_eq!(
+        retrieved[0].content.as_deref().unwrap(),
+        "What is the speed of light?"
+    );
 
     // Store conversation summary
     let summary = ConversationSummary {

@@ -8,8 +8,8 @@
 
 use m31a_cloud_tasks::proto::SpawnAgentRequest;
 use m31a_cloud_tasks::{
-    AgentStatusEnum, CloudAuth, CloudTaskExecutor, CloudTasksConfig,
-    LocalFallbackCloudTasksClient, TaskSpec, TaskStatusEnum,
+    AgentStatusEnum, CloudAuth, CloudTaskExecutor, CloudTasksConfig, LocalFallbackCloudTasksClient,
+    TaskSpec, TaskStatusEnum,
 };
 use std::collections::HashMap;
 use tempfile::tempdir;

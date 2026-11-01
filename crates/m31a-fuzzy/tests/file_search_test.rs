@@ -50,15 +50,21 @@ fn test_collect_workspace_files_with_gitignore() {
 
     // Verify allowed files are collected
     assert!(
-        candidates.iter().any(|c| c.display_name == "src/main.rs" && c.candidate_type == CandidateType::File),
+        candidates
+            .iter()
+            .any(|c| c.display_name == "src/main.rs" && c.candidate_type == CandidateType::File),
         "src/main.rs must be present"
     );
     assert!(
-        candidates.iter().any(|c| c.display_name == "src/lib.rs" && c.candidate_type == CandidateType::File),
+        candidates
+            .iter()
+            .any(|c| c.display_name == "src/lib.rs" && c.candidate_type == CandidateType::File),
         "src/lib.rs must be present"
     );
     assert!(
-        candidates.iter().any(|c| c.display_name == "src/" && c.candidate_type == CandidateType::Directory),
+        candidates
+            .iter()
+            .any(|c| c.display_name == "src/" && c.candidate_type == CandidateType::Directory),
         "src/ directory must be present"
     );
 
@@ -72,11 +78,15 @@ fn test_collect_workspace_files_with_gitignore() {
         ".git directory must be ignored"
     );
     assert!(
-        !candidates.iter().any(|c| c.display_name.contains("secret_dir")),
+        !candidates
+            .iter()
+            .any(|c| c.display_name.contains("secret_dir")),
         "secret_dir must be ignored by .gitignore"
     );
     assert!(
-        !candidates.iter().any(|c| c.display_name.contains("debug.log")),
+        !candidates
+            .iter()
+            .any(|c| c.display_name.contains("debug.log")),
         "*.log files must be ignored"
     );
 }
@@ -106,7 +116,11 @@ fn test_cached_workspace_collection() {
     // Write a new file immediately; cache within 5000ms should return original snapshot
     fs::write(root.join("second.rs"), b"").unwrap();
     let files2 = WorkspaceScanner::collect_workspace_files_cached(root, 10);
-    assert_eq!(files2.len(), 1, "Cached collection should return cached result");
+    assert_eq!(
+        files2.len(),
+        1,
+        "Cached collection should return cached result"
+    );
 }
 
 #[test]

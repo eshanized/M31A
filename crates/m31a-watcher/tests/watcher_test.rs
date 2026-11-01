@@ -74,7 +74,8 @@ async fn test_watcher_detects_real_fs_mutations() {
             .append(true)
             .open(&file_path)
             .unwrap();
-        file.write_all(b"\nimpl Service { pub fn new() -> Self { Self } }").unwrap();
+        file.write_all(b"\nimpl Service { pub fn new() -> Self { Self } }")
+            .unwrap();
     }
 
     let batch_modify = tokio::time::timeout(Duration::from_millis(2000), rx.recv())
@@ -153,7 +154,10 @@ async fn test_watcher_ignores_noise_and_detects_git_head() {
         "Trigger source file must be captured"
     );
     assert!(
-        !batch.changes.iter().any(|c| c.path == ignored_artifact || c.path == swp_file),
+        !batch
+            .changes
+            .iter()
+            .any(|c| c.path == ignored_artifact || c.path == swp_file),
         "Ignored files must not appear in changes batch"
     );
 

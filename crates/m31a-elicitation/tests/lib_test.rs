@@ -8,7 +8,11 @@ use m31a_elicitation::{ApprovalDecision, ApprovalKind, ApprovalState, QuestionIt
 
 #[test]
 fn test_root_reexports_availability() {
-    let question = QuestionItem::new("Run test suite?", vec!["Yes".to_string(), "No".to_string()], false);
+    let question = QuestionItem::new(
+        "Run test suite?",
+        vec!["Yes".to_string(), "No".to_string()],
+        false,
+    );
     assert_eq!(question.options.len(), 2);
 
     let state = ApprovalState::new(ApprovalKind::ExecCommand {
@@ -28,7 +32,11 @@ fn test_elicitation_to_approval_lifecycle() {
     // 1. User answers an elicitation question about action risk
     let mut q = QuestionItem::new(
         "Choose authorization tier",
-        vec!["Read Only".to_string(), "Execute In Sandbox".to_string(), "Unrestricted".to_string()],
+        vec![
+            "Read Only".to_string(),
+            "Execute In Sandbox".to_string(),
+            "Unrestricted".to_string(),
+        ],
         false,
     );
     q.move_down(); // Move to Execute In Sandbox

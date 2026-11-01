@@ -40,7 +40,11 @@ fn test_builtin_templates_inventory_and_steps() {
         let template = t.unwrap();
         assert!(!template.name.is_empty());
         assert!(!template.description.is_empty());
-        assert!(!template.steps.is_empty(), "Template {} must have workflow steps", id);
+        assert!(
+            !template.steps.is_empty(),
+            "Template {} must have workflow steps",
+            id
+        );
         assert!(template.estimated_duration_minutes.is_some());
     }
 
@@ -140,7 +144,10 @@ fn test_custom_template_persistence_and_loading() {
     {
         let library2 = TemplateLibrary::new(custom_dir);
         let loaded = library2.get("incident-response");
-        assert!(loaded.is_some(), "Custom template must be loaded on startup");
+        assert!(
+            loaded.is_some(),
+            "Custom template must be loaded on startup"
+        );
         let t = loaded.unwrap();
         assert_eq!(t.name, "Incident Response");
         assert_eq!(t.steps.len(), 1);
@@ -149,6 +156,9 @@ fn test_custom_template_persistence_and_loading() {
         let mut vars = HashMap::new();
         vars.insert("incident_id".to_string(), "INC-4040".to_string());
         let applied = library2.apply_template("incident-response", vars).unwrap();
-        assert_eq!(applied.initial_prompt.unwrap(), "Mitigating incident INC-4040");
+        assert_eq!(
+            applied.initial_prompt.unwrap(),
+            "Mitigating incident INC-4040"
+        );
     }
 }

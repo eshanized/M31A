@@ -64,15 +64,35 @@ fn test_render_gutter_symbols_and_numbers() {
     let del_line = &rendered[1];
     assert!(del_line.spans[0].content.contains(" 11     - "));
     assert_eq!(del_line.spans[0].style.fg, Some(Color::Rgb(248, 81, 73)));
-    assert!(del_line.spans[1].style.add_modifier.contains(Modifier::BOLD));
-    assert!(del_line.spans[1].style.add_modifier.contains(Modifier::UNDERLINED));
+    assert!(
+        del_line.spans[1]
+            .style
+            .add_modifier
+            .contains(Modifier::BOLD)
+    );
+    assert!(
+        del_line.spans[1]
+            .style
+            .add_modifier
+            .contains(Modifier::UNDERLINED)
+    );
 
     // 2: Add
     let add_line = &rendered[2];
     assert!(add_line.spans[0].content.contains("     11 + "));
     assert_eq!(add_line.spans[0].style.fg, Some(Color::Rgb(46, 160, 67)));
-    assert!(add_line.spans[1].style.add_modifier.contains(Modifier::BOLD));
-    assert!(add_line.spans[1].style.add_modifier.contains(Modifier::UNDERLINED));
+    assert!(
+        add_line.spans[1]
+            .style
+            .add_modifier
+            .contains(Modifier::BOLD)
+    );
+    assert!(
+        add_line.spans[1]
+            .style
+            .add_modifier
+            .contains(Modifier::UNDERLINED)
+    );
 
     // 3: Hunk Header
     let hunk_line = &rendered[3];

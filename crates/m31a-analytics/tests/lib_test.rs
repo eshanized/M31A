@@ -4,9 +4,7 @@
 //! - Root re-exports: `render_bar`, `render_sparkline`, `AnalyticsDashboard`, `SessionTokenMetrics`
 //! - Cohesive end-to-end analytics workflow: metric ingestion, chart generation, and dashboard layout
 
-use m31a_analytics::{
-    AnalyticsDashboard, SessionTokenMetrics, render_bar, render_sparkline,
-};
+use m31a_analytics::{AnalyticsDashboard, SessionTokenMetrics, render_bar, render_sparkline};
 
 #[test]
 fn test_root_reexports() {

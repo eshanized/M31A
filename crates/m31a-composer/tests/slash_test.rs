@@ -43,7 +43,10 @@ fn test_matching_commands_prefix_search() {
 fn test_tokenize_slash_command_quotes_and_escapes() {
     let line1 = "/test arg1 \"arg with spaces\" 'single quoted'";
     let tokens = tokenize_slash_command(line1);
-    assert_eq!(tokens, vec!["/test", "arg1", "arg with spaces", "single quoted"]);
+    assert_eq!(
+        tokens,
+        vec!["/test", "arg1", "arg with spaces", "single quoted"]
+    );
 
     let line2 = "/run \"quoted with \\\"nested\\\" quotes\"";
     let tokens2 = tokenize_slash_command(line2);
@@ -67,7 +70,11 @@ fn test_parse_and_resolve_slash_command() {
 fn test_slash_completions_and_popup() {
     let completions = get_slash_completions("/set");
     assert!(!completions.is_empty());
-    assert!(completions.iter().any(|item| item.name == "/settings" || item.name == "/setup"));
+    assert!(
+        completions
+            .iter()
+            .any(|item| item.name == "/settings" || item.name == "/setup")
+    );
 
     let mut popup = SlashPopup::new();
     popup.update("/set");

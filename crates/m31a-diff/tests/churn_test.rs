@@ -39,8 +39,18 @@ fn test_churn_pure_whitespace_indentation() {
     assert!(stats.churn_penalty_score >= 70.0);
     assert_eq!(stats.verdict, ChurnVerdict::GratuitousRewrite);
 
-    assert!(stats.recommendations.iter().any(|r| r.contains("Revert 4 whitespace")));
-    assert!(stats.recommendations.iter().any(|r| r.contains("over 35% non-semantic churn")));
+    assert!(
+        stats
+            .recommendations
+            .iter()
+            .any(|r| r.contains("Revert 4 whitespace"))
+    );
+    assert!(
+        stats
+            .recommendations
+            .iter()
+            .any(|r| r.contains("over 35% non-semantic churn"))
+    );
 }
 
 #[test]

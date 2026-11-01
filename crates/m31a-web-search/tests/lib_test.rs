@@ -7,11 +7,11 @@
 //! - Error boundaries for unavailable search engines
 
 use m31a_web_search::{
-    validate_public_url, SafeSearchLevel, SearchEngine, SearchFuture, SearchManager,
-    SearchProvider, SearchRequest, SearchResponse, SearchResult, SearchResultMetadata,
+    SafeSearchLevel, SearchEngine, SearchFuture, SearchManager, SearchProvider, SearchRequest,
+    SearchResponse, SearchResult, SearchResultMetadata, validate_public_url,
 };
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 struct MockSearchProvider {
     engine: SearchEngine,
@@ -84,16 +84,32 @@ impl SearchProvider for MockSearchProvider {
 #[tokio::test]
 async fn test_ssrf_adversarial_rejection() {
     // Loopback IPv4
-    assert!(validate_public_url("http://127.0.0.1:8080/admin").await.is_err());
+    assert!(
+        validate_public_url("http://127.0.0.1:8080/admin")
+            .await
+            .is_err()
+    );
     assert!(validate_public_url("http://localhost:9090").await.is_err());
 
     // AWS/GCP/Azure link-local metadata IP
-    assert!(validate_public_url("http://169.254.169.254/latest/meta-data").await.is_err());
+    assert!(
+        validate_public_url("http://169.254.169.254/latest/meta-data")
+            .await
+            .is_err()
+    );
 
     // Private RFC1918 subnets
-    assert!(validate_public_url("http://10.0.0.1/internal").await.is_err());
+    assert!(
+        validate_public_url("http://10.0.0.1/internal")
+            .await
+            .is_err()
+    );
     assert!(validate_public_url("http://172.16.10.20/db").await.is_err());
-    assert!(validate_public_url("http://192.168.1.254/router").await.is_err());
+    assert!(
+        validate_public_url("http://192.168.1.254/router")
+            .await
+            .is_err()
+    );
 
     // Loopback IPv6
     assert!(validate_public_url("http://[::1]:8080/").await.is_err());
@@ -101,18 +117,38 @@ async fn test_ssrf_adversarial_rejection() {
     // Dangerous protocols
     assert!(validate_public_url("file:///etc/passwd").await.is_err());
     assert!(validate_public_url("ftp://ftp.example.com").await.is_err());
-    assert!(validate_public_url("gopher://gopher.example.com").await.is_err());
+    assert!(
+        validate_public_url("gopher://gopher.example.com")
+            .await
+            .is_err()
+    );
 
     // Credential stuffing in URL
-    assert!(validate_public_url("https://root:secret@api.example.com").await.is_err());
+    assert!(
+        validate_public_url("https://root:secret@api.example.com")
+            .await
+            .is_err()
+    );
 
     // Internal top-level domain
-    assert!(validate_public_url("http://backend.internal/api").await.is_err());
-    assert!(validate_public_url("http://node.local/status").await.is_err());
+    assert!(
+        validate_public_url("http://backend.internal/api")
+            .await
+            .is_err()
+    );
+    assert!(
+        validate_public_url("http://node.local/status")
+            .await
+            .is_err()
+    );
 
     // Legitimate public HTTPS URLs must be allowed
     assert!(validate_public_url("https://crates.io").await.is_ok());
-    assert!(validate_public_url("https://example.com/search").await.is_ok());
+    assert!(
+        validate_public_url("https://example.com/search")
+            .await
+            .is_ok()
+    );
 }
 
 #[tokio::test]
@@ -144,7 +180,10 @@ async fn test_search_manager_routing_and_ttl_caching() {
     // First search: executes provider
     let resp1 = manager.search(request.clone()).await.unwrap();
     assert_eq!(resp1.results.len(), 2);
-    assert_eq!(resp1.results[0].title, "Result 1 for rust async concurrency");
+    assert_eq!(
+        resp1.results[0].title,
+        "Result 1 for rust async concurrency"
+    );
     assert_eq!(call_count.load(Ordering::SeqCst), 1);
 
     // Second search with identical request: served from in-memory TTL cache
@@ -173,7 +212,10 @@ async fn test_search_all_and_unregistered_engine() {
     );
 
     // search_all should invoke all registered engines
-    let all_res = manager.search_all("distributed consensus".to_string(), 5).await.unwrap();
+    let all_res = manager
+        .search_all("distributed consensus".to_string(), 5)
+        .await
+        .unwrap();
     assert_eq!(all_res.len(), 1);
     assert_eq!(all_res[0].engine, SearchEngine::DuckDuckGo);
 

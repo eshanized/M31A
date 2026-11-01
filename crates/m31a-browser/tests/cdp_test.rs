@@ -16,14 +16,19 @@ use std::collections::HashMap;
 
 #[test]
 fn test_cdp_request_and_response_serialization() {
-    let req = CdpRequest::new(42, "Page.navigate", Some(json!({ "url": "https://example.com" })));
+    let req = CdpRequest::new(
+        42,
+        "Page.navigate",
+        Some(json!({ "url": "https://example.com" })),
+    );
     let req_json = serde_json::to_string(&req).expect("serialize request");
     assert!(req_json.contains("\"id\":42"));
     assert!(req_json.contains("\"method\":\"Page.navigate\""));
     assert!(req_json.contains("\"url\":\"https://example.com\""));
 
     // Deserialization roundtrip
-    let deserialized_req: CdpRequest = serde_json::from_str(&req_json).expect("deserialize request");
+    let deserialized_req: CdpRequest =
+        serde_json::from_str(&req_json).expect("deserialize request");
     assert_eq!(deserialized_req.id, 42);
     assert_eq!(deserialized_req.method, "Page.navigate");
 

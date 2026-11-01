@@ -8,8 +8,8 @@
 
 use m31a_core::types::TokenUsage;
 use m31a_telemetry::{
-    JsonlExporter, SqliteAuditExporter, TelemetryEvent, TelemetryExporter,
-    TelemetryPipeline, TelemetryReducer, ViolationSeverity,
+    JsonlExporter, SqliteAuditExporter, TelemetryEvent, TelemetryExporter, TelemetryPipeline,
+    TelemetryReducer, ViolationSeverity,
 };
 use std::collections::HashMap;
 use std::fs::File;
@@ -270,8 +270,14 @@ async fn test_pipeline_async_flow_and_flush() {
 
     // Verify events were flushed to SQLite even before batch_size (5) reached, due to 100ms timer
     let reader_exporter = SqliteAuditExporter::new(&db_path).unwrap();
-    let events = reader_exporter.query_events(Some("sess-pipe-1"), 10).unwrap();
-    assert_eq!(events.len(), 3, "Periodic flush timer must persist buffered events");
+    let events = reader_exporter
+        .query_events(Some("sess-pipe-1"), 10)
+        .unwrap();
+    assert_eq!(
+        events.len(),
+        3,
+        "Periodic flush timer must persist buffered events"
+    );
 
     // Cleanly cancel the background task
     handle.abort();

@@ -69,13 +69,19 @@ async fn test_real_headless_chromium_lifecycle() {
     let eval_res = session.evaluate("35 + 7").await;
     assert!(eval_res.is_ok());
     let val = eval_res.unwrap();
-    assert!(val.contains("42"), "Expected evaluated output to contain 42, got: {val}");
+    assert!(
+        val.contains("42"),
+        "Expected evaluated output to contain 42, got: {val}"
+    );
 
     // 3. Capture screenshot
     let screenshot_b64 = session.screenshot(None).await;
     assert!(screenshot_b64.is_ok());
     let b64_str = screenshot_b64.unwrap();
-    assert!(!b64_str.is_empty(), "Screenshot should produce non-empty base64 string");
+    assert!(
+        !b64_str.is_empty(),
+        "Screenshot should produce non-empty base64 string"
+    );
 
     // 4. Inspect network records
     let records = session.get_network_records().await;

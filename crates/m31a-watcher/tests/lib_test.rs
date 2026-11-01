@@ -57,7 +57,10 @@ async fn test_root_level_watcher_pipeline() {
 
     assert!(!batch.is_empty());
     assert!(batch.has_source_changes());
-    assert_eq!(batch.affected_extensions().into_iter().collect::<Vec<_>>(), vec!["rs"]);
+    assert_eq!(
+        batch.affected_extensions().into_iter().collect::<Vec<_>>(),
+        vec!["rs"]
+    );
 
     watcher.stop();
 }

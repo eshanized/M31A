@@ -74,7 +74,8 @@ fn test_engine_analyze_real_git() {
     assert_eq!(report_head.files_reviewed, 1);
     assert_eq!(report_head.total_additions, 1);
 
-    let report_explicit = ReviewEngine::analyze_git(root, Some("HEAD")).expect("analyze_git explicit");
+    let report_explicit =
+        ReviewEngine::analyze_git(root, Some("HEAD")).expect("analyze_git explicit");
     assert_eq!(report_explicit.verdict, ReviewVerdict::RequestChanges);
 }
 

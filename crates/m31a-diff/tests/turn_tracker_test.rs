@@ -93,7 +93,10 @@ fn test_turn_tracker_combined_operations() {
 fn test_turn_tracker_timeout_truncation() {
     let mut tracker = TurnDiffTracker::new();
     for i in 0..100 {
-        tracker.record_addition(format!("file_{}.txt", i), format!("contents of file {}\n", i));
+        tracker.record_addition(
+            format!("file_{}.txt", i),
+            format!("contents of file {}\n", i),
+        );
     }
 
     // Specifying an impossibly small timeout (e.g. 0 nanoseconds) triggers timeout break

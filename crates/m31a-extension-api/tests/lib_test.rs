@@ -9,8 +9,8 @@
 
 use m31a_core::types::{FunctionCall, ToolCall};
 use m31a_extension_api::{
-    verify_plugin_integrity, CommandDef, ExtensionContext, M31APlugin, PluginCapability,
-    PluginConfig, PluginLoader, PluginManifest, PluginMarketplaceClient, PluginToolDef,
+    CommandDef, ExtensionContext, M31APlugin, PluginCapability, PluginConfig, PluginLoader,
+    PluginManifest, PluginMarketplaceClient, PluginToolDef, verify_plugin_integrity,
 };
 use serde_json::json;
 use std::path::PathBuf;
@@ -66,7 +66,11 @@ impl M31APlugin for TestEmbeddedPlugin {
         }]
     }
 
-    fn execute_tool(&self, name: &str, args: serde_json::Value) -> anyhow::Result<serde_json::Value> {
+    fn execute_tool(
+        &self,
+        name: &str,
+        args: serde_json::Value,
+    ) -> anyhow::Result<serde_json::Value> {
         if name == "calc_sum" {
             let a = args["a"].as_f64().unwrap_or(0.0);
             let b = args["b"].as_f64().unwrap_or(0.0);
@@ -95,7 +99,9 @@ impl M31APlugin for TestEmbeddedPlugin {
 
     fn check_approval(&self, _hook: &str, tool_call: &ToolCall) -> anyhow::Result<bool> {
         // Reject destructive rm command
-        if tool_call.function.name == "exec_command" && tool_call.function.arguments.contains("rm -rf") {
+        if tool_call.function.name == "exec_command"
+            && tool_call.function.arguments.contains("rm -rf")
+        {
             Ok(false)
         } else {
             Ok(true)
@@ -141,7 +147,11 @@ sha256 = "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90"
     assert_eq!(manifest.version, "1.2.3");
     assert_eq!(manifest.capabilities.len(), 2);
     assert!(manifest.capabilities.contains(&PluginCapability::Tools));
-    assert!(manifest.capabilities.contains(&PluginCapability::SandboxBackends));
+    assert!(
+        manifest
+            .capabilities
+            .contains(&PluginCapability::SandboxBackends)
+    );
     assert_eq!(manifest.min_m31a_version, "0.1.0");
 
     let serialized = toml::to_string(&manifest).unwrap();
@@ -238,7 +248,10 @@ fn test_plugin_loader_missing_library_error() {
 
     // Directory without dynamic library
     let res = loader.load_plugin(tmp.path());
-    assert!(res.is_err(), "Loading from directory without plugin shared library must fail");
+    assert!(
+        res.is_err(),
+        "Loading from directory without plugin shared library must fail"
+    );
     let err_str = res.unwrap_err().to_string();
     assert!(err_str.contains("Plugin library not found"));
 }

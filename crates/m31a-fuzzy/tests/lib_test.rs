@@ -4,9 +4,7 @@
 //! - Root re-exports: `Candidate`, `CandidateType`, `WorkspaceScanner`, `fuzzy_match`, `fuzzy_match_indices`
 //! - Full pipeline: scanning files, searching candidates, and extracting matching character spans
 
-use m31a_fuzzy::{
-    Candidate, CandidateType, WorkspaceScanner, fuzzy_match, fuzzy_match_indices,
-};
+use m31a_fuzzy::{Candidate, CandidateType, WorkspaceScanner, fuzzy_match, fuzzy_match_indices};
 use std::fs;
 use tempfile::tempdir;
 
@@ -38,7 +36,10 @@ fn test_end_to_end_fuzzy_search_pipeline() {
 
     let search_results = WorkspaceScanner::search("exec", &candidates);
     assert!(!search_results.is_empty());
-    assert_eq!(search_results[0].display_name, "crates/engine/src/executor.rs");
+    assert_eq!(
+        search_results[0].display_name,
+        "crates/engine/src/executor.rs"
+    );
     assert_eq!(search_results[0].candidate_type, CandidateType::File);
     assert!(search_results[0].score > 0);
 }

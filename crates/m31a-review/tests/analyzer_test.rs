@@ -41,13 +41,19 @@ fn test_analyzer_shell_and_sql_injections() {
     let findings = StaticDiffAnalyzer::analyze_diff(diff);
     assert_eq!(findings.len(), 4);
 
-    let shell_findings: Vec<_> = findings.iter().filter(|f| f.title.contains("shell")).collect();
+    let shell_findings: Vec<_> = findings
+        .iter()
+        .filter(|f| f.title.contains("shell"))
+        .collect();
     assert_eq!(shell_findings.len(), 2);
     for f in shell_findings {
         assert_eq!(f.severity, ReviewSeverity::High);
     }
 
-    let sql_findings: Vec<_> = findings.iter().filter(|f| f.title.contains("SQL")).collect();
+    let sql_findings: Vec<_> = findings
+        .iter()
+        .filter(|f| f.title.contains("SQL"))
+        .collect();
     assert_eq!(sql_findings.len(), 2);
     for f in sql_findings {
         assert_eq!(f.severity, ReviewSeverity::High);
@@ -66,11 +72,17 @@ fn test_analyzer_path_traversal_and_busy_spin() {
     let findings = StaticDiffAnalyzer::analyze_diff(diff);
     assert_eq!(findings.len(), 2);
 
-    let traversal = findings.iter().find(|f| f.title.contains("path traversal")).unwrap();
+    let traversal = findings
+        .iter()
+        .find(|f| f.title.contains("path traversal"))
+        .unwrap();
     assert_eq!(traversal.severity, ReviewSeverity::Medium);
     assert_eq!(traversal.category, ReviewCategory::Security);
 
-    let spin = findings.iter().find(|f| f.title.contains("busy-spin")).unwrap();
+    let spin = findings
+        .iter()
+        .find(|f| f.title.contains("busy-spin"))
+        .unwrap();
     assert_eq!(spin.severity, ReviewSeverity::Medium);
     assert_eq!(spin.category, ReviewCategory::Performance);
 }
@@ -89,10 +101,16 @@ fn test_analyzer_static_mut_weak_hash_and_http() {
     let findings = StaticDiffAnalyzer::analyze_diff(diff);
     assert_eq!(findings.len(), 4);
 
-    let static_mut = findings.iter().find(|f| f.title.contains("static mut")).unwrap();
+    let static_mut = findings
+        .iter()
+        .find(|f| f.title.contains("static mut"))
+        .unwrap();
     assert_eq!(static_mut.severity, ReviewSeverity::High);
 
-    let weak_hashes: Vec<_> = findings.iter().filter(|f| f.title.contains("Weak crypto")).collect();
+    let weak_hashes: Vec<_> = findings
+        .iter()
+        .filter(|f| f.title.contains("Weak crypto"))
+        .collect();
     assert_eq!(weak_hashes.len(), 2);
 
     let http = findings.iter().find(|f| f.title.contains("HTTP")).unwrap();
@@ -111,7 +129,10 @@ fn test_analyzer_test_file_suppression() {
 "#;
 
     let findings = StaticDiffAnalyzer::analyze_diff(diff);
-    assert!(findings.is_empty(), "test files should suppress unwraps, md5, and http warnings");
+    assert!(
+        findings.is_empty(),
+        "test files should suppress unwraps, md5, and http warnings"
+    );
 }
 
 #[test]
@@ -128,5 +149,8 @@ fn test_analyzer_line_number_tracking() {
     let findings = StaticDiffAnalyzer::analyze_diff(diff);
     assert_eq!(findings.len(), 1);
     assert_eq!(findings[0].line_number, Some(102));
-    assert_eq!(findings[0].file_path, std::path::PathBuf::from("src/app.rs"));
+    assert_eq!(
+        findings[0].file_path,
+        std::path::PathBuf::from("src/app.rs")
+    );
 }

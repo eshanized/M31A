@@ -37,7 +37,8 @@ fn test_lib_exports_and_roundtrip_types() {
     assert_eq!(report.medium_count(), 0);
 
     let json_report = ReviewFormatter::render_json(&report).expect("serialize report");
-    let deser_report: ReviewReport = serde_json::from_str(&json_report).expect("deserialize report");
+    let deser_report: ReviewReport =
+        serde_json::from_str(&json_report).expect("deserialize report");
     assert_eq!(deser_report.verdict, ReviewVerdict::RequestChanges);
     assert_eq!(deser_report.findings.len(), 1);
     assert_eq!(deser_report.findings[0].title, "Test Finding");
@@ -47,8 +48,11 @@ fn test_lib_exports_and_roundtrip_types() {
 async fn test_lib_pipeline_end_to_end() {
     let tmp = tempfile::tempdir().expect("create temp dir");
     let test_file = tmp.path().join("service.rs");
-    std::fs::write(&test_file, "pub fn run() {\n    let token = \"nvapi-1234567890123456789012345\";\n}\n")
-        .expect("write test file");
+    std::fs::write(
+        &test_file,
+        "pub fn run() {\n    let token = \"nvapi-1234567890123456789012345\";\n}\n",
+    )
+    .expect("write test file");
 
     let diff = format!(
         "--- a/service.rs\n+++ b/service.rs\n@@ -1,1 +1,3 @@\n pub fn run() {{\n+    let token = \"nvapi-1234567890123456789012345\";\n }}\n"

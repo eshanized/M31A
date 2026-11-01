@@ -68,7 +68,10 @@ fn test_hook_disposition_variants() {
     assert_eq!(allow, HookDisposition::Allow);
 
     let block = HookDisposition::Block("Execution restricted".to_string());
-    assert_eq!(block, HookDisposition::Block("Execution restricted".to_string()));
+    assert_eq!(
+        block,
+        HookDisposition::Block("Execution restricted".to_string())
+    );
 
     let rewrite = HookDisposition::Rewrite {
         input: "{\"safe\": true}".to_string(),

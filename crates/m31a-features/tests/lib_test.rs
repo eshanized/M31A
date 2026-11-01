@@ -87,7 +87,10 @@ async fn test_targeting_rules_evaluation() {
     let manager = FeatureFlagManager::new(tmp.path().to_path_buf());
 
     let flag = sample_flag("feature-targeted", FeatureState::Enabled, 100);
-    manager.create_flag(flag, "test-suite".to_string()).await.unwrap();
+    manager
+        .create_flag(flag, "test-suite".to_string())
+        .await
+        .unwrap();
 
     // 1. Explicitly targeted user
     let ctx_target = EvaluationContext {
@@ -97,7 +100,10 @@ async fn test_targeting_rules_evaluation() {
         custom_attributes: HashMap::new(),
         session_id: None,
     };
-    let res = manager.evaluate("feature-targeted", &ctx_target).await.unwrap();
+    let res = manager
+        .evaluate("feature-targeted", &ctx_target)
+        .await
+        .unwrap();
     assert!(res.enabled, "Targeted user must evaluate to true");
     assert_eq!(res.reason, EvaluationReason::TargetedEnabled);
 
@@ -109,8 +115,14 @@ async fn test_targeting_rules_evaluation() {
         custom_attributes: HashMap::new(),
         session_id: None,
     };
-    let res = manager.evaluate("feature-targeted", &ctx_excluded).await.unwrap();
-    assert!(!res.enabled, "Excluded user must evaluate to false even if in group");
+    let res = manager
+        .evaluate("feature-targeted", &ctx_excluded)
+        .await
+        .unwrap();
+    assert!(
+        !res.enabled,
+        "Excluded user must evaluate to false even if in group"
+    );
     assert_eq!(res.reason, EvaluationReason::TargetedDisabled);
 
     // 3. User with matching group
@@ -121,7 +133,10 @@ async fn test_targeting_rules_evaluation() {
         custom_attributes: HashMap::new(),
         session_id: None,
     };
-    let res = manager.evaluate("feature-targeted", &ctx_group).await.unwrap();
+    let res = manager
+        .evaluate("feature-targeted", &ctx_group)
+        .await
+        .unwrap();
     assert!(res.enabled, "User in targeted group must evaluate to true");
     assert_eq!(res.reason, EvaluationReason::TargetedEnabled);
 }
@@ -133,7 +148,10 @@ async fn test_overrides_and_clearing() {
 
     let mut flag = sample_flag("feature-override", FeatureState::Disabled, 0);
     flag.targeting = TargetingRules::default();
-    manager.create_flag(flag, "test-suite".to_string()).await.unwrap();
+    manager
+        .create_flag(flag, "test-suite".to_string())
+        .await
+        .unwrap();
 
     let ctx = EvaluationContext {
         user_id: Some("engineer-01".to_string()),
@@ -174,12 +192,18 @@ async fn test_dependencies_gate() {
 
     let mut parent = sample_flag("dep-parent", FeatureState::Disabled, 100);
     parent.targeting = TargetingRules::default();
-    manager.create_flag(parent, "admin".to_string()).await.unwrap();
+    manager
+        .create_flag(parent, "admin".to_string())
+        .await
+        .unwrap();
 
     let mut child = sample_flag("dep-child", FeatureState::Enabled, 100);
     child.dependencies = vec!["dep-parent".to_string()];
     child.targeting = TargetingRules::default();
-    manager.create_flag(child, "admin".to_string()).await.unwrap();
+    manager
+        .create_flag(child, "admin".to_string())
+        .await
+        .unwrap();
 
     let ctx = EvaluationContext {
         user_id: Some("u123".to_string()),
@@ -208,7 +232,10 @@ async fn test_dependencies_gate() {
         .unwrap();
 
     let res = manager.evaluate("dep-child", &ctx).await.unwrap();
-    assert!(res.enabled, "Child must now be enabled after parent is enabled");
+    assert!(
+        res.enabled,
+        "Child must now be enabled after parent is enabled"
+    );
 }
 
 #[tokio::test]
@@ -217,7 +244,10 @@ async fn test_rollout_advancement_and_rollback_audit() {
     let manager = FeatureFlagManager::new(tmp.path().to_path_buf());
 
     let flag = sample_flag("feature-rollout", FeatureState::Enabled, 10);
-    manager.create_flag(flag, "admin".to_string()).await.unwrap();
+    manager
+        .create_flag(flag, "admin".to_string())
+        .await
+        .unwrap();
 
     // Advance rollout to stage 1 (100%)
     manager
@@ -242,8 +272,16 @@ async fn test_rollout_advancement_and_rollback_audit() {
     // Audit logs validation
     let audit_entries = manager.get_audit_log(Some("feature-rollout"), 50).await;
     assert!(audit_entries.len() >= 3);
-    assert!(audit_entries.iter().any(|e| e.action == AuditAction::RolloutAdvanced));
-    assert!(audit_entries.iter().any(|e| e.action == AuditAction::RolloutRolledBack));
+    assert!(
+        audit_entries
+            .iter()
+            .any(|e| e.action == AuditAction::RolloutAdvanced)
+    );
+    assert!(
+        audit_entries
+            .iter()
+            .any(|e| e.action == AuditAction::RolloutRolledBack)
+    );
 }
 
 #[tokio::test]
@@ -255,7 +293,10 @@ async fn test_storage_persistence_roundtrip() {
     {
         let manager = FeatureFlagManager::new(storage_dir.clone());
         let flag = sample_flag("persisted-feature", FeatureState::Enabled, 50);
-        manager.create_flag(flag, "admin".to_string()).await.unwrap();
+        manager
+            .create_flag(flag, "admin".to_string())
+            .await
+            .unwrap();
     }
 
     // Load second manager instance from the same disk path

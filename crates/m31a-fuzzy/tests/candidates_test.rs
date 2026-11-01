@@ -36,7 +36,10 @@ fn test_candidate_builder_and_mutation() {
     assert_eq!(cand.display_name, "m31a-core");
     assert_eq!(cand.candidate_type, CandidateType::Directory);
     assert_eq!(cand.insert_text, "crates/m31a-core/");
-    assert_eq!(cand.description.as_deref(), Some("Core workspace abstractions"));
+    assert_eq!(
+        cand.description.as_deref(),
+        Some("Core workspace abstractions")
+    );
     assert_eq!(cand.score, 0);
     assert!(cand.match_indices.is_empty());
 

@@ -77,7 +77,10 @@ async fn test_image_cache_lifecycle_and_eviction() {
 
     // Check hit
     let retrieved = cache.get(prompt, model, params).await;
-    assert!(retrieved.is_some(), "Stored payload must be retrieved from cache");
+    assert!(
+        retrieved.is_some(),
+        "Stored payload must be retrieved from cache"
+    );
     assert_eq!(retrieved.unwrap(), payload);
 }
 
@@ -86,8 +89,8 @@ async fn test_image_generation_manager_routing_and_caching() {
     let tmp = tempdir().unwrap();
     let cache_dir = tmp.path().join("manager_cache");
 
-    let mut manager = ImageGenerationManager::new("local_synthetic".to_string())
-        .with_cache(cache_dir, 10);
+    let mut manager =
+        ImageGenerationManager::new("local_synthetic".to_string()).with_cache(cache_dir, 10);
 
     manager.register_provider(
         "local_synthetic".to_string(),
@@ -124,7 +127,10 @@ async fn test_unregistered_provider_fails() {
     let req = sample_request("test prompt", "unknown_provider:v1", 1);
 
     let res = manager.generate(req).await;
-    assert!(res.is_err(), "Generating from unregistered provider must fail");
+    assert!(
+        res.is_err(),
+        "Generating from unregistered provider must fail"
+    );
     let err = res.unwrap_err().to_string();
     assert!(err.contains("Provider 'unknown_provider' not found"));
 }

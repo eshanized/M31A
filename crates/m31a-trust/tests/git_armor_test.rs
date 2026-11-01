@@ -87,7 +87,11 @@ fn test_git_armor_detects_dangerous_git_config() {
     assert!(!report.is_safe);
     assert!(report.custom_commands_detected >= 2);
 
-    let titles: Vec<String> = report.risks.iter().map(|r| r.title.to_lowercase()).collect();
+    let titles: Vec<String> = report
+        .risks
+        .iter()
+        .map(|r| r.title.to_lowercase())
+        .collect();
     assert!(titles.iter().any(|t| t.contains("fsmonitor")));
     assert!(titles.iter().any(|t| t.contains("sshcommand")));
     assert!(titles.iter().any(|t| t.contains("alias")));

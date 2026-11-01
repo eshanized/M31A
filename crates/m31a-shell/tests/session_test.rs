@@ -36,7 +36,10 @@ async fn test_persistent_session_environment_and_cwd_tracking() {
 
     // 2. Change directory and create a marker file
     let out2 = session
-        .execute("cd build_output && touch marker.txt", Duration::from_secs(5))
+        .execute(
+            "cd build_output && touch marker.txt",
+            Duration::from_secs(5),
+        )
         .await
         .expect("Command 2 failed");
 
@@ -66,7 +69,10 @@ async fn test_persistent_session_failure_reporting() {
     let mut session = PersistentShellSession::new("test-session-err", temp.path());
 
     let out = session
-        .execute("sh -c 'echo \"err_msg\" >&2; exit 7'", Duration::from_secs(5))
+        .execute(
+            "sh -c 'echo \"err_msg\" >&2; exit 7'",
+            Duration::from_secs(5),
+        )
         .await
         .expect("Command execution should complete");
 

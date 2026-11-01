@@ -16,7 +16,11 @@ use tempfile::tempdir;
 fn test_hook_config_empty() {
     let empty = HookConfig::empty();
     assert!(empty.rules.is_empty());
-    assert!(empty.matched_rules(HookEvent::PreToolUse, "Bash").is_empty());
+    assert!(
+        empty
+            .matched_rules(HookEvent::PreToolUse, "Bash")
+            .is_empty()
+    );
 }
 
 #[test]
@@ -103,7 +107,9 @@ fn test_parse_rejections() {
     assert!(HookConfig::from_json(r#"{"InvalidEventName": []}"#).is_err());
 
     // Unknown handler type
-    assert!(HookConfig::from_json(r#"{"stop": [ { "hooks": [ { "type": "alien" } ] } ]}"#).is_err());
+    assert!(
+        HookConfig::from_json(r#"{"stop": [ { "hooks": [ { "type": "alien" } ] } ]}"#).is_err()
+    );
 }
 
 #[test]

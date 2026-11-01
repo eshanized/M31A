@@ -20,13 +20,19 @@ fn test_render_bar_formatting_and_scaling() {
     assert!(bar_full.contains("Full"));
     assert!(bar_full.contains("100"));
     assert!(bar_full.contains('█'));
-    assert!(!bar_full.contains('░'), "100% bar should not contain empty blocks");
+    assert!(
+        !bar_full.contains('░'),
+        "100% bar should not contain empty blocks"
+    );
 
     // 0% bar
     let bar_zero = render_bar("Zero", 0, 100, 40);
     assert!(bar_zero.contains("Zero"));
     assert!(bar_zero.contains('░'));
-    assert!(!bar_zero.contains('█'), "0% bar should not contain filled blocks");
+    assert!(
+        !bar_zero.contains('█'),
+        "0% bar should not contain filled blocks"
+    );
 }
 
 #[test]

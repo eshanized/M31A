@@ -39,7 +39,10 @@ fn test_bracketed_paste_character_threshold_trigger() {
     detector.push_bracketed_str(&long_line);
 
     let pill = detector.end_bracketed_paste();
-    assert!(pill.is_some(), "200 characters on 1 line exceeds 160 char threshold");
+    assert!(
+        pill.is_some(),
+        "200 characters on 1 line exceeds 160 char threshold"
+    );
 
     let p = pill.unwrap();
     assert_eq!(p.line_count, 1);

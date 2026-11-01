@@ -7,7 +7,9 @@
 
 use chrono::Utc;
 use m31a_proc::buffer::CircularOutputBuffer;
-use m31a_proc::process::{ManagedProcess, ProcessInfo, ProcessOutput, ProcessStatus, ProcessStopResult};
+use m31a_proc::process::{
+    ManagedProcess, ProcessInfo, ProcessOutput, ProcessStatus, ProcessStopResult,
+};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -30,7 +32,9 @@ fn test_process_status_predicates_and_badges() {
     assert!(!terminated.is_running());
     assert_eq!(terminated.display_badge(), ("TERMINATED", "yellow"));
 
-    let failed = ProcessStatus::Failed { error: "Exec format error".to_string() };
+    let failed = ProcessStatus::Failed {
+        error: "Exec format error".to_string(),
+    };
     assert!(!failed.is_running());
     assert_eq!(failed.display_badge(), ("FAILED", "red"));
 }

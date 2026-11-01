@@ -79,10 +79,23 @@ fn test_affected_extensions_normalization() {
 #[test]
 fn test_has_source_changes_detection() {
     let supported_source_files = [
-        "code.rs", "app.ts", "index.js", "ui.tsx", "component.jsx",
-        "script.py", "server.go", "lib.c", "engine.cpp", "header.h",
-        "class.hpp", "Main.java", "Cargo.toml", "package.json",
-        "config.yaml", "ci.yml", "README.md",
+        "code.rs",
+        "app.ts",
+        "index.js",
+        "ui.tsx",
+        "component.jsx",
+        "script.py",
+        "server.go",
+        "lib.c",
+        "engine.cpp",
+        "header.h",
+        "class.hpp",
+        "Main.java",
+        "Cargo.toml",
+        "package.json",
+        "config.yaml",
+        "ci.yml",
+        "README.md",
     ];
 
     for file in supported_source_files {
@@ -100,7 +113,13 @@ fn test_has_source_changes_detection() {
     }
 
     // Non-source files
-    let non_source_files = ["image.png", "binary.wasm", "archive.tar.gz", "video.mp4", "blob.bin"];
+    let non_source_files = [
+        "image.png",
+        "binary.wasm",
+        "archive.tar.gz",
+        "video.mp4",
+        "blob.bin",
+    ];
     for file in non_source_files {
         let mut batch = WorkspaceChangeBatch::new();
         batch.changes.push(FileChangeEvent {

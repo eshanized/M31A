@@ -35,9 +35,16 @@ async fn test_runtime_exit_two_blocks_with_stderr() {
     let rt = HookRuntime::new(cfg);
 
     let d = rt
-        .dispatch(HookEvent::UserPromptSubmit, "", json!({"prompt": "malicious input"}))
+        .dispatch(
+            HookEvent::UserPromptSubmit,
+            "",
+            json!({"prompt": "malicious input"}),
+        )
         .await;
-    assert_eq!(d, HookDisposition::Block("Security Violation: Prompt Denied".to_string()));
+    assert_eq!(
+        d,
+        HookDisposition::Block("Security Violation: Prompt Denied".to_string())
+    );
 }
 
 #[tokio::test]
@@ -49,7 +56,10 @@ async fn test_runtime_json_stdout_decision_and_rewrite() {
     .unwrap();
     let rt_block = HookRuntime::new(cfg_block);
     let d_block = rt_block.dispatch(HookEvent::Stop, "", json!({})).await;
-    assert_eq!(d_block, HookDisposition::Block("Verification incomplete".to_string()));
+    assert_eq!(
+        d_block,
+        HookDisposition::Block("Verification incomplete".to_string())
+    );
 
     // 2. PreToolUse input rewrite
     let cfg_rewrite = HookConfig::from_json(
@@ -93,5 +103,8 @@ async fn test_runtime_custom_mcp_invoker() {
         .dispatch(HookEvent::PreToolUse, "Bash", json!({"danger": true}))
         .await;
 
-    assert_eq!(d, HookDisposition::Block("Firewall dropped packet".to_string()));
+    assert_eq!(
+        d,
+        HookDisposition::Block("Firewall dropped packet".to_string())
+    );
 }

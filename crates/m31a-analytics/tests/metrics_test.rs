@@ -72,7 +72,8 @@ fn test_session_token_metrics_serde_roundtrip() {
     metrics.record_turn("meta/llama-3.1-70b-instruct", 500, 200, 50, 200, 600);
 
     let json = serde_json::to_string(&metrics).expect("serialize metrics");
-    let deserialized: SessionTokenMetrics = serde_json::from_str(&json).expect("deserialize metrics");
+    let deserialized: SessionTokenMetrics =
+        serde_json::from_str(&json).expect("deserialize metrics");
 
     assert_eq!(deserialized.turn_count, 1);
     assert_eq!(deserialized.prompt_tokens, 500);

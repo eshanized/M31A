@@ -53,18 +53,31 @@ async fn test_fragment_conditions_and_priority_resolution() {
 
     assert_eq!(resolved_min.model_family, ModelFamily::DeepSeek);
     // Base instructions and sandbox should be included
-    assert!(resolved_min.fragments.iter().any(|f| f.id == "base_instructions"));
+    assert!(
+        resolved_min
+            .fragments
+            .iter()
+            .any(|f| f.id == "base_instructions")
+    );
     assert!(resolved_min.fragments.iter().any(|f| f.id == "sandbox"));
     // Condition-gated fragments should NOT be included
     assert!(!resolved_min.fragments.iter().any(|f| f.id == "apply_patch"));
-    assert!(!resolved_min.fragments.iter().any(|f| f.id == "token_budget"));
+    assert!(
+        !resolved_min
+            .fragments
+            .iter()
+            .any(|f| f.id == "token_budget")
+    );
     assert!(!resolved_min.fragments.iter().any(|f| f.id == "plan_mode"));
 
     // 2. Resolve with apply_patch tool and high context usage
     let resolved_active = registry
         .resolve(
             "nvidia/nemotron-3.5-lightning-30b-a3b",
-            &["apply_patch".to_string(), "get_context_remaining".to_string()],
+            &[
+                "apply_patch".to_string(),
+                "get_context_remaining".to_string(),
+            ],
             &["plan_mode".to_string()],
             "workspace_write",
             "on_request",
@@ -73,9 +86,24 @@ async fn test_fragment_conditions_and_priority_resolution() {
         .await
         .unwrap();
 
-    assert!(resolved_active.fragments.iter().any(|f| f.id == "apply_patch"));
-    assert!(resolved_active.fragments.iter().any(|f| f.id == "plan_mode"));
-    assert!(resolved_active.fragments.iter().any(|f| f.id == "token_budget"));
+    assert!(
+        resolved_active
+            .fragments
+            .iter()
+            .any(|f| f.id == "apply_patch")
+    );
+    assert!(
+        resolved_active
+            .fragments
+            .iter()
+            .any(|f| f.id == "plan_mode")
+    );
+    assert!(
+        resolved_active
+            .fragments
+            .iter()
+            .any(|f| f.id == "token_budget")
+    );
 
     // 3. Verify strict priority descending order
     for i in 1..resolved_active.fragments.len() {

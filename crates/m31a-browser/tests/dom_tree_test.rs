@@ -54,7 +54,11 @@ fn test_accessibility_tree_indexing_and_coordinates() {
     // Verify snapshot fields
     assert_eq!(snapshot.url, "https://shop.example.com");
     assert_eq!(snapshot.title, "Test Portal");
-    assert!(snapshot.tree_text.contains("[Page: \"Test Portal\", URL: \"https://shop.example.com\"]"));
+    assert!(
+        snapshot
+            .tree_text
+            .contains("[Page: \"Test Portal\", URL: \"https://shop.example.com\"]")
+    );
 
     // Verify interactive elements assigned refs
     assert!(snapshot.ref_map.contains_key("@e1") || snapshot.ref_map.contains_key("@e2"));
@@ -65,10 +69,17 @@ fn test_accessibility_tree_indexing_and_coordinates() {
         .ref_map
         .values()
         .any(|&(cx, cy, node_id)| cx == 140.0 && cy == 220.0 && node_id == Some(11));
-    assert!(has_button_coords, "Button center coordinates must be calculated as (140, 220)");
+    assert!(
+        has_button_coords,
+        "Button center coordinates must be calculated as (140, 220)"
+    );
 
     // Check email textbox value is rendered in formatted tree
-    assert!(snapshot.tree_text.contains("textbox \"Email\" [value: \"alice@example.com\"]"));
+    assert!(
+        snapshot
+            .tree_text
+            .contains("textbox \"Email\" [value: \"alice@example.com\"]")
+    );
     assert!(snapshot.tree_text.contains("button \"Submit Order\""));
 }
 
@@ -90,5 +101,8 @@ fn test_non_interactive_elements_handling() {
     let builder = AccessibilityTreeBuilder::new();
     let snapshot = builder.build("about:blank", "Blank", root);
 
-    assert!(snapshot.ref_map.is_empty(), "Empty non-interactive node must not receive an @e ref");
+    assert!(
+        snapshot.ref_map.is_empty(),
+        "Empty non-interactive node must not receive an @e ref"
+    );
 }

@@ -20,7 +20,10 @@ fn test_posix_pty_session_allocation_and_resizing() {
     assert!(session.slave_path.starts_with("/dev/pts"));
 
     // Resize window
-    let new_size = PtySize { rows: 40, cols: 120 };
+    let new_size = PtySize {
+        rows: 40,
+        cols: 120,
+    };
     session.set_size(new_size).expect("Resize PTY window");
 
     // Close slave explicitly
@@ -51,14 +54,10 @@ async fn test_pty_runner_executes_real_command() {
 async fn test_pty_runner_non_zero_exit_code() {
     let temp = tempdir().unwrap();
 
-    let output = PtyRunner::run_command(
-        "sh -c 'exit 42'",
-        temp.path(),
-        &[],
-        Duration::from_secs(5),
-    )
-    .await
-    .expect("Execute failing command");
+    let output =
+        PtyRunner::run_command("sh -c 'exit 42'", temp.path(), &[], Duration::from_secs(5))
+            .await
+            .expect("Execute failing command");
 
     assert_eq!(output.exit_code, 42);
     assert!(!output.timed_out);
@@ -69,15 +68,13 @@ async fn test_pty_runner_timeout_and_interrupt() {
     let temp = tempdir().unwrap();
 
     // Command that sleeps for 10 seconds, but timeout is 100ms
-    let output = PtyRunner::run_command(
-        "sleep 10",
-        temp.path(),
-        &[],
-        Duration::from_millis(150),
-    )
-    .await
-    .expect("Command execution should complete with timeout status");
+    let output = PtyRunner::run_command("sleep 10", temp.path(), &[], Duration::from_millis(150))
+        .await
+        .expect("Command execution should complete with timeout status");
 
     assert!(output.timed_out, "Command must be marked as timed out");
-    assert_eq!(output.exit_code, 130, "SIGINT exit code expected on timeout");
+    assert_eq!(
+        output.exit_code, 130,
+        "SIGINT exit code expected on timeout"
+    );
 }

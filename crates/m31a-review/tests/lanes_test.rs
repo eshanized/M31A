@@ -126,14 +126,22 @@ fn test_consolidator_corroborates_multi_lane_agreement() {
     assert_eq!(finding.status, ClaimStatus::Corroborated);
     assert_eq!(finding.severity, ReviewSeverity::Critical); // min severity = highest priority
     assert_eq!(finding.attesting_lanes.len(), 2);
-    assert!(finding.verification_notes.contains("Corroborated across 2 lanes"));
+    assert!(
+        finding
+            .verification_notes
+            .contains("Corroborated across 2 lanes")
+    );
 }
 
 #[tokio::test]
 async fn test_dispatcher_markdown_output() {
     let tmp = tempdir().expect("tempdir");
     let file = tmp.path().join("calc.rs");
-    fs::write(&file, "pub fn divide(a: i32, b: i32) -> i32 {\n    a / b\n}\n").expect("write calc.rs");
+    fs::write(
+        &file,
+        "pub fn divide(a: i32, b: i32) -> i32 {\n    a / b\n}\n",
+    )
+    .expect("write calc.rs");
 
     let claims = vec![
         ReviewerClaim {

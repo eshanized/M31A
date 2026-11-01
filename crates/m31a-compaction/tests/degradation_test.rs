@@ -6,9 +6,7 @@
 //! - Role filtering (Level 2 drops tool outputs, Level 3 retains only user prompts)
 //! - Edge cases (empty transcripts, single-message preservation)
 
-use m31a_compaction::{
-    degrade_transcript, TranscriptDegradationLevel, PROGRESSIVE_LEVELS,
-};
+use m31a_compaction::{PROGRESSIVE_LEVELS, TranscriptDegradationLevel, degrade_transcript};
 use m31a_core::types::{ChatMessage, FunctionCall, Role, ToolCall};
 
 fn sample_transcript() -> Vec<ChatMessage> {
@@ -81,7 +79,9 @@ fn test_level_2_tool_output_removed_and_inputs_clipped() {
 
     // Assistant tool call args must be clipped
     let assistant_msg = degraded.iter().find(|m| m.role == Role::Assistant).unwrap();
-    let args = &assistant_msg.tool_calls.as_ref().unwrap()[0].function.arguments;
+    let args = &assistant_msg.tool_calls.as_ref().unwrap()[0]
+        .function
+        .arguments;
     assert!(args.contains("... [args clipped]"));
 }
 
@@ -113,7 +113,13 @@ fn test_level_4_omitted_intermediate() {
     assert_eq!(degraded.len(), 2);
     assert_eq!(degraded[0].role, Role::System);
     assert_eq!(degraded[1].role, Role::Assistant);
-    assert!(degraded[1].content.as_ref().unwrap().contains("Patch has been applied"));
+    assert!(
+        degraded[1]
+            .content
+            .as_ref()
+            .unwrap()
+            .contains("Patch has been applied")
+    );
 }
 
 #[test]

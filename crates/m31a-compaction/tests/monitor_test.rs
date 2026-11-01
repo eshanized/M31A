@@ -31,14 +31,24 @@ fn test_headroom_monitor_severity_transitions() {
     assert_eq!(snap_critical.severity, HeadroomSeverity::Critical);
     assert!(snap_critical.should_compact);
     assert!(snap_critical.advisory_message.is_some());
-    assert!(snap_critical.advisory_message.unwrap().contains("headroom low"));
+    assert!(
+        snap_critical
+            .advisory_message
+            .unwrap()
+            .contains("headroom low")
+    );
 
     // 4. Exhausted: used 97k (3% headroom remaining, below 5%)
     let snap_exhausted = monitor.evaluate(97_000);
     assert_eq!(snap_exhausted.severity, HeadroomSeverity::Exhausted);
     assert!(snap_exhausted.should_compact);
     assert!(snap_exhausted.advisory_message.is_some());
-    assert!(snap_exhausted.advisory_message.unwrap().contains("exhausted"));
+    assert!(
+        snap_exhausted
+            .advisory_message
+            .unwrap()
+            .contains("exhausted")
+    );
 }
 
 #[test]

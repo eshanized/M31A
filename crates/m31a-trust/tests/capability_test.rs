@@ -40,16 +40,37 @@ fn test_operation_capability_trust_requirements() {
 #[test]
 fn test_operation_capability_labels() {
     assert_eq!(OperationCapability::HarmlessUI.label(), "UI Operation");
-    assert_eq!(OperationCapability::WorkspaceMetadataRead.label(), "Metadata Read");
+    assert_eq!(
+        OperationCapability::WorkspaceMetadataRead.label(),
+        "Metadata Read"
+    );
     assert_eq!(OperationCapability::WorkspaceFileRead.label(), "File Read");
-    assert_eq!(OperationCapability::WorkspaceMutation.label(), "Workspace Mutation");
-    assert_eq!(OperationCapability::PatchApplication.label(), "Patch Application");
-    assert_eq!(OperationCapability::ShellExecution.label(), "Shell Execution");
+    assert_eq!(
+        OperationCapability::WorkspaceMutation.label(),
+        "Workspace Mutation"
+    );
+    assert_eq!(
+        OperationCapability::PatchApplication.label(),
+        "Patch Application"
+    );
+    assert_eq!(
+        OperationCapability::ShellExecution.label(),
+        "Shell Execution"
+    );
     assert_eq!(OperationCapability::GitMutation.label(), "Git Mutation");
     assert_eq!(OperationCapability::NetworkAccess.label(), "Network Access");
-    assert_eq!(OperationCapability::CredentialAccess.label(), "Credential Access");
-    assert_eq!(OperationCapability::SandboxSensitive.label(), "Sandbox Operation");
-    assert_eq!(OperationCapability::TrustManagement.label(), "Trust Management");
+    assert_eq!(
+        OperationCapability::CredentialAccess.label(),
+        "Credential Access"
+    );
+    assert_eq!(
+        OperationCapability::SandboxSensitive.label(),
+        "Sandbox Operation"
+    );
+    assert_eq!(
+        OperationCapability::TrustManagement.label(),
+        "Trust Management"
+    );
 }
 
 #[test]

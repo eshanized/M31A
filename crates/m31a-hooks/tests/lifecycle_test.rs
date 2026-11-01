@@ -16,12 +16,25 @@ use tempfile::tempdir;
 #[test]
 fn test_all_12_canonical_phase_points() {
     let all = CanonicalPhasePoint::all();
-    assert_eq!(all.len(), 12, "Must contain exactly 12 canonical phase points");
+    assert_eq!(
+        all.len(),
+        12,
+        "Must contain exactly 12 canonical phase points"
+    );
 
     let expected_names = [
-        "discuss:pre", "discuss:post", "plan:pre", "plan:post",
-        "execute:pre", "execute:wave:pre", "execute:wave:post", "execute:post",
-        "verify:pre", "verify:post", "ship:pre", "ship:post",
+        "discuss:pre",
+        "discuss:post",
+        "plan:pre",
+        "plan:post",
+        "execute:pre",
+        "execute:wave:pre",
+        "execute:wave:post",
+        "execute:post",
+        "verify:pre",
+        "verify:post",
+        "ship:pre",
+        "ship:post",
     ];
 
     for (point, name) in all.iter().zip(expected_names.iter()) {
@@ -68,7 +81,10 @@ fn test_phase_hook_dispatch_missing_consumed_artifact_halts() {
     let context = HashMap::new();
     let result = reg.dispatch(CanonicalPhasePoint::PlanPost, root, &context);
 
-    assert!(result.halted, "Missing consumed artifact with Halt policy must halt");
+    assert!(
+        result.halted,
+        "Missing consumed artifact with Halt policy must halt"
+    );
     assert!(result.halt_reason.unwrap().contains("CONTEXT.md"));
 }
 
@@ -119,5 +135,8 @@ fn test_phase_hook_when_condition_skipped() {
     context.insert("flags.enable_audit".to_string(), "false".to_string());
 
     let result = reg.dispatch(CanonicalPhasePoint::VerifyPre, root, &context);
-    assert_eq!(result.executed_hooks, 0, "When condition = false must skip execution");
+    assert_eq!(
+        result.executed_hooks, 0,
+        "When condition = false must skip execution"
+    );
 }

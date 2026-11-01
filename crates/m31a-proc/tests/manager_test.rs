@@ -22,7 +22,10 @@ async fn test_process_manager_spawn_and_output_capture() {
     let info = manager
         .start(
             "sh",
-            &["-c".to_string(), "echo 'Line A'; echo 'Line B' >&2; exit 0".to_string()],
+            &[
+                "-c".to_string(),
+                "echo 'Line A'; echo 'Line B' >&2; exit 0".to_string(),
+            ],
             temp.path(),
             HashMap::new(),
             Some("test-worker".to_string()),

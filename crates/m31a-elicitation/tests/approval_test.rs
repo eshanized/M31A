@@ -72,17 +72,35 @@ fn test_decisions_for_all_approval_kinds() {
     assert_eq!(s1.decide(), ApprovalDecision::AllowOnce);
 
     s1.selected_option = 1;
-    assert_eq!(s1.decide(), ApprovalDecision::AlwaysAllowPattern("ls *".to_string()));
+    assert_eq!(
+        s1.decide(),
+        ApprovalDecision::AlwaysAllowPattern("ls *".to_string())
+    );
 
     s1.selected_option = 2;
-    assert_eq!(s1.decide(), ApprovalDecision::Deny { reason: "Operation denied by user.".to_string() });
+    assert_eq!(
+        s1.decide(),
+        ApprovalDecision::Deny {
+            reason: "Operation denied by user.".to_string()
+        }
+    );
 
     s1.selected_option = 3;
     s1.edit_buffer = "ls -lh".to_string();
-    assert_eq!(s1.decide(), ApprovalDecision::EditCommand { new_command: "ls -lh".to_string() });
+    assert_eq!(
+        s1.decide(),
+        ApprovalDecision::EditCommand {
+            new_command: "ls -lh".to_string()
+        }
+    );
 
     s1.selected_option = 4;
-    assert_eq!(s1.decide(), ApprovalDecision::Deny { reason: "Cancelled".to_string() });
+    assert_eq!(
+        s1.decide(),
+        ApprovalDecision::Deny {
+            reason: "Cancelled".to_string()
+        }
+    );
 
     // 2. ApplyPatch pattern format
     let mut s2 = ApprovalState::new(ApprovalKind::ApplyPatch {
@@ -92,7 +110,10 @@ fn test_decisions_for_all_approval_kinds() {
         lines_deleted: 2,
     });
     s2.selected_option = 1;
-    assert_eq!(s2.decide(), ApprovalDecision::AlwaysAllowPattern("patch:src/main.rs".to_string()));
+    assert_eq!(
+        s2.decide(),
+        ApprovalDecision::AlwaysAllowPattern("patch:src/main.rs".to_string())
+    );
 
     // 3. WriteFile pattern format
     let mut s3 = ApprovalState::new(ApprovalKind::WriteFile {
@@ -100,7 +121,10 @@ fn test_decisions_for_all_approval_kinds() {
         bytes_count: 1024,
     });
     s3.selected_option = 1;
-    assert_eq!(s3.decide(), ApprovalDecision::AlwaysAllowPattern("write:Cargo.lock".to_string()));
+    assert_eq!(
+        s3.decide(),
+        ApprovalDecision::AlwaysAllowPattern("write:Cargo.lock".to_string())
+    );
 
     // 4. SpawnAgent pattern format
     let mut s4 = ApprovalState::new(ApprovalKind::SpawnAgent {
@@ -108,7 +132,10 @@ fn test_decisions_for_all_approval_kinds() {
         instructions: "scan code".to_string(),
     });
     s4.selected_option = 1;
-    assert_eq!(s4.decide(), ApprovalDecision::AlwaysAllowPattern("agent:security-auditor".to_string()));
+    assert_eq!(
+        s4.decide(),
+        ApprovalDecision::AlwaysAllowPattern("agent:security-auditor".to_string())
+    );
 }
 
 #[test]
@@ -117,7 +144,9 @@ fn test_approval_decision_predicates_and_conversions() {
     assert!(allow.is_allowed());
     assert_eq!(allow.denial_feedback(), None);
 
-    let allow_file = ApprovalDecision::AllowFile { path: "/tmp/test".to_string() };
+    let allow_file = ApprovalDecision::AllowFile {
+        path: "/tmp/test".to_string(),
+    };
     assert!(allow_file.is_allowed());
     assert_eq!(allow_file.denial_feedback(), None);
 
@@ -125,11 +154,15 @@ fn test_approval_decision_predicates_and_conversions() {
     assert!(always.is_allowed());
     assert_eq!(always.denial_feedback(), None);
 
-    let edit = ApprovalDecision::EditCommand { new_command: "git status".to_string() };
+    let edit = ApprovalDecision::EditCommand {
+        new_command: "git status".to_string(),
+    };
     assert!(edit.is_allowed());
     assert_eq!(edit.denial_feedback(), None);
 
-    let deny = ApprovalDecision::Deny { reason: "Suspicious command".to_string() };
+    let deny = ApprovalDecision::Deny {
+        reason: "Suspicious command".to_string(),
+    };
     assert!(!deny.is_allowed());
     assert_eq!(deny.denial_feedback(), Some("Suspicious command"));
 
@@ -137,7 +170,12 @@ fn test_approval_decision_predicates_and_conversions() {
     let from_true: ApprovalDecision = true.into();
     assert_eq!(from_true, ApprovalDecision::AllowOnce);
     let from_false: ApprovalDecision = false.into();
-    assert_eq!(from_false, ApprovalDecision::Deny { reason: "Operation denied by user.".to_string() });
+    assert_eq!(
+        from_false,
+        ApprovalDecision::Deny {
+            reason: "Operation denied by user.".to_string()
+        }
+    );
 }
 
 #[test]

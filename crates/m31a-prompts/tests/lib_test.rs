@@ -6,9 +6,7 @@
 //! - Template search and category filtering
 //! - Custom template creation, TOML file persistence, retrieval, and deletion safety
 
-use m31a_prompts::{
-    PromptCategory, PromptLibrary, PromptTemplate, PromptVariable, VariableType,
-};
+use m31a_prompts::{PromptCategory, PromptLibrary, PromptTemplate, PromptVariable, VariableType};
 use std::collections::HashMap;
 use tempfile::tempdir;
 
@@ -144,7 +142,12 @@ async fn test_custom_template_lifecycle_and_deletion_safety() {
     // Cannot delete builtin template
     let del_builtin = library.delete("code-review").await;
     assert!(del_builtin.is_err());
-    assert!(del_builtin.unwrap_err().to_string().contains("Cannot delete builtin template"));
+    assert!(
+        del_builtin
+            .unwrap_err()
+            .to_string()
+            .contains("Cannot delete builtin template")
+    );
 
     // Successfully delete custom template
     library.delete("git-commit-helper").await.unwrap();

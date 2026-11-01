@@ -41,7 +41,8 @@ fn test_lib_exports_and_serialization() {
 
     let verdict = ChurnVerdict::Acceptable;
     let json_verdict = serde_json::to_string(&verdict).expect("serialize ChurnVerdict");
-    let deser_verdict: ChurnVerdict = serde_json::from_str(&json_verdict).expect("deserialize ChurnVerdict");
+    let deser_verdict: ChurnVerdict =
+        serde_json::from_str(&json_verdict).expect("deserialize ChurnVerdict");
     assert_eq!(verdict, deser_verdict);
 
     let churn_stats = DiffChurnStats {
@@ -56,7 +57,8 @@ fn test_lib_exports_and_serialization() {
         recommendations: vec!["Looks good".to_string()],
     };
     let json_churn = serde_json::to_string(&churn_stats).expect("serialize DiffChurnStats");
-    let deser_churn: DiffChurnStats = serde_json::from_str(&json_churn).expect("deserialize DiffChurnStats");
+    let deser_churn: DiffChurnStats =
+        serde_json::from_str(&json_churn).expect("deserialize DiffChurnStats");
     assert_eq!(deser_churn.verdict, ChurnVerdict::Minimal);
     assert_eq!(deser_churn.total_lines_added, 5);
 
@@ -70,7 +72,8 @@ fn test_lib_exports_and_serialization() {
         timestamp: std::time::SystemTime::now(),
     };
     let json_entry = serde_json::to_string(&entry).expect("serialize TrackedFileEntry");
-    let deser_entry: TrackedFileEntry = serde_json::from_str(&json_entry).expect("deserialize TrackedFileEntry");
+    let deser_entry: TrackedFileEntry =
+        serde_json::from_str(&json_entry).expect("deserialize TrackedFileEntry");
     assert_eq!(deser_entry.path, PathBuf::from("src/test.rs"));
     assert_eq!(deser_entry.kind, FileMutationKind::Modified);
 }

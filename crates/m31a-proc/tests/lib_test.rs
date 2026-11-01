@@ -33,7 +33,10 @@ async fn test_root_manager_lifecycle_integration() {
     let info: ProcessInfo = manager
         .start(
             "sh",
-            &["-c".to_string(), "echo 'Supervisor test'; exit 0".to_string()],
+            &[
+                "-c".to_string(),
+                "echo 'Supervisor test'; exit 0".to_string(),
+            ],
             temp.path(),
             HashMap::new(),
             Some("integration-proc".to_string()),

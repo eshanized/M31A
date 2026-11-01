@@ -37,5 +37,8 @@ async fn test_root_persistent_session_with_truncation() {
     assert!(out.stdout.contains("Item 2"));
     assert!(out.stdout.contains("Item 29"));
     assert!(out.stdout.contains("Item 30"));
-    assert!(out.stdout.contains("lines truncated to preserve token context"));
+    assert!(
+        out.stdout
+            .contains("lines truncated to preserve token context")
+    );
 }
