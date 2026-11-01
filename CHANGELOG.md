@@ -11,6 +11,33 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [0.1.13] — 2026-11-01
+
+### Added
+- **Modular 39-Crate Rust Workspace**: Restructured M31A from a monolithic crate into a 39-crate Cargo workspace under the Rust 2024 edition with unified dependency management and clean architectural domain separation.
+- **Official Python Client SDK (`m31a`)**: Complete async (`M31AClient`) and sync (`SyncM31AClient`) client library with zero external dependencies, supporting UDS, Stdio, HTTP/SSE, and Mock transports, thread/turn lifecycles, streaming events, comprehensive tests, and example applications (`interactive_stream.py`, `sync_quickstart.py`, `checkpoint_rollback.py`).
+- **Official TypeScript Client SDK (`@m31a/sdk`)**: Strongly typed TypeScript/JavaScript client library for Node.js and browser runtimes, featuring async iterable streaming, DeepSeek-R1 reasoning paths, approval handling, section rendering, unit tests, and reference implementations (`interactive_stream.ts`, `approval_agent.ts`, `board_pubsub.ts`).
+- **Bazel Build System Integration**: Added multi-platform Bazel 7 workspace configuration (`BUILD.bazel`, `MODULE.bazel`, `bazel/platforms`, `bazel/rules`), toolchains, and an automated target generation script (`scripts/generate_bazel_build.sh`).
+- **Headless App Server & JSON-RPC 2.0 Protocol (`m31a-app-server`)**: Added daemon server supporting 40+ JSON-RPC 2.0 methods and notifications across Stdio, Unix Domain Sockets, and HTTP/SSE with pairing authentication, session management, and connection multiplexing.
+- **Multi-Agent Swarm & Distributed Mesh (`examples/distributed_task_mesh`)**: Added distributed task mesh architecture with role specialization (`Architect`, `Coder`, `Tester`, `Guardian`), cross-agent pub-sub message boards, and path concurrency locks.
+- **Comprehensive Documentation Hub**:
+  - Published comprehensive guides: `docs/GETTING_STARTED.md`, `docs/TUI_GUIDE.md`, `docs/CLI_REFERENCE.md` (documenting all 54 subcommands), `docs/CONFIGURATION.md`, `docs/EXTENSIONS_AND_SKILLS.md`.
+  - Added technical architecture manuals: `docs/ARCHITECTURE.md`, `docs/SANDBOX_SECURITY.md`, `docs/APP_SERVER_RPC.md`, `docs/SWARM_AND_MULTI_AGENT.md`, and crate directory map `crates/README.md`.
+  - Added formal TUI specifications: architecture, transcript rendering, model selector, approval interactions, state machines, session lifecycle, and interaction matrices.
+  - Added project documentation: `ROADMAP.md`, `SUPPORT.md`, `CITATION.cff`, and example workspace configuration `config.example.toml`.
+- **Modernized CI/CD & GitHub Automation**: Added GitHub Actions workflows for Rust workspace testing (`.github/workflows/ci.yml`) and Bazel build validation (`.github/workflows/bazel.yml`), Dependabot integration (`.github/dependabot.yml`), standardized pull request template (`.github/PULL_REQUEST_TEMPLATE.md`), and updated issue templates including model provider requests.
+
+### Changed
+- **Workspace Architecture**: Replaced legacy monolithic single-crate layout with domain-partitioned crates across core runtime, model providers, execution policy, sandboxing, guardian supervision, SQLite storage, terminal I/O, diff rendering, tools suite, and TUI cockpit.
+- **Documentation & Metadata**: Updated `README.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`, and `LICENSE` with updated workspace paths, contribution guides, and zero-mock verification instructions.
+- **Version Bump**: Bumped workspace package version to `0.1.13`.
+
+### Removed
+- **Legacy Monolithic Codebase & Tests**: Removed legacy `src/`, `tests/`, `migrations/`, and `prompts/` directories in favor of crate-encapsulated implementations and integration suites.
+- **Obsolete Workflows & Templates**: Cleaned up deprecated GitHub Actions workflows (`development.yml`, `macos.yml`, `release-gates.yml`, `release.yml`, `windows.yml`) and legacy issue/PR markdown templates.
+
+---
+
 ## [0.1.12] — 2026-10-23
 
 ### Governance & Workflow Planning
@@ -504,7 +531,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ### Added
 - Initial project genesis: single-crate architecture, kernel, and phase planning
 
-[Unreleased]: https://github.com/eshanized/M31A/compare/v0.1.12...HEAD
+[Unreleased]: https://github.com/eshanized/M31A/compare/v0.1.13...HEAD
+[0.1.13]: https://github.com/eshanized/M31A/compare/v0.1.12...v0.1.13
 [0.1.12]: https://github.com/eshanized/M31A/releases/tag/v0.1.12
 [0.1.11]: https://github.com/eshanized/M31A/releases/tag/v0.1.11
 [0.1.10]: https://github.com/eshanized/M31A/releases/tag/v0.1.10
