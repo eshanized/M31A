@@ -239,7 +239,11 @@ pub use plugins::{InstalledPlugin, PluginManager, PluginManifest};
 pub use process_hardening::{
     DANGEROUS_ENV_PREFIXES, apply_process_hardening, scrub_dangerous_env_vars,
 };
-pub use prompts::{CollaborationMode, DynamicContextItem, SystemPromptBuilder};
+pub use prompts::{
+    CanonicalPromptAssembler, CollaborationMode, DynamicContextItem, InstructionResolver,
+    ModelCapabilitiesSnapshot, ModelFamily, PromptLifecycleManager, PromptRuntimeSnapshot,
+    SystemPromptBuilder,
+};
 pub use queue_service::{
     MAX_QUEUE_ITEMS, MAX_USER_INPUT_TEXT_CHARS, QueueService, QueueServiceError, QueuedItem,
 };

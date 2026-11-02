@@ -1,8 +1,8 @@
 # Apply Patch Guidance
 
-## Critical: Use the FREEFORM Tool
+## Standard Tool Invocation
 
-**`apply_patch` is a FREEFORM tool.** Never invoke `applypatch` or `apply-patch` as a shell command. The model must call the `apply_patch` tool directly with the patch as a parameter.
+**`apply_patch` is a standard JSON tool.** Call the `apply_patch` tool directly with `{ "patch": "..." }`. For simple single-file replacements, legacy arguments `{ "path": "...", "search_text": "...", "replace_text": "..." }` are also supported. Shell invocations matching `apply_patch <<'EOF'` in `exec_command` are automatically routed directly to the patch engine.
 
 ## Patch Format
 
@@ -24,6 +24,7 @@ The patch follows the exact Codex specification:
  }
 *** End of File
 *** Delete File: path/to/obsolete_file.rs
+*** End of File
 *** End Patch
 ```
 
@@ -33,7 +34,7 @@ The patch follows the exact Codex specification:
 2. **File operations**: `*** Add File:`, `*** Update File:`, `*** Delete File:`, `*** Move to:`
 3. **Hunks**: `@@ context line` followed by `-old` / `+new` lines
 4. **End of file**: `*** End of File` after each file's changes
-5. **Context lines** must match exactly (whitespace-sensitive, but engine has 5-tier fuzzy matching)
+5. **Context lines** match with 5-tier fuzzy matching
 
 ## Fuzzy Matching (Engine Handles This)
 
@@ -52,7 +53,7 @@ The patch engine applies 5-tier matching automatically:
 ```
 *** Update File: src/lib.rs
 @@ pub mod existing_module;
- 
+
 +pub mod new_module;
 *** End of File
 ```
@@ -81,8 +82,7 @@ The patch engine applies 5-tier matching automatically:
 
 ## When NOT to Use apply_patch
 
-- Single-line changes in one file → use `write_file` after reading
-- Simple search/replace → use `exec_command` with `sed` or similar
+- Single-line changes in one file → use `edit`
 - Creating entirely new files → use `write_file` (simpler)
 
 **Prefer `apply_patch` for multi-file changes or when you need atomic, reviewable diffs.**

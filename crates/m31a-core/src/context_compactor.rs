@@ -58,6 +58,52 @@ impl CompactTokenBudget {
     pub fn should_compact(&self, total_current_tokens: usize) -> bool {
         total_current_tokens >= self.trigger_threshold_tokens()
     }
+
+    /// Returns the maximum allowable tokens for compactable dialogue after accounting
+    /// for reserved system instructions and tool schemas.
+    pub fn max_dialogue_tokens(&self) -> usize {
+        self.max_context_tokens
+            .saturating_sub(self.reserved_system_tokens)
+    }
+
+    /// Target token budget available specifically for conversational dialogue.
+    pub fn target_dialogue_tokens(&self, system_tokens: usize) -> usize {
+        let reserved = self.reserved_system_tokens.max(system_tokens);
+        self.target_tokens().saturating_sub(reserved)
+    }
+
+    /// Evaluates if total tokens (including system and tool definitions) warrant compaction.
+    pub fn should_compact_with_budget(
+        &self,
+        total_tokens: usize,
+        tool_schema_tokens: usize,
+    ) -> bool {
+        let effective_tokens = total_tokens + tool_schema_tokens;
+        effective_tokens >= self.trigger_threshold_tokens()
+    }
+}
+
+pub const SUMMARY_PREFIX: &str = "### Earlier Dialogue Summary (Compacted Context)";
+
+/// Returns true if the message is a system-generated compaction summary.
+pub fn is_compaction_summary(m: &ChatMessage) -> bool {
+    m.role == Role::System
+        && m.content
+            .as_deref()
+            .map(|c| c.starts_with(SUMMARY_PREFIX))
+            .unwrap_or(false)
+}
+
+/// Returns true if the message is an authoritative system instruction.
+/// Authoritative system prompts must never be summarized, truncated, or discarded.
+pub fn is_authoritative_system_message(m: &ChatMessage) -> bool {
+    m.role == Role::System
+        && !is_compaction_summary(m)
+        && !m
+            .content
+            .as_deref()
+            .map(crate::fragments::is_contextual_text)
+            .unwrap_or(false)
 }
 
 fn default_prepare_ratio() -> f64 {
@@ -145,6 +191,23 @@ impl ContextCompactor {
         }
     }
 
+    /// Returns estimated tokens remaining in the current context window,
+    /// accounting for tool definition tokens and system token reservations.
+    pub fn tokens_remaining_with_tools(
+        &self,
+        messages: &[crate::types::ChatMessage],
+        tool_tokens: usize,
+    ) -> Option<usize> {
+        let total_tokens: usize =
+            messages.iter().map(message_token_count).sum::<usize>() + tool_tokens;
+        let trigger = self.budget.trigger_threshold_tokens();
+        if total_tokens >= trigger {
+            Some(0)
+        } else {
+            Some(trigger - total_tokens)
+        }
+    }
+
     /// Forces a new context window by performing unconditional compaction.
     /// Returns the compacted history.
     ///
@@ -215,13 +278,36 @@ impl ContextCompactor {
                 tools_digested: 0,
             };
         }
-        let messages: &[ChatMessage] = &source;
-        let mut output_messages = Vec::new();
+
+        // P0-A: Separate immutable authoritative system instructions from compactable dialogue.
+        // Authoritative system instructions must NEVER be summarized, truncated, or discarded.
+        let mut authoritative_system = Vec::new();
+        let mut compactable_dialogue = Vec::new();
+
+        for msg in source {
+            if is_authoritative_system_message(&msg) {
+                authoritative_system.push(msg);
+            } else {
+                compactable_dialogue.push(msg);
+            }
+        }
+
+        // If there is no compactable dialogue, preserve the authoritative instructions intact.
+        if compactable_dialogue.is_empty() {
+            return CompactedHistory {
+                compacted_messages: authoritative_system,
+                original_tokens: total_tokens,
+                compacted_tokens: total_tokens,
+                turns_summarized: 0,
+                tools_digested: 0,
+            };
+        }
+
         let mut tools_digested = 0;
 
-        // Pass 1: Digest oversized tool outputs across the board
-        let intermediate: Vec<ChatMessage> = messages
-            .iter()
+        // Pass 1: Digest oversized tool outputs in compactable dialogue
+        let intermediate_dialogue: Vec<ChatMessage> = compactable_dialogue
+            .into_iter()
             .map(|m| {
                 if m.role == Role::Tool
                     && let Some(ref text) = m.content
@@ -235,50 +321,63 @@ impl ContextCompactor {
                         return copy;
                     }
                 }
-                m.clone()
+                m
             })
             .collect();
 
-        let pass1_tokens: usize = intermediate.iter().map(message_token_count).sum();
-        if pass1_tokens <= self.budget.target_tokens() {
+        let system_tokens: usize = authoritative_system.iter().map(message_token_count).sum();
+        let pass1_dialogue_tokens: usize =
+            intermediate_dialogue.iter().map(message_token_count).sum();
+        let pass1_total_tokens = system_tokens + pass1_dialogue_tokens;
+
+        if pass1_total_tokens <= self.budget.target_tokens() {
+            let mut output = authoritative_system;
+            output.extend(intermediate_dialogue);
             return CompactedHistory {
-                compacted_messages: intermediate,
+                compacted_messages: output,
                 original_tokens: total_tokens,
-                compacted_tokens: pass1_tokens,
+                compacted_tokens: pass1_total_tokens,
                 turns_summarized: 0,
                 tools_digested,
             };
         }
 
-        // Pass 2: Summarize early turns (preserving the last 4 recent turns)
-        let keep_tail_count = 4.min(intermediate.len());
-        let head_split_idx = intermediate.len().saturating_sub(keep_tail_count);
+        // Pass 2: Summarize early dialogue turns (preserving the last 4 recent dialogue turns)
+        let keep_tail_count = 4.min(intermediate_dialogue.len());
+        let head_split_idx = intermediate_dialogue.len().saturating_sub(keep_tail_count);
 
-        let head_to_summarize = &intermediate[..head_split_idx];
-        let tail_to_preserve = &intermediate[head_split_idx..];
+        let head_to_summarize = &intermediate_dialogue[..head_split_idx];
+        let tail_to_preserve = &intermediate_dialogue[head_split_idx..];
 
-        let mut summary_lines = Vec::new();
-        summary_lines.push("### Earlier Dialogue Summary (Compacted Context)".to_string());
-        for (i, msg) in head_to_summarize.iter().enumerate() {
-            let role_name = match msg.role {
-                Role::User => "User",
-                Role::Assistant => "Assistant",
-                Role::System => "System",
-                Role::Tool => "Tool",
-            };
-            let text = msg.content.as_deref().unwrap_or("[no content]");
-            let snippet: String = text.chars().take(120).collect();
-            summary_lines.push(format!(
-                "- [Turn {} - {}]: {}...",
-                i + 1,
-                role_name,
-                snippet.replace('\n', " ")
-            ));
+        let mut output_messages =
+            Vec::with_capacity(authoritative_system.len() + 1 + tail_to_preserve.len());
+        output_messages.extend(authoritative_system);
+
+        let turns_summarized = head_to_summarize.len();
+        if turns_summarized > 0 {
+            let mut summary_lines = Vec::new();
+            summary_lines.push(SUMMARY_PREFIX.to_string());
+            for (i, msg) in head_to_summarize.iter().enumerate() {
+                let role_name = match msg.role {
+                    Role::User => "User",
+                    Role::Assistant => "Assistant",
+                    Role::System => "System",
+                    Role::Tool => "Tool",
+                };
+                let text = msg.content.as_deref().unwrap_or("[no content]");
+                let snippet: String = text.chars().take(120).collect();
+                summary_lines.push(format!(
+                    "- [Turn {} - {}]: {}...",
+                    i + 1,
+                    role_name,
+                    snippet.replace('\n', " ")
+                ));
+            }
+
+            let summary_message = ChatMessage::system(summary_lines.join("\n"));
+            output_messages.push(summary_message);
         }
 
-        let summary_message = ChatMessage::system(summary_lines.join("\n"));
-
-        output_messages.push(summary_message);
         output_messages.extend_from_slice(tail_to_preserve);
 
         let final_tokens: usize = output_messages.iter().map(message_token_count).sum();
@@ -286,7 +385,7 @@ impl ContextCompactor {
             compacted_messages: output_messages,
             original_tokens: total_tokens,
             compacted_tokens: final_tokens,
-            turns_summarized: head_to_summarize.len(),
+            turns_summarized,
             tools_digested,
         }
     }
@@ -463,5 +562,265 @@ mod tests {
         let result = compactor.compact_if_needed(&messages);
         assert_eq!(result.compacted_messages.len(), 2);
         assert_eq!(result.turns_summarized, 0);
+    }
+
+    #[test]
+    fn test_system_prompt_survives_normal_compaction_byte_for_byte() {
+        let unique_prompt =
+            "You are M31A. CRITICAL UNIQUE DIRECTIVE: #XYZ-98765-AUTH-TOKEN. Do not deviate.";
+        let budget = CompactTokenBudget {
+            max_context_tokens: 1_000,
+            trigger_ratio: 0.50, // triggers at 500 tokens
+            target_ratio: 0.25,
+            reserved_system_tokens: 200,
+            max_single_tool_output_tokens: 20,
+            ..Default::default()
+        };
+        let compactor = ContextCompactor::new(budget);
+
+        let messages = vec![
+            ChatMessage::system(unique_prompt),
+            ChatMessage::user("Long user message to trigger summarization ".repeat(50)),
+            ChatMessage::assistant(Some("Assistant response 1 ".repeat(50)), None),
+            ChatMessage::user("User follow-up message ".repeat(50)),
+            ChatMessage::assistant(Some("Assistant response 2 ".repeat(50)), None),
+            ChatMessage::user("Recent question 1"),
+            ChatMessage::assistant(Some("Recent answer 1".into()), None),
+            ChatMessage::user("Recent question 2"),
+            ChatMessage::assistant(Some("Recent answer 2".into()), None),
+        ];
+
+        let result = compactor.compact_if_needed(&messages);
+        assert!(
+            result.turns_summarized > 0,
+            "must have summarized early turns"
+        );
+        assert!(
+            result.compacted_tokens < result.original_tokens,
+            "must reduce tokens"
+        );
+
+        // System prompt MUST be at index 0 and identical byte-for-byte
+        assert_eq!(result.compacted_messages[0].role, Role::System);
+        assert_eq!(
+            result.compacted_messages[0].content.as_deref(),
+            Some(unique_prompt),
+            "Authoritative system prompt must survive normal compaction byte-for-byte"
+        );
+
+        // Verify summary message is at index 1 and does not repeat system prompt as a summarized turn
+        assert_eq!(result.compacted_messages[1].role, Role::System);
+        let summary_text = result.compacted_messages[1].content.as_deref().unwrap();
+        assert!(summary_text.starts_with(SUMMARY_PREFIX));
+        assert!(
+            !summary_text.contains("#XYZ-98765-AUTH-TOKEN"),
+            "System prompt must not be summarized into the dialogue summary"
+        );
+    }
+
+    #[test]
+    fn test_system_prompt_survives_unconditional_compaction() {
+        let unique_prompt = "M31A Authoritative Instructions - Unconditional Test - Token-778899";
+        let budget = CompactTokenBudget {
+            max_context_tokens: 500,
+            trigger_ratio: 0.90,
+            target_ratio: 0.20,
+            reserved_system_tokens: 50,
+            max_single_tool_output_tokens: 30,
+            ..Default::default()
+        };
+        let compactor = ContextCompactor::new(budget);
+
+        let messages = vec![
+            ChatMessage::system(unique_prompt),
+            ChatMessage::user("Turn 1 ".repeat(80)),
+            ChatMessage::assistant(Some("Turn 2 ".repeat(80)), None),
+            ChatMessage::user("Turn 3 ".repeat(80)),
+            ChatMessage::assistant(Some("Turn 4 ".repeat(80)), None),
+            ChatMessage::user("Turn 5"),
+            ChatMessage::assistant(Some("Turn 6".into()), None),
+        ];
+
+        let result = compactor.compact_unconditional(&messages);
+        assert!(result.turns_summarized > 0);
+        assert_eq!(result.compacted_messages[0].role, Role::System);
+        assert_eq!(
+            result.compacted_messages[0].content.as_deref(),
+            Some(unique_prompt),
+            "System prompt must survive unconditional compaction byte-for-byte"
+        );
+    }
+
+    #[test]
+    fn test_system_prompt_survives_multiple_compaction_cycles() {
+        let unique_prompt = "MULTI-CYCLE-INVARIANT-PROMPT-KEY-42";
+        let budget = CompactTokenBudget {
+            max_context_tokens: 800,
+            trigger_ratio: 0.50,
+            target_ratio: 0.25,
+            reserved_system_tokens: 100,
+            max_single_tool_output_tokens: 20,
+            ..Default::default()
+        };
+        let compactor = ContextCompactor::new(budget);
+
+        let mut history = vec![
+            ChatMessage::system(unique_prompt),
+            ChatMessage::user("Heavy message cycle 1 ".repeat(50)),
+            ChatMessage::assistant(Some("Heavy response cycle 1 ".repeat(50)), None),
+            ChatMessage::user("Heavy message cycle 1 follow up ".repeat(50)),
+            ChatMessage::assistant(Some("Heavy response cycle 1 follow up ".repeat(50)), None),
+            ChatMessage::user("Tail 1"),
+            ChatMessage::assistant(Some("Tail 2".into()), None),
+            ChatMessage::user("Tail 3"),
+            ChatMessage::assistant(Some("Tail 4".into()), None),
+        ];
+
+        // Cycle 1
+        let compacted1 = compactor.compact_if_needed(&history);
+        assert!(compacted1.turns_summarized > 0);
+        assert_eq!(
+            compacted1.compacted_messages[0].content.as_deref(),
+            Some(unique_prompt)
+        );
+
+        // Add more turns to compacted history to simulate continuous conversation
+        history = compacted1.compacted_messages;
+        history.push(ChatMessage::user("Heavy message cycle 2 ".repeat(60)));
+        history.push(ChatMessage::assistant(
+            Some("Heavy response cycle 2 ".repeat(60)),
+            None,
+        ));
+        history.push(ChatMessage::user(
+            "Heavy message cycle 2 follow up ".repeat(60),
+        ));
+        history.push(ChatMessage::assistant(
+            Some("Heavy response cycle 2 follow up ".repeat(60)),
+            None,
+        ));
+        history.push(ChatMessage::user("Recent tail A"));
+        history.push(ChatMessage::assistant(Some("Recent tail B".into()), None));
+
+        // Cycle 2
+        let compacted2 = compactor.compact_if_needed(&history);
+        assert!(compacted2.turns_summarized > 0);
+        assert_eq!(
+            compacted2.compacted_messages[0].content.as_deref(),
+            Some(unique_prompt),
+            "System prompt must remain byte-for-byte identical across second compaction cycle"
+        );
+
+        // Cycle 3: Add yet more turns and compact unconditionally
+        history = compacted2.compacted_messages;
+        history.push(ChatMessage::user("Cycle 3 heavy ".repeat(60)));
+        history.push(ChatMessage::assistant(
+            Some("Cycle 3 heavy reply ".repeat(60)),
+            None,
+        ));
+        let compacted3 = compactor.compact_unconditional(&history);
+        assert_eq!(
+            compacted3.compacted_messages[0].content.as_deref(),
+            Some(unique_prompt),
+            "System prompt must remain byte-for-byte identical across third compaction cycle"
+        );
+    }
+
+    #[test]
+    fn test_tool_result_digestion_cannot_alter_system_instructions() {
+        let unique_prompt = "PRESERVE-DURING-TOOL-DIGESTION-KEY";
+        let budget = CompactTokenBudget {
+            max_context_tokens: 5_000,
+            trigger_ratio: 0.80,
+            target_ratio: 0.30,
+            reserved_system_tokens: 200,
+            max_single_tool_output_tokens: 15, // aggressive tool digestion threshold
+            ..Default::default()
+        };
+        let compactor = ContextCompactor::new(budget);
+
+        let messages = vec![
+            ChatMessage::system(unique_prompt),
+            ChatMessage::user("Run command"),
+            ChatMessage {
+                role: Role::Tool,
+                content: Some(
+                    "Gigantic output with dozens of log lines and symbols...\n".repeat(30),
+                ),
+                tool_calls: None,
+                tool_call_id: Some("call-xyz".into()),
+                reasoning_content: None,
+            },
+            ChatMessage::assistant(Some("Command done".into()), None),
+        ];
+
+        let result = compactor.compact_unconditional(&messages);
+        assert!(result.tools_digested > 0);
+        assert_eq!(result.compacted_messages[0].role, Role::System);
+        assert_eq!(
+            result.compacted_messages[0].content.as_deref(),
+            Some(unique_prompt),
+            "Tool digestion must never modify or alter system instructions"
+        );
+    }
+
+    #[test]
+    fn test_malformed_history_preserves_authoritative_prompt() {
+        let unique_prompt = "SURVIVE-MALFORMED-HISTORY-PROMPT";
+        let budget = CompactTokenBudget::default();
+        let compactor = ContextCompactor::new(budget);
+
+        // Case 1: Only system prompt present
+        let only_sys = vec![ChatMessage::system(unique_prompt)];
+        let res1 = compactor.compact_unconditional(&only_sys);
+        assert_eq!(res1.compacted_messages.len(), 1);
+        assert_eq!(
+            res1.compacted_messages[0].content.as_deref(),
+            Some(unique_prompt)
+        );
+
+        // Case 2: System prompt with only contextual fragments (which get dropped)
+        let sys_and_contextual = vec![
+            ChatMessage::system(unique_prompt),
+            ChatMessage::user("<token_budget>9999</token_budget>"),
+            ChatMessage::user("<context_window>approaching</context_window>"),
+        ];
+        let res2 = compactor.compact_unconditional(&sys_and_contextual);
+        assert_eq!(res2.compacted_messages.len(), 1);
+        assert_eq!(
+            res2.compacted_messages[0].content.as_deref(),
+            Some(unique_prompt)
+        );
+    }
+
+    #[test]
+    fn test_compaction_budget_accounts_for_system_and_tool_tokens() {
+        let budget = CompactTokenBudget {
+            max_context_tokens: 100_000,
+            trigger_ratio: 0.75, // 75,000
+            prepare_ratio: 0.65, // 65,000
+            target_ratio: 0.40,  // 40,000
+            reserved_system_tokens: 5_000,
+            max_single_tool_output_tokens: 800,
+        };
+
+        assert_eq!(budget.max_dialogue_tokens(), 95_000);
+        assert_eq!(budget.target_dialogue_tokens(5_000), 35_000);
+        // If system prompt is larger than reserved (e.g. 8,000 tokens)
+        assert_eq!(budget.target_dialogue_tokens(8_000), 32_000);
+
+        // Trigger logic with tool tokens
+        assert!(!budget.should_compact_with_budget(70_000, 2_000)); // 72,000 < 75,000
+        assert!(budget.should_compact_with_budget(70_000, 6_000)); // 76,000 >= 75,000
+
+        let compactor = ContextCompactor::new(budget);
+        let messages = vec![
+            ChatMessage::system("Base system prompt instructions"),
+            ChatMessage::user("Hello agent"),
+        ];
+        let remaining_without_tools = compactor.tokens_remaining(&messages).unwrap();
+        let remaining_with_tools = compactor
+            .tokens_remaining_with_tools(&messages, 10_000)
+            .unwrap();
+        assert_eq!(remaining_without_tools - remaining_with_tools, 10_000);
     }
 }

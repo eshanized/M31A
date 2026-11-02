@@ -37,6 +37,9 @@ pub struct Config {
     #[serde(default)]
     pub api_key: Option<String>,
 
+    #[serde(default)]
+    pub system_prompt: Option<String>,
+
     #[serde(default = "default_sandbox")]
     pub sandbox: SandboxPolicy,
 
@@ -523,6 +526,7 @@ impl Default for Config {
             model_post_turn_compact_threshold_percent: default_post_turn_compact_pct(),
             api_base: default_api_base(),
             api_key: resolve_stored_api_key(),
+            system_prompt: None,
             sandbox: default_sandbox(),
             approval: default_approval(),
             approvals_reviewer: default_approvals_reviewer(),
@@ -885,6 +889,7 @@ impl Config {
                 .model_post_turn_compact_threshold_percent,
             api_base: overlay.api_base,
             api_key: overlay.api_key.or(base.api_key),
+            system_prompt: overlay.system_prompt.or(base.system_prompt),
             sandbox: overlay.sandbox,
             approval: overlay.approval,
             approvals_reviewer: overlay.approvals_reviewer,
@@ -1262,5 +1267,20 @@ temperature = 5.0
         assert!(res.is_err());
         let err_msg = res.unwrap_err().to_string();
         assert!(err_msg.contains("Temperature 5 outside recommended range"));
+    }
+
+    #[test]
+    fn test_strict_config_validation_accepts_system_prompt() {
+        let toml_sys = r#"
+model = "nvidia/nemotron-3.5-lightning-30b-a3b"
+system_prompt = "Custom system instructions from config"
+"#;
+        let res: Result<Config> = Config::load_layer(toml_sys, true);
+        assert!(res.is_ok());
+        let cfg = res.unwrap();
+        assert_eq!(
+            cfg.system_prompt.as_deref(),
+            Some("Custom system instructions from config")
+        );
     }
 }

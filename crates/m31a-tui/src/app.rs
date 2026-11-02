@@ -452,21 +452,23 @@ impl App {
 
         let (event_tx, event_rx) = mpsc::channel(1024);
 
-        let initial_sys_prompt = SystemPromptBuilder::build(
+        let snapshot = m31a_core::prompts::PromptRuntimeSnapshot::new(
             &cwd,
             &active_model,
             &format!("{:?}", config.sandbox),
             collaboration_mode,
-        );
-        let world_state_digests = SystemPromptBuilder::sections(
-            &cwd,
-            &active_model,
-            &format!("{:?}", config.sandbox),
-            collaboration_mode,
-            None,
-            None,
         )
-        .section_digests();
+        .with_user_custom_instructions(config.system_prompt.clone())
+        .with_provider(
+            config
+                .model_provider
+                .as_deref()
+                .unwrap_or("NVIDIA NIM / Upstream Provider"),
+        );
+
+        let initial_state = SystemPromptBuilder::sections_canonical(&snapshot);
+        let initial_sys_prompt = initial_state.render();
+        let world_state_digests = initial_state.section_digests();
         let chat_history = vec![ChatMessage::system(initial_sys_prompt)];
 
         let mut bottom_pane = crate::bottom_pane::BottomPaneState::new(
@@ -4458,15 +4460,25 @@ impl App {
     }
 
     pub fn refresh_system_prompt(&mut self) {
-        let state = SystemPromptBuilder::sections_with_dynamic_context(
+        let mut snapshot = m31a_core::prompts::PromptRuntimeSnapshot::new(
             &self.cwd,
             &self.active_model,
             &format!("{:?}", self.config.sandbox),
             self.collaboration_mode,
-            None,
-            self.active_goal.as_ref(),
-            &self.pinned_context,
-        );
+        )
+        .with_user_custom_instructions(self.config.system_prompt.clone())
+        .with_provider(
+            self.config
+                .model_provider
+                .as_deref()
+                .unwrap_or("NVIDIA NIM / Upstream Provider"),
+        )
+        .with_dynamic_context(self.pinned_context.clone());
+        if let Some(ref goal) = self.active_goal {
+            snapshot.active_goal = Some(goal.clone());
+        }
+
+        let state = SystemPromptBuilder::sections_canonical(&snapshot);
 
         // Calculate and maintain world-state section digests silently.
         let deltas = state.diff_since(&self.world_state_digests);

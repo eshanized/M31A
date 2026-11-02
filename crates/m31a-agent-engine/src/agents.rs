@@ -652,16 +652,17 @@ impl AgentRuntime for EngineAgentRuntime {
         }));
         child.hooks = self.hooks.clone();
 
-        let mut system_prompt = SystemPromptBuilder::build(
+        let snapshot = m31a_core::prompts::PromptRuntimeSnapshot::new(
             &child_cwd,
             &model,
             &format!("{:?}", role.sandbox_policy),
             CollaborationMode::Default,
-        );
-        if let Some(overlay) = &role.system_prompt_overlay {
-            system_prompt.push_str("\n\n## Role Overlay\n");
-            system_prompt.push_str(overlay);
-        }
+        )
+        .with_role(Some(role.clone()));
+
+        let system_prompt = SystemPromptBuilder::build_canonical(&snapshot);
+        child.authoritative_system_prompt = Some(system_prompt.clone());
+
         let history = vec![
             ChatMessage::system(system_prompt),
             ChatMessage::user(req.prompt.clone()),

@@ -400,12 +400,22 @@ impl AppServer {
         };
         engine.hooks = Some(self.hooks.clone());
 
-        let system_instructions = SystemPromptBuilder::build(
+        let snapshot = m31a_core::prompts::PromptRuntimeSnapshot::new(
             &cwd,
             &self.config.model,
             &format!("{:?}", self.config.sandbox),
             CollaborationMode::Default,
+        )
+        .with_user_custom_instructions(self.config.system_prompt.clone())
+        .with_provider(
+            self.config
+                .model_provider
+                .as_deref()
+                .unwrap_or("NVIDIA NIM / Upstream Provider"),
         );
+
+        let system_instructions = SystemPromptBuilder::build_canonical(&snapshot);
+        engine.authoritative_system_prompt = Some(system_instructions.clone());
         let history = vec![
             ChatMessage::system(system_instructions),
             ChatMessage::user(prompt.to_string()),

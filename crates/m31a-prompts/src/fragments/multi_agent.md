@@ -19,12 +19,14 @@
     "task_name": "Implement user authentication",
     "prompt": "Create JWT-based auth with refresh tokens...",
     "role": "coder",
-    "model": "nvidia/nemotron-3.5-lightning-30b-a3b"
+    "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
+    "isolate_worktree": true
   }
 }
 ```
 
-- **Depth limit**: Maximum 1 level of subagents (configurable)
+- **Depth limit**: Default maximum 3 levels of subagents (configurable via resource governance)
+- **Worktree isolation**: Pass `"isolate_worktree": true` to isolate subagent filesystem edits in a dedicated Git worktree branch
 - **Returns**: `agent_id` (e.g., `agent_coder_a1b2c3d4`) and nickname
 
 ## Communicating with Agents
@@ -89,4 +91,4 @@ Each agent can get its own git worktree:
 3. **Wait with timeouts** — Prevents hanging on stuck agents
 4. **Use message board for coordination** — Not `send_input` for everything
 5. **Clean up** — `close_agent` or `terminate_agent_tree` when done
-6. **Monitor depth** — Respect the 1-level limit
+6. **Monitor depth** — Respect the configured max spawn depth (default 3)

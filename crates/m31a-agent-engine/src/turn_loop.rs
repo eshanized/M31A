@@ -226,6 +226,9 @@ pub struct AgentEngine {
     pub auto_checkpoint: bool,
     /// Optional telemetry pipeline for session and turn observability
     pub telemetry: Option<Arc<m31a_telemetry::TelemetryPipeline>>,
+    /// Authoritative runtime-owned system instructions (P0-A invariant).
+    /// Maintained separately from compactable dialogue to guarantee preservation across compaction.
+    pub authoritative_system_prompt: Option<String>,
 }
 
 impl AgentEngine {
@@ -265,7 +268,14 @@ impl AgentEngine {
             collaboration_mode: CollaborationMode::Default,
             auto_checkpoint: true,
             telemetry: None,
+            authoritative_system_prompt: None,
         }
+    }
+
+    /// Sets the authoritative system prompt on this engine.
+    pub fn with_system_prompt(mut self, prompt: impl Into<String>) -> Self {
+        self.authoritative_system_prompt = Some(prompt.into());
+        self
     }
 
     pub fn with_telemetry(mut self, telemetry: Arc<m31a_telemetry::TelemetryPipeline>) -> Self {
@@ -651,9 +661,42 @@ impl AgentEngine {
         let digest_budget = self.compactor.budget().max_single_tool_output_tokens;
 
         let mut merged = if p.result.turns_summarized > 0 {
-            let mut v = Vec::with_capacity(history.len());
-            v.push(p.result.compacted_messages[0].clone());
-            v.extend(history[n.saturating_sub(4)..].iter().cloned());
+            // P0-A: Preserve authoritative system instructions across merge
+            let auth_system: Vec<ChatMessage> = history
+                .iter()
+                .filter(|m| m31a_core::context_compactor::is_authoritative_system_message(m))
+                .cloned()
+                .collect();
+            let auth_system = if auth_system.is_empty() {
+                p.result
+                    .compacted_messages
+                    .iter()
+                    .filter(|m| m31a_core::context_compactor::is_authoritative_system_message(m))
+                    .cloned()
+                    .collect()
+            } else {
+                auth_system
+            };
+
+            let mut v = Vec::with_capacity(history.len() + auth_system.len() + 1);
+            v.extend(auth_system);
+
+            if let Some(summary) = p
+                .result
+                .compacted_messages
+                .iter()
+                .find(|m| m31a_core::context_compactor::is_compaction_summary(m))
+            {
+                v.push(summary.clone());
+            }
+
+            let dialogue_start = history
+                .iter()
+                .take_while(|m| m31a_core::context_compactor::is_authoritative_system_message(m))
+                .count();
+
+            let tail_start = (n.saturating_sub(4)).max(dialogue_start);
+            v.extend(history[tail_start..].iter().cloned());
             v
         } else {
             let mut v = p.result.compacted_messages.clone();
@@ -694,6 +737,26 @@ impl AgentEngine {
         max_turns: usize,
     ) -> Result<()> {
         self.tools.set_session_id(session_id);
+
+        // P0-A: Synchronize authoritative system prompt between engine state and history
+        if let Some(text) = history
+            .first()
+            .filter(|m| m31a_core::context_compactor::is_authoritative_system_message(m))
+            .and_then(|m| m.content.as_deref())
+        {
+            self.authoritative_system_prompt = Some(text.to_string());
+        }
+        let has_authoritative_head = history
+            .first()
+            .map(m31a_core::context_compactor::is_authoritative_system_message)
+            .unwrap_or(false);
+        if let (false, Some(prompt)) = (
+            has_authoritative_head,
+            self.authoritative_system_prompt.as_ref(),
+        ) {
+            history.insert(0, ChatMessage::system(prompt.clone()));
+        }
+
         let tools_def = compose_tool_surface(&self.tools.definitions(), self.code_mode.as_ref());
         let mut total_usage = TokenUsage::default();
         let router = HybridModelRouter::new();
@@ -1004,6 +1067,18 @@ impl AgentEngine {
 
             // Normalize history to fix any orphan tool calls, empty outputs, or displaced system messages
             crate::history_normalizer::normalize_tool_history(&mut history);
+
+            // P0-A invariant: Authoritative system instructions must be at head of history before dispatch
+            let has_authoritative_head = history
+                .first()
+                .map(m31a_core::context_compactor::is_authoritative_system_message)
+                .unwrap_or(false);
+            if let (false, Some(prompt)) = (
+                has_authoritative_head,
+                self.authoritative_system_prompt.as_ref(),
+            ) {
+                history.insert(0, ChatMessage::system(prompt.clone()));
+            }
 
             // 3. Setup streaming callbacks with DeltaBatcher (50ms interval)
             let streamed_content = Arc::new(std::sync::Mutex::new(String::new()));
@@ -2247,6 +2322,77 @@ mod tests {
             );
         }
         assert_eq!(merged.turns_summarized, 2);
+    }
+
+    #[test]
+    fn test_merge_prepared_compaction_preserves_system_prompt_with_new_messages() {
+        let client = ProviderClient::from_provider(m31a_provider::MockProvider::new("test-model"));
+        let storage = Storage::open_in_memory().expect("storage");
+        let engine = AgentEngine::new(
+            client,
+            ToolRegistry::new(),
+            storage,
+            ApprovalPolicy::Never,
+            ExecPolicy::standard(),
+            SandboxPolicy::DangerFullAccess,
+            std::env::temp_dir(),
+        );
+
+        let unique_prompt = "AUTHORITATIVE SYSTEM INSTRUCTION #882211 - MERGE IMMUTABLE";
+        let sys = ChatMessage::system(unique_prompt);
+        let summary = ChatMessage::system("### Earlier Dialogue Summary (Compacted Context)");
+
+        // Snapshot S = [sys, a, b, c, d, e, f]; prepared summarized dialogue [a, b].
+        let mut s = vec![sys.clone()];
+        for i in 0..6 {
+            s.push(ChatMessage::user(format!(
+                "msg-{}",
+                (i as u8 + b'a') as char
+            )));
+        }
+
+        let prepared = PreparedCompaction {
+            snapshot_len: 7,
+            result: CompactedHistory {
+                compacted_messages: vec![sys.clone(), summary.clone()],
+                original_tokens: 200,
+                compacted_tokens: 50,
+                turns_summarized: 2,
+                tools_digested: 0,
+            },
+        };
+
+        // Live history H = S + [msg-g, msg-h] (messages arrived while preparing)
+        let mut history = s.clone();
+        history.push(ChatMessage::user("msg-g"));
+        history.push(ChatMessage::user("msg-h"));
+
+        let merged = engine.merge_prepared_compaction(&history, prepared);
+
+        // System prompt must be at index 0 byte-for-byte!
+        assert_eq!(
+            merged.compacted_messages[0].content.as_deref(),
+            Some(unique_prompt),
+            "System prompt must be at index 0 after prepared compaction merge"
+        );
+        // Summary message at index 1
+        assert_eq!(
+            merged.compacted_messages[1].content.as_deref(),
+            Some("### Earlier Dialogue Summary (Compacted Context)")
+        );
+        // Live tail and new messages preserved
+        assert!(
+            merged
+                .compacted_messages
+                .iter()
+                .any(|m| m.content.as_deref() == Some("msg-g"))
+        );
+        assert!(
+            merged
+                .compacted_messages
+                .iter()
+                .any(|m| m.content.as_deref() == Some("msg-h"))
+        );
     }
 
     /// §5.2 end-to-end: transport-level background-prepare pipeline verification

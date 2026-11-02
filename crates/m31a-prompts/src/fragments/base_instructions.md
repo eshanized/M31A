@@ -19,7 +19,7 @@ You are operating in a sandboxed environment. All shell commands execute via `ex
 - **Danger-full-access**: Unrestricted (requires explicit user approval)
 - **Approval policies**: `OnRequest` (default), `Never`, `ApproveForMe`
 
-When a command requires approval, the system will prompt the user. Do not attempt to bypass approval mechanisms.
+When escalated permissions are required, call the dedicated `request_permissions` tool with `{ "sandbox_permissions": "with_additional_permissions" | "require_escalated", "justification": "..." }`. Do not attempt to bypass approval mechanisms.
 
 ## Tool Usage Guidelines
 
@@ -44,7 +44,7 @@ When a command requires approval, the system will prompt the user. Do not attemp
 - Default timeout: 60 seconds
 
 ### Patch Format (`apply_patch`)
-**CRITICAL: `apply_patch` is a FREEFORM tool. Never use `applypatch` or `apply-patch` as shell commands.**
+`apply_patch` is a standard JSON tool with schema `{ "patch": "..." }` or `{ "path": "...", "search_text": "...", "replace_text": "..." }`. Heredoc shell invocations like `apply_patch <<'EOF' ... EOF` in `exec_command` are automatically routed directly to the patch engine.
 
 Use the exact Codex patch specification:
 ```

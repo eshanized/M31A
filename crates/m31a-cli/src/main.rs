@@ -3839,15 +3839,30 @@ async fn run_turn(
 
     let mut session = Session::new(&config.model, cwd);
 
-    // Initial system prompt with dynamic skills, memories, and git context
-    let system_instructions = SystemPromptBuilder::build(
+    let collaboration_mode = if plan {
+        m31a_core::prompts::CollaborationMode::Plan
+    } else {
+        m31a_core::prompts::CollaborationMode::Default
+    };
+
+    // Initial system prompt assembled via canonical runtime pipeline
+    let snapshot = m31a_core::prompts::PromptRuntimeSnapshot::new(
         cwd,
         &config.model,
         &format!("{:?}", config.sandbox),
-        CollaborationMode::Default,
+        collaboration_mode,
+    )
+    .with_user_custom_instructions(config.system_prompt.clone())
+    .with_provider(
+        config
+            .model_provider
+            .as_deref()
+            .unwrap_or("NVIDIA NIM / Upstream Provider"),
     );
 
-    let mut history = vec![ChatMessage::system(system_instructions)];
+    let system_instructions = SystemPromptBuilder::build_canonical(&snapshot);
+
+    let mut history = vec![ChatMessage::system(system_instructions.clone())];
 
     // §4.3: inject the real child-engine runtime so spawn_agent runs actual
     // AgentEngine subagents (descriptive fallback when not injected).
@@ -3942,6 +3957,7 @@ async fn run_turn(
         } else {
             m31a_core::prompts::CollaborationMode::Default
         },
+        authoritative_system_prompt: Some(system_instructions.clone()),
         ..engine
     };
 
