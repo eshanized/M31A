@@ -7,6 +7,7 @@
 //! - Validates that accepted patches are supported by verified evidence.
 //! - Generates task-specific few-shot exemplars to prevent repeating past failures.
 
+use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -46,7 +47,9 @@ impl ContinuousLearningEngine {
         Self { storage_dir }
     }
 
-    /// Creates and optionally persists a DPO preference trajectory pair.
+    /// Creates, validates, sanitizes, and optionally persists a DPO preference trajectory pair.
+    /// Rejects ungrounded trajectories that lack diagnostic failure logs or verified evidence.
+    /// Redacts all detected API keys, credentials, and private keys from saved records.
     pub fn record_trajectory(
         &self,
         prompt: &str,
@@ -54,18 +57,58 @@ impl ContinuousLearningEngine {
         accepted_patch: &str,
         rejection_reason: &str,
         verification_evidence: &str,
-    ) -> DpoPreferencePair {
+    ) -> Result<DpoPreferencePair> {
+        let p_trimmed = prompt.trim();
+        let rej_trimmed = rejected_patch.trim();
+        let acc_trimmed = accepted_patch.trim();
+        let reason_trimmed = rejection_reason.trim();
+        let ev_trimmed = verification_evidence.trim();
+
+        if p_trimmed.is_empty() {
+            bail!("Continuous learning prompt cannot be empty");
+        }
+        if rej_trimmed.is_empty() {
+            bail!("Rejected patch cannot be empty");
+        }
+        if acc_trimmed.is_empty() {
+            bail!("Accepted patch cannot be empty");
+        }
+        if reason_trimmed.is_empty() {
+            bail!(
+                "Rejected patch must be grounded in diagnostic failure logs or compiler/test error output"
+            );
+        }
+        if ev_trimmed.is_empty() {
+            bail!("Accepted patch must be grounded in verified test/compiler evidence");
+        }
+
+        let ev_lower = ev_trimmed.to_ascii_lowercase();
+        if ev_lower == "none"
+            || ev_lower == "n/a"
+            || ev_lower == "unknown"
+            || ev_lower == "unverified"
+        {
+            bail!("Verification evidence cannot be placeholder/stub value '{ev_trimmed}'");
+        }
+
+        // Apply strict secret redaction across all stored fields
+        let clean_prompt = crate::sanitizer::redact_secrets(p_trimmed);
+        let clean_rejected_patch = crate::sanitizer::redact_secrets(rej_trimmed);
+        let clean_accepted_patch = crate::sanitizer::redact_secrets(acc_trimmed);
+        let clean_rejection_reason = crate::sanitizer::redact_secrets(reason_trimmed);
+        let clean_verification_evidence = crate::sanitizer::redact_secrets(ev_trimmed);
+
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
 
         let pair = DpoPreferencePair {
-            prompt: prompt.to_string(),
-            rejected_patch: rejected_patch.to_string(),
-            accepted_patch: accepted_patch.to_string(),
-            rejection_reason: rejection_reason.to_string(),
-            verification_evidence: verification_evidence.to_string(),
+            prompt: clean_prompt,
+            rejected_patch: clean_rejected_patch,
+            accepted_patch: clean_accepted_patch,
+            rejection_reason: clean_rejection_reason,
+            verification_evidence: clean_verification_evidence,
             timestamp_epoch_secs: now,
         };
 
@@ -83,7 +126,7 @@ impl ContinuousLearningEngine {
             }
         }
 
-        pair
+        Ok(pair)
     }
 
     /// Distills a DPO trajectory pair into a few-shot exemplar for contextual guidance.
@@ -151,13 +194,15 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let engine = ContinuousLearningEngine::new(Some(temp.path().to_path_buf()));
 
-        let pair = engine.record_trajectory(
-            "Fix type error in auth",
-            "- let x: u32 = str_val;",
-            "+ let x: u32 = str_val.parse()?;\n+ assert!(x > 0);",
-            "Mismatched types: expected u32, found String",
-            "cargo test -p auth PASSED 10/10",
-        );
+        let pair = engine
+            .record_trajectory(
+                "Fix type error in auth",
+                "- let x: u32 = str_val;",
+                "+ let x: u32 = str_val.parse()?;\n+ assert!(x > 0);",
+                "Mismatched types: expected u32, found String",
+                "cargo test -p auth PASSED 10/10",
+            )
+            .unwrap();
 
         assert_eq!(pair.prompt, "Fix type error in auth");
         assert!(pair.accepted_patch.contains(".parse()?"));
@@ -173,5 +218,52 @@ mod tests {
         let retrieved = engine.retrieve_exemplars("auth type error", &exemplars, 5);
         assert_eq!(retrieved.len(), 1);
         assert_eq!(retrieved[0].task_category, "TypeCorrection");
+    }
+
+    #[test]
+    fn test_record_trajectory_validation_and_secret_redaction() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = ContinuousLearningEngine::new(Some(temp.path().to_path_buf()));
+
+        // 1. Ungrounded rejected patch (missing rejection diagnostic)
+        let err1 = engine.record_trajectory(
+            "Fix auth bug",
+            "- let a = 1;",
+            "+ let a = 2;",
+            "",
+            "cargo test passed",
+        );
+        assert!(err1.is_err());
+        assert!(
+            err1.unwrap_err()
+                .to_string()
+                .contains("diagnostic failure logs")
+        );
+
+        // 2. Ungrounded accepted patch (stub/placeholder evidence)
+        let err2 = engine.record_trajectory(
+            "Fix auth bug",
+            "- let a = 1;",
+            "+ let a = 2;",
+            "panic at runtime",
+            "none",
+        );
+        assert!(err2.is_err());
+        assert!(err2.unwrap_err().to_string().contains("placeholder/stub"));
+
+        // 3. Secret redaction on successful recording
+        let secret_token = "Bearer sk-123456789012345678901234567890";
+        let pair = engine
+            .record_trajectory(
+                &format!("Fix leak of {}", secret_token),
+                "- let token = \"secret\";",
+                "+ let token = \"[REDACTED]\";",
+                "Leaked token in log",
+                "cargo test verification passed 5/5",
+            )
+            .unwrap();
+
+        assert!(!pair.prompt.contains("sk-123456789012345678901234567890"));
+        assert!(pair.prompt.contains("[REDACTED_SECRET]"));
     }
 }
