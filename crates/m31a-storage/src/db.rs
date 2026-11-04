@@ -1356,6 +1356,27 @@ impl Storage {
         Ok(list)
     }
 
+    pub fn get_turn(&self, turn_id: &str) -> Result<Option<TurnRecord>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, thread_id, turn_index, status, created_at FROM thread_turns WHERE id = ?1",
+        )?;
+        let mut rows = stmt.query_map(params![turn_id], |row| {
+            Ok(TurnRecord {
+                id: row.get(0)?,
+                thread_id: row.get(1)?,
+                turn_index: row.get::<_, i64>(2)? as usize,
+                status: row.get(3)?,
+                created_at: row.get(4)?,
+            })
+        })?;
+        if let Some(r) = rows.next() {
+            Ok(Some(r?))
+        } else {
+            Ok(None)
+        }
+    }
+
     pub fn save_item(
         &self,
         item_id: &str,
@@ -1741,6 +1762,63 @@ impl Storage {
         Ok(())
     }
 
+    /// Heartbeats an active execution claim by refreshing its updated_at_ms timestamp.
+    pub fn heartbeat_claim(&self, claim_id: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        conn.execute(
+            "UPDATE thread_execution_claims SET updated_at_ms = ?2 WHERE claim_id = ?1 AND status IN ('claimed', 'running')",
+            params![claim_id, now_ms],
+        )?;
+        Ok(())
+    }
+
+    /// Atomically finalizes both a turn and its associated execution claim in a single SQLite transaction.
+    pub fn finalize_turn_and_claim(
+        &self,
+        thread_id: &str,
+        turn_id: &str,
+        turn_index: usize,
+        claim_id: &str,
+        terminal_status: &str,
+    ) -> Result<()> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        let now_ms = chrono::Utc::now().timestamp_millis();
+
+        // 1. Update or insert turn record
+        let now_sec = chrono::Utc::now().timestamp();
+        tx.execute(
+            r#"
+            INSERT INTO thread_turns (id, thread_id, turn_index, status, created_at)
+            VALUES (?1, ?2, ?3, ?4, ?5)
+            ON CONFLICT(id) DO UPDATE SET
+                status = excluded.status
+            "#,
+            params![
+                turn_id,
+                thread_id,
+                turn_index as i64,
+                terminal_status,
+                now_sec
+            ],
+        )?;
+
+        // 2. Finalize execution claim
+        let claim_status = match terminal_status {
+            "completed" => "completed",
+            "aborted" | "cancelled" => "aborted",
+            _ => "crashed",
+        };
+        tx.execute(
+            "UPDATE thread_execution_claims SET status = ?2, updated_at_ms = ?3 WHERE claim_id = ?1",
+            params![claim_id, claim_status, now_ms],
+        )?;
+
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn get_active_claim(&self, thread_id: &str) -> Result<Option<ExecutionClaim>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
@@ -1817,8 +1895,9 @@ impl Storage {
                 }
             };
 
-            let is_stale = (now_ms - claim.updated_at_ms) > 600_000;
-            if !pid_alive || is_stale {
+            // An active process with a living PID is never crashed, regardless of elapsed time.
+            // Only claims with dead/nonexistent PIDs are marked as crashed.
+            if !pid_alive {
                 conn.execute(
                     "UPDATE thread_execution_claims SET status = 'crashed', updated_at_ms = ?2 WHERE claim_id = ?1",
                     params![claim.claim_id, now_ms],
