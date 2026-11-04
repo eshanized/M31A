@@ -18,6 +18,17 @@ pub struct SessionTokenMetrics {
     pub turn_token_history: Vec<u64>,
 }
 
+/// Typed metrics recorded for a single inference/interaction turn.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TurnMetrics {
+    pub model: String,
+    pub prompt_tokens: u64,
+    pub completion_tokens: u64,
+    pub reasoning_tokens: u64,
+    pub ttft_ms: u64,
+    pub duration_ms: u64,
+}
+
 /// Computes per-token input and output prices in USD for NVIDIA NIM models.
 pub fn nim_model_pricing(model: &str) -> (f64, f64) {
     let m = model.to_lowercase();
@@ -37,6 +48,28 @@ pub fn nim_model_pricing(model: &str) -> (f64, f64) {
 }
 
 impl SessionTokenMetrics {
+    /// Records a turn using typed `TurnMetrics` to eliminate parameter misordering.
+    pub fn record_turn_metrics(&mut self, turn: TurnMetrics) {
+        self.prompt_tokens += turn.prompt_tokens;
+        self.completion_tokens += turn.completion_tokens;
+        self.reasoning_tokens += turn.reasoning_tokens;
+        let turn_total = turn.prompt_tokens + turn.completion_tokens;
+        self.total_tokens += turn_total;
+        self.turn_count += 1;
+        self.ttft_ms = turn.ttft_ms;
+        self.total_duration_ms += turn.duration_ms;
+        self.turn_token_history.push(turn_total);
+
+        *self.model_breakdown.entry(turn.model.clone()).or_insert(0) += turn_total;
+
+        // Accurate model-specific NVIDIA NIM pricing
+        let (input_rate, output_rate) = nim_model_pricing(&turn.model);
+        let cost = (turn.prompt_tokens as f64 * input_rate)
+            + (turn.completion_tokens as f64 * output_rate);
+        self.estimated_cost_usd += cost;
+    }
+
+    /// Positional wrapper delegating to `record_turn_metrics`.
     pub fn record_turn(
         &mut self,
         model: &str,
@@ -46,22 +79,14 @@ impl SessionTokenMetrics {
         ttft_ms: u64,
         duration_ms: u64,
     ) {
-        self.prompt_tokens += prompt;
-        self.completion_tokens += completion;
-        self.reasoning_tokens += reasoning;
-        let turn_total = prompt + completion;
-        self.total_tokens += turn_total;
-        self.turn_count += 1;
-        self.ttft_ms = ttft_ms;
-        self.total_duration_ms += duration_ms;
-        self.turn_token_history.push(turn_total);
-
-        *self.model_breakdown.entry(model.to_string()).or_insert(0) += turn_total;
-
-        // Accurate model-specific NVIDIA NIM pricing
-        let (input_rate, output_rate) = nim_model_pricing(model);
-        let cost = (prompt as f64 * input_rate) + (completion as f64 * output_rate);
-        self.estimated_cost_usd += cost;
+        self.record_turn_metrics(TurnMetrics {
+            model: model.to_string(),
+            prompt_tokens: prompt,
+            completion_tokens: completion,
+            reasoning_tokens: reasoning,
+            ttft_ms,
+            duration_ms,
+        });
     }
 }
 
@@ -76,5 +101,19 @@ mod tests {
         assert_eq!(m.total_tokens, 1500);
         assert_eq!(m.reasoning_tokens, 300);
         assert!(m.estimated_cost_usd > 0.0);
+
+        // Also test typed struct API
+        let mut m2 = SessionTokenMetrics::default();
+        m2.record_turn_metrics(TurnMetrics {
+            model: "deepseek-ai/deepseek-r1".to_string(),
+            prompt_tokens: 1000,
+            completion_tokens: 500,
+            reasoning_tokens: 300,
+            ttft_ms: 450,
+            duration_ms: 1200,
+        });
+        assert_eq!(m.total_tokens, m2.total_tokens);
+        assert_eq!(m.reasoning_tokens, m2.reasoning_tokens);
+        assert_eq!(m.estimated_cost_usd, m2.estimated_cost_usd);
     }
 }
