@@ -307,9 +307,6 @@ mod tests {
         }
         let dir = tempdir().unwrap();
 
-        let rules = build_landlock_rules(&m31a_core::SandboxPolicy::WorkspaceWrite, dir.path())
-            .expect("ruleset for supported kernel");
-
         // Write INSIDE the workspace must succeed.
         let inside_marker = dir.path().join("inside.txt");
         let mut inside = Command::new("bash");
@@ -317,8 +314,11 @@ mod tests {
             .arg("-c")
             .arg("echo ok > inside.txt")
             .current_dir(dir.path());
+        let inside_rules =
+            build_landlock_rules(&m31a_core::SandboxPolicy::WorkspaceWrite, dir.path())
+                .expect("ruleset for supported kernel");
         unsafe {
-            inside.pre_exec(pre_exec_hook(build_test_ruleset(&rules)));
+            inside.pre_exec(pre_exec_hook(inside_rules));
         }
         let out = inside.output().unwrap();
         assert!(
@@ -339,8 +339,11 @@ mod tests {
             .arg("-c")
             .arg(format!("echo pwned > {outside}"))
             .current_dir(dir.path());
+        let outside_rules =
+            build_landlock_rules(&m31a_core::SandboxPolicy::WorkspaceWrite, dir.path())
+                .expect("ruleset for supported kernel");
         unsafe {
-            outside_cmd.pre_exec(pre_exec_hook(build_test_ruleset(&rules)));
+            outside_cmd.pre_exec(pre_exec_hook(outside_rules));
         }
         let out = outside_cmd.output().unwrap();
         let _ = std::fs::remove_file(&outside); // best-effort cleanup if somehow created
@@ -365,27 +368,11 @@ mod tests {
             .arg("echo nope > denied.txt")
             .current_dir(dir.path());
         unsafe {
-            cmd.pre_exec(pre_exec_hook(build_test_ruleset(&rules)));
+            cmd.pre_exec(pre_exec_hook(rules));
         }
         let out = cmd.output().unwrap();
         assert!(!out.status.success(), "ReadOnly policy allowed a write");
         assert!(!dir.path().join("denied.txt").exists());
-    }
-
-    /// Test helper: re-opens rule fds via a fresh clone (fds in `rules` were
-    /// opened at build time and remain valid within this process).
-    fn build_test_ruleset(rules: &LandlockRuleset) -> LandlockRuleset {
-        LandlockRuleset {
-            handled_access_fs: rules.handled_access_fs,
-            rules: rules
-                .rules
-                .iter()
-                .map(|r| PathBeneathRule {
-                    parent_fd: r.parent_fd,
-                    allowed_access: r.allowed_access,
-                })
-                .collect(),
-        }
     }
 
     #[test]
