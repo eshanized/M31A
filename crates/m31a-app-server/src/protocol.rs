@@ -64,6 +64,20 @@ pub struct ActiveTurnHandle {
     pub cancel_token: CancellationToken,
 }
 
+#[derive(Debug)]
+pub struct PendingApprovalEntry {
+    pub thread_id: String,
+    pub turn_id: String,
+    pub response_tx: oneshot::Sender<m31a_elicitation::ApprovalDecision>,
+}
+
+#[derive(Debug)]
+pub struct PendingQuestionEntry {
+    pub thread_id: String,
+    pub turn_id: String,
+    pub response_tx: oneshot::Sender<Vec<String>>,
+}
+
 #[derive(Clone)]
 pub struct AppServer {
     config: Arc<Config>,
@@ -78,9 +92,8 @@ pub struct AppServer {
     pub lifecycle: Arc<crate::daemon_lifecycle::DaemonLifecycleCoordinator>,
     pub auth_manager: Arc<crate::auth::AuthManager>,
     pub trust_store: Arc<Mutex<m31a_trust::TrustStore>>,
-    pub pending_approvals:
-        Arc<Mutex<HashMap<String, oneshot::Sender<m31a_elicitation::ApprovalDecision>>>>,
-    pub pending_questions: Arc<Mutex<HashMap<String, oneshot::Sender<Vec<String>>>>>,
+    pub pending_approvals: Arc<Mutex<HashMap<String, PendingApprovalEntry>>>,
+    pub pending_questions: Arc<Mutex<HashMap<String, PendingQuestionEntry>>>,
     pub active_turns: Arc<Mutex<HashMap<String, ActiveTurnHandle>>>,
 }
 
@@ -399,6 +412,7 @@ impl AppServer {
             None
         };
         engine.hooks = Some(self.hooks.clone());
+        engine.dangerously_bypass = self.config.dangerously_bypass;
 
         let snapshot = m31a_core::prompts::PromptRuntimeSnapshot::new(
             &cwd,
@@ -480,7 +494,7 @@ impl AppServer {
     /// Maps an engine event onto the app-server notification surfaces.
     /// Approval requests and user-input questions are registered into pending
     /// maps so clients can respond interactively.
-    fn bridge_engine_event(&self, turn_id: &str, thread_id: &str, ev: EngineEvent) {
+    pub fn bridge_engine_event(&self, turn_id: &str, thread_id: &str, ev: EngineEvent) {
         let (method, params): (&str, serde_json::Value) = match ev {
             EngineEvent::ContentChunk(chunk) => (
                 "notification/turn_content_chunk",
@@ -515,10 +529,14 @@ impl AppServer {
                 response_tx,
             } => {
                 let approval_id = format!("appr_{}", uuid::Uuid::new_v4().simple());
-                self.pending_approvals
-                    .lock()
-                    .unwrap()
-                    .insert(approval_id.clone(), response_tx);
+                self.pending_approvals.lock().unwrap().insert(
+                    approval_id.clone(),
+                    PendingApprovalEntry {
+                        thread_id: thread_id.to_string(),
+                        turn_id: turn_id.to_string(),
+                        response_tx,
+                    },
+                );
                 let params = serde_json::json!({
                     "approval_id": approval_id,
                     "turn_id": turn_id,
@@ -544,10 +562,14 @@ impl AppServer {
                 response_tx,
             } => {
                 let question_id = format!("quest_{}", uuid::Uuid::new_v4().simple());
-                self.pending_questions
-                    .lock()
-                    .unwrap()
-                    .insert(question_id.clone(), response_tx);
+                self.pending_questions.lock().unwrap().insert(
+                    question_id.clone(),
+                    PendingQuestionEntry {
+                        thread_id: thread_id.to_string(),
+                        turn_id: turn_id.to_string(),
+                        response_tx,
+                    },
+                );
                 let params = serde_json::json!({
                     "question_id": question_id,
                     "turn_id": turn_id,
@@ -1212,15 +1234,31 @@ impl AppServer {
                 };
 
                 let mut pending = self.pending_approvals.lock().unwrap();
-                if let Some(tx) = pending.remove(approval_id) {
-                    let _ = tx.send(decision);
-                    Ok(serde_json::json!({
-                        "approval_id": approval_id,
-                        "resolved": true,
-                    }))
-                } else {
-                    bail!("Approval request '{approval_id}' not found or already resolved");
+                let entry = pending.get(approval_id).ok_or_else(|| {
+                    anyhow!("Approval request '{approval_id}' not found or already resolved")
+                })?;
+
+                if let Some(param_tid) = params.get("thread_id").and_then(|v| v.as_str())
+                    && param_tid != entry.thread_id
+                {
+                    bail!(
+                        "Conflicting thread identifier: expected '{}', got '{}'",
+                        entry.thread_id,
+                        param_tid
+                    );
                 }
+
+                if let Some(ident) = identity {
+                    self.auth_manager
+                        .require_thread_access(&entry.thread_id, ident)?;
+                }
+
+                let entry = pending.remove(approval_id).unwrap();
+                let _ = entry.response_tx.send(decision);
+                Ok(serde_json::json!({
+                    "approval_id": approval_id,
+                    "resolved": true,
+                }))
             }
 
             "turn/deny" => {
@@ -1235,18 +1273,36 @@ impl AppServer {
                     .unwrap_or("Denied by client");
 
                 let mut pending = self.pending_approvals.lock().unwrap();
-                if let Some(tx) = pending.remove(approval_id) {
-                    let _ = tx.send(m31a_elicitation::ApprovalDecision::Deny {
+                let entry = pending.get(approval_id).ok_or_else(|| {
+                    anyhow!("Approval request '{approval_id}' not found or already resolved")
+                })?;
+
+                if let Some(param_tid) = params.get("thread_id").and_then(|v| v.as_str())
+                    && param_tid != entry.thread_id
+                {
+                    bail!(
+                        "Conflicting thread identifier: expected '{}', got '{}'",
+                        entry.thread_id,
+                        param_tid
+                    );
+                }
+
+                if let Some(ident) = identity {
+                    self.auth_manager
+                        .require_thread_access(&entry.thread_id, ident)?;
+                }
+
+                let entry = pending.remove(approval_id).unwrap();
+                let _ = entry
+                    .response_tx
+                    .send(m31a_elicitation::ApprovalDecision::Deny {
                         reason: reason.to_string(),
                     });
-                    Ok(serde_json::json!({
-                        "approval_id": approval_id,
-                        "resolved": true,
-                        "denied": true,
-                    }))
-                } else {
-                    bail!("Approval request '{approval_id}' not found or already resolved");
-                }
+                Ok(serde_json::json!({
+                    "approval_id": approval_id,
+                    "resolved": true,
+                    "denied": true,
+                }))
             }
 
             "turn/answer" | "question/respond" => {
@@ -1267,16 +1323,32 @@ impl AppServer {
                     };
 
                 let mut pending = self.pending_questions.lock().unwrap();
-                if let Some(tx) = pending.remove(question_id) {
-                    let _ = tx.send(answers.clone());
-                    Ok(serde_json::json!({
-                        "question_id": question_id,
-                        "resolved": true,
-                        "answers": answers,
-                    }))
-                } else {
-                    bail!("Question request '{question_id}' not found or already resolved");
+                let entry = pending.get(question_id).ok_or_else(|| {
+                    anyhow!("Question request '{question_id}' not found or already resolved")
+                })?;
+
+                if let Some(param_tid) = params.get("thread_id").and_then(|v| v.as_str())
+                    && param_tid != entry.thread_id
+                {
+                    bail!(
+                        "Conflicting thread identifier: expected '{}', got '{}'",
+                        entry.thread_id,
+                        param_tid
+                    );
                 }
+
+                if let Some(ident) = identity {
+                    self.auth_manager
+                        .require_thread_access(&entry.thread_id, ident)?;
+                }
+
+                let entry = pending.remove(question_id).unwrap();
+                let _ = entry.response_tx.send(answers.clone());
+                Ok(serde_json::json!({
+                    "question_id": question_id,
+                    "resolved": true,
+                    "answers": answers,
+                }))
             }
 
             "turn/steer" => {
@@ -1288,59 +1360,107 @@ impl AppServer {
                 let turn_id = params.get("turn_id").and_then(|v| v.as_str());
                 let thread_id = params.get("thread_id").and_then(|v| v.as_str());
 
+                if turn_id.is_none() && thread_id.is_none() {
+                    bail!(
+                        "Missing target resource identifier: either 'turn_id' or 'thread_id' must be provided"
+                    );
+                }
+
                 let active = self.active_turns.lock().unwrap();
                 let handle = if let Some(tid) = turn_id {
-                    active.get(tid)
+                    let h = active
+                        .get(tid)
+                        .ok_or_else(|| anyhow!("Active turn '{tid}' not found"))?;
+                    if let Some(thid) = thread_id
+                        && h.thread_id != thid
+                    {
+                        bail!(
+                            "Conflicting identifiers: turn '{tid}' belongs to thread '{}', got '{thid}'",
+                            h.thread_id
+                        );
+                    }
+                    h
                 } else if let Some(thid) = thread_id {
-                    active.values().find(|h| h.thread_id == thid)
+                    active
+                        .values()
+                        .find(|h| h.thread_id == thid)
+                        .ok_or_else(|| anyhow!("No active turn running for thread '{thid}'"))?
                 } else {
-                    active.values().next()
+                    bail!("Missing target identifier");
                 };
 
-                if let Some(h) = handle {
-                    h.steer_tx
-                        .send(message.to_string())
-                        .map_err(|e| anyhow!("Failed to send steer message: {e}"))?;
-                    Ok(serde_json::json!({
-                        "steered": true,
-                        "turn_id": h.turn_id,
-                        "thread_id": h.thread_id,
-                    }))
-                } else {
-                    bail!("No active turn running to steer");
+                if let Some(ident) = identity {
+                    self.auth_manager
+                        .require_thread_access(&handle.thread_id, ident)?;
                 }
+
+                handle
+                    .steer_tx
+                    .send(message.to_string())
+                    .map_err(|e| anyhow!("Failed to send steer message: {e}"))?;
+                Ok(serde_json::json!({
+                    "steered": true,
+                    "turn_id": handle.turn_id,
+                    "thread_id": handle.thread_id,
+                }))
             }
 
             "turn/interrupt" => {
                 let turn_id = params.get("turn_id").and_then(|v| v.as_str());
                 let thread_id = params.get("thread_id").and_then(|v| v.as_str());
 
+                if turn_id.is_none() && thread_id.is_none() {
+                    bail!(
+                        "Missing target resource identifier: either 'turn_id' or 'thread_id' must be provided"
+                    );
+                }
+
                 let active = self.active_turns.lock().unwrap();
                 let handle = if let Some(tid) = turn_id {
-                    active.get(tid)
+                    let h = active
+                        .get(tid)
+                        .ok_or_else(|| anyhow!("Active turn '{tid}' not found"))?;
+                    if let Some(thid) = thread_id
+                        && h.thread_id != thid
+                    {
+                        bail!(
+                            "Conflicting identifiers: turn '{tid}' belongs to thread '{}', got '{thid}'",
+                            h.thread_id
+                        );
+                    }
+                    h
                 } else if let Some(thid) = thread_id {
-                    active.values().find(|h| h.thread_id == thid)
+                    active
+                        .values()
+                        .find(|h| h.thread_id == thid)
+                        .ok_or_else(|| anyhow!("No active turn running for thread '{thid}'"))?
                 } else {
-                    active.values().next()
+                    bail!("Missing target identifier");
                 };
 
-                if let Some(h) = handle {
-                    h.cancel_token.cancel();
-                    self.notify(
-                        "notification/turn_interrupted",
-                        Some(serde_json::json!({
-                            "turn_id": h.turn_id,
-                            "thread_id": h.thread_id,
-                        })),
-                    );
-                    Ok(serde_json::json!({
-                        "interrupted": true,
-                        "turn_id": h.turn_id,
-                        "thread_id": h.thread_id,
-                    }))
-                } else {
-                    bail!("No active turn running to interrupt");
+                if let Some(ident) = identity {
+                    self.auth_manager
+                        .require_thread_access(&handle.thread_id, ident)?;
                 }
+
+                handle.cancel_token.cancel();
+                let cancelled_turn_id = handle.turn_id.clone();
+                let cancelled_thread_id = handle.thread_id.clone();
+                drop(active);
+
+                self.notify(
+                    "notification/turn_interrupted",
+                    Some(serde_json::json!({
+                        "turn_id": cancelled_turn_id,
+                        "thread_id": cancelled_thread_id,
+                    })),
+                );
+
+                Ok(serde_json::json!({
+                    "interrupted": true,
+                    "turn_id": cancelled_turn_id,
+                    "thread_id": cancelled_thread_id,
+                }))
             }
 
             "checkpoint/create" => {
@@ -1408,6 +1528,25 @@ impl AppServer {
                     .get("revert_conversation")
                     .and_then(|v| v.as_bool())
                     .unwrap_or(true);
+
+                let checkpoint = self
+                    .storage
+                    .get_checkpoint(checkpoint_id)?
+                    .ok_or_else(|| anyhow!("Checkpoint '{checkpoint_id}' not found"))?;
+
+                if let Some(param_tid) = params.get("thread_id").and_then(|v| v.as_str())
+                    && param_tid != checkpoint.thread_id
+                {
+                    bail!(
+                        "Conflicting thread identifier: checkpoint belongs to '{}', got '{param_tid}'",
+                        checkpoint.thread_id
+                    );
+                }
+
+                if let Some(ident) = identity {
+                    self.auth_manager
+                        .require_thread_access(&checkpoint.thread_id, ident)?;
+                }
 
                 let record = self
                     .storage
