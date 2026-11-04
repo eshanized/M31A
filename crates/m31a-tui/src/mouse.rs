@@ -15,6 +15,7 @@
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::{Constraint, Direction, Layout, Position, Rect};
 use ratatui::widgets::Block;
+use std::sync::Arc;
 
 use crate::app::App;
 use crate::bottom_pane::BottomPaneMode;
@@ -681,6 +682,13 @@ fn handle_left_click_down(app: &mut App, col: u16, row: u16, screen_area: Rect) 
                         app.config
                             .features
                             .insert(key.as_str().to_string(), *enabled);
+                        if let Some(reg) = Arc::get_mut(&mut app.features_registry) {
+                            reg.set_enabled(*key, *enabled);
+                        } else {
+                            let mut new_reg = (*app.features_registry).clone();
+                            new_reg.set_enabled(*key, *enabled);
+                            app.features_registry = Arc::new(new_reg);
+                        }
                         let _ = app.config.save();
                     }
                 }
