@@ -7,7 +7,7 @@ use m31a_core::types::{ChatMessage, Role, TokenUsage, ToolCall};
 use m31a_core::{
     ApprovalPolicy, CompactTokenBudget, ContextCompactor, SandboxPolicy, approx_token_count,
 };
-use m31a_execpolicy::{Decision, ExecPolicy};
+use m31a_execpolicy::ExecPolicy;
 use m31a_guardian::GuardianReviewer;
 use m31a_hooks::{HookDisposition, HookEvent};
 use m31a_provider::{HybridModelRouter, ProviderClient, StreamCallback, classify_task_tier};
@@ -98,7 +98,7 @@ fn is_mutating_shell_command(cmd_args: &str) -> bool {
 
 /// Guardian reviews every sequential dispatch only when the user opted into
 /// automated supervision (`ApproveForMe`) and a reviewer is configured.
-fn guardian_required_for_call(
+pub(crate) fn guardian_required_for_call(
     approval_policy: &ApprovalPolicy,
     guardian: &Option<Arc<GuardianReviewer>>,
 ) -> bool {
@@ -229,6 +229,8 @@ pub struct AgentEngine {
     /// Authoritative runtime-owned system instructions (P0-A invariant).
     /// Maintained separately from compactable dialogue to guarantee preservation across compaction.
     pub authoritative_system_prompt: Option<String>,
+    /// Explicitly permits bypassing interactive approval requirements.
+    pub dangerously_bypass: bool,
 }
 
 impl AgentEngine {
@@ -269,6 +271,29 @@ impl AgentEngine {
             auto_checkpoint: true,
             telemetry: None,
             authoritative_system_prompt: None,
+            dangerously_bypass: false,
+        }
+    }
+
+    /// Sets whether interactive approval requirements should be dangerously bypassed.
+    pub fn with_dangerously_bypass(mut self, bypass: bool) -> Self {
+        self.dangerously_bypass = bypass;
+        self
+    }
+
+    /// Creates an authoritative tool execution dispatcher bound to this engine's security policies.
+    pub fn tool_dispatcher(&self) -> crate::dispatcher::AuthoritativeToolDispatcher {
+        crate::dispatcher::AuthoritativeToolDispatcher {
+            tools: self.tools.clone(),
+            exec_policy: self.exec_policy.clone(),
+            approval_policy: self.approval_policy,
+            dangerously_bypass: self.dangerously_bypass,
+            sandbox_policy: self.sandbox_policy,
+            collaboration_mode: self.collaboration_mode,
+            guardian: self.guardian.clone(),
+            hooks: self.hooks.clone(),
+            session_allowed_files: self.session_allowed_files.clone(),
+            cwd: self.cwd.clone(),
         }
     }
 
@@ -849,6 +874,32 @@ impl AgentEngine {
             )
             .ok();
 
+        let heartbeat_handle = if let Some(claim) = &active_claim {
+            let claim_id = claim.claim_id.clone();
+            let storage = self.storage.clone();
+            let ct = cancel_token.clone();
+            Some(tokio::spawn(async move {
+                let mut ticker = tokio::time::interval(tokio::time::Duration::from_secs(15));
+                loop {
+                    tokio::select! {
+                        _ = ct.cancelled() => break,
+                        _ = ticker.tick() => {
+                            if storage.heartbeat_claim(&claim_id).is_err() {
+                                break;
+                            }
+                        }
+                    }
+                }
+            }))
+        } else {
+            None
+        };
+
+        let mut turn_failed = false;
+        let mut current_turn_id = format!("{}_{}", session_id, 1);
+        let mut current_turn_idx = 1;
+        let dispatcher = self.tool_dispatcher();
+
         let session_start_time = std::time::Instant::now();
         if let Some(telem) = &self.telemetry {
             telem.session_start(
@@ -1061,6 +1112,8 @@ impl AgentEngine {
             }
 
             let turn_id = uuid::Uuid::new_v4().to_string();
+            current_turn_id = turn_id.clone();
+            current_turn_idx = turn;
             if self.persist_items {
                 let _ = self.storage.save_turn(&turn_id, session_id, turn, "active");
             }
@@ -1206,75 +1259,29 @@ impl AgentEngine {
                                 .all(|c| is_parallel_safe_tool(&c.function.name));
 
                         if all_readonly && !cancel_token.is_cancelled() {
-                            // Concurrent parallel execution of independent read-only tools
+                            // Concurrent parallel execution of independent read-only tools through authoritative dispatcher
                             let mut join_handles = Vec::new();
                             for call in tool_calls {
                                 let call_id = call.id.clone();
                                 let fn_name = call.function.name.clone();
                                 let fn_args = call.function.arguments.clone();
-
-                                // Guardian static review (ApproveForMe): zero-latency local
-                                // heuristics only — parallel read-only calls skip the LLM
-                                // reviewer to preserve concurrency benefits.
-                                if guardian_required_for_call(&self.approval_policy, &self.guardian)
-                                {
-                                    let guardian = self.guardian.as_ref().unwrap();
-                                    let args_value =
-                                        serde_json::from_str::<serde_json::Value>(&fn_args)
-                                            .unwrap_or(serde_json::Value::String(fn_args.clone()));
-                                    let action = m31a_guardian::PlannedAction::new(
-                                        fn_name.clone(),
-                                        args_value,
-                                        m31a_guardian::PlannedActionKind::Command,
-                                    );
-                                    if let Some(a) = guardian.evaluate_action_locally(&action)
-                                        && !a.approved
-                                    {
-                                        let denial = format!(
-                                            "Tool execution blocked by safety reviewer: {}",
-                                            a.rationale
-                                        );
-                                        let _ = event_tx.send(EngineEvent::ToolCallStarted {
-                                            id: call_id.clone(),
-                                            name: fn_name.clone(),
-                                            args: fn_args.clone(),
-                                        });
-                                        let _ = event_tx.send(EngineEvent::ToolCallFinished {
-                                            id: call_id.clone(),
-                                            output: denial.clone(),
-                                            success: false,
-                                        });
-                                        let _ = event_tx.send(EngineEvent::GuardianDenied {
-                                            rationale: a.rationale.clone(),
-                                        });
-                                        if self.persist_items {
-                                            let _ = self.storage.save_item(
-                                                &uuid::Uuid::new_v4().to_string(),
-                                                session_id,
-                                                Some(&turn_id),
-                                                "guardian_denial",
-                                                &denial,
-                                            );
-                                        }
-                                        history.push(ChatMessage::tool_response(call_id, denial));
-                                        continue;
-                                    }
-                                }
-
-                                let tools = self.tools.clone();
-                                let cwd = self.cwd.clone();
-                                let sandbox = self.sandbox_policy;
+                                let disp = dispatcher.clone();
                                 let tx = event_tx.clone();
-
-                                let _ = tx.send(EngineEvent::ToolCallStarted {
-                                    id: call_id.clone(),
-                                    name: fn_name.clone(),
-                                    args: fn_args.clone(),
-                                });
+                                let sess_id = session_id.to_string();
+                                let tid = turn_id.clone();
+                                let ct = cancel_token.clone();
 
                                 join_handles.push(tokio::spawn(async move {
-                                    let res =
-                                        tools.execute(&fn_name, &fn_args, &cwd, sandbox).await;
+                                    let ctx = crate::dispatcher::DispatchContext {
+                                        session_id: &sess_id,
+                                        turn_id: &tid,
+                                        call_id: &call_id,
+                                        cancel_token: &ct,
+                                        event_tx: &tx,
+                                        turn_client: None,
+                                        task_context: "",
+                                    };
+                                    let res = disp.dispatch(&ctx, &fn_name, &fn_args).await;
                                     (call_id, fn_name, fn_args, res)
                                 }));
                             }
@@ -1306,7 +1313,7 @@ impl AgentEngine {
 
                                 let call_id = call.id.clone();
                                 let fn_name = call.function.name.clone();
-                                let mut fn_args = call.function.arguments.clone();
+                                let fn_args = call.function.arguments.clone();
 
                                 // Interactive question choice elicitation
                                 if fn_name == "request_user_input"
@@ -1391,12 +1398,21 @@ impl AgentEngine {
                                             response_tx: q_tx,
                                         });
 
-                                        let (user_replied, answer) = match q_rx.await {
-                                            Ok(ans) if !ans.is_empty() => (true, ans.join(", ")),
-                                            _ => (
-                                                false,
-                                                "[no user reply — incomplete evidence rather than a partial grant] Proceed with default recommendation.".to_string(),
-                                            ),
+                                        let (user_replied, answer) = tokio::select! {
+                                            biased;
+                                            _ = cancel_token.cancelled() => {
+                                                let _ = event_tx.send(EngineEvent::TurnFailed("Turn cancelled".to_string()));
+                                                break;
+                                            }
+                                            ans_res = q_rx => {
+                                                match ans_res {
+                                                    Ok(ans) if !ans.is_empty() => (true, ans.join(", ")),
+                                                    _ => (
+                                                        false,
+                                                        "[no user reply — incomplete evidence rather than a partial grant] Proceed with default recommendation.".to_string(),
+                                                    ),
+                                                }
+                                            }
                                         };
 
                                         // §5.5: verified Q/A persists as a host-owned
@@ -1436,78 +1452,39 @@ impl AgentEngine {
                                     continue;
                                 }
 
-                                // §4.4 PreToolUse hook: may rewrite the tool
-                                // input or block the call before any policy
-                                // evaluation.
-                                if let Some(hooks) = &self.hooks {
-                                    let input_value =
-                                        serde_json::from_str::<serde_json::Value>(&fn_args)
-                                            .unwrap_or(serde_json::Value::Null);
-                                    match hooks
-                                        .dispatch(
-                                            HookEvent::PreToolUse,
-                                            &fn_name,
-                                            serde_json::json!({ "tool": fn_name, "input": input_value }),
-                                        )
-                                        .await
-                                    {
-                                        HookDisposition::Rewrite { input } => {
-                                            fn_args = input;
-                                        }
-                                        HookDisposition::Block(reason) => {
-                                            let _ = event_tx.send(EngineEvent::ToolCallStarted {
-                                                id: call_id.clone(),
-                                                name: fn_name.clone(),
-                                                args: fn_args.clone(),
-                                            });
-                                            let _ = event_tx.send(EngineEvent::ToolCallFinished {
-                                                id: call_id.clone(),
-                                                output: reason.clone(),
-                                                success: false,
-                                            });
-                                            if self.persist_items {
-                                                let _ = self.storage.save_item(
-                                                    &uuid::Uuid::new_v4().to_string(),
-                                                    session_id,
-                                                    Some(&turn_id),
-                                                    "tool_error",
-                                                    &reason,
-                                                );
-                                            }
-                                            history.push(ChatMessage::tool_response(call_id.clone(), reason));
-                                            continue;
-                                        }
-                                        HookDisposition::Allow => {}
-                                    }
-                                }
-
-                                // §2.4: code-mode `exec`/`wait` route through the
-                                // orchestrator instead of the registry — these are
-                                // engine-level tools with cell state, not registry
-                                // tools, so they are intercepted before execpolicy
-                                // (their payload is JS source, not a shell command).
-                                if let Some(code_mode) = self.code_mode.as_ref().filter(|_| {
-                                    fn_name == m31a_code_mode::EXEC_TOOL_NAME
-                                        || fn_name == m31a_code_mode::WAIT_TOOL_NAME
-                                }) {
-                                    let _ = event_tx.send(EngineEvent::ToolCallStarted {
-                                        id: call_id.clone(),
-                                        name: fn_name.clone(),
-                                        args: fn_args.clone(),
-                                    });
-
+                                let res = if (fn_name == m31a_code_mode::EXEC_TOOL_NAME
+                                    || fn_name == m31a_code_mode::WAIT_TOOL_NAME)
+                                    && let Some(code_mode) = self.code_mode.as_ref()
+                                {
                                     let args_value =
                                         serde_json::from_str::<serde_json::Value>(&fn_args)
                                             .unwrap_or(serde_json::Value::Null);
-                                    let res = if fn_name == m31a_code_mode::EXEC_TOOL_NAME {
+                                    if fn_name == m31a_code_mode::EXEC_TOOL_NAME {
                                         match args_value.get("code").and_then(|c| c.as_str()) {
                                             Some(code) => {
+                                                let bridge =
+                                                    crate::dispatcher::CodeModeDispatcherBridge {
+                                                        dispatcher: dispatcher.clone(),
+                                                        session_id: session_id.to_string(),
+                                                        turn_id: turn_id.clone(),
+                                                        cancel_token: cancel_token.clone(),
+                                                        event_tx: event_tx.clone(),
+                                                        turn_client: Some(turn_client.clone()),
+                                                        task_context: last_user_text(&history),
+                                                    };
+                                                let effective_sandbox = if self.collaboration_mode
+                                                    == CollaborationMode::Plan
+                                                {
+                                                    SandboxPolicy::ReadOnly
+                                                } else {
+                                                    self.sandbox_policy
+                                                };
                                                 code_mode
                                                     .execute_batch(
                                                         code,
-                                                        &self.tools,
+                                                        &bridge,
                                                         &self.cwd,
-                                                        self.sandbox_policy,
+                                                        effective_sandbox,
                                                     )
                                                     .await
                                             }
@@ -1533,351 +1510,18 @@ impl AgentEngine {
                                             .unwrap_or(false);
                                         code_mode
                                             .wait_cell(&cell_id, yield_ms, max_tokens, terminate)
-                                    };
-
-                                    self.ingest_tool_result(
-                                        &mut history,
-                                        session_id,
-                                        &turn_id,
-                                        &call_id,
-                                        &fn_name,
-                                        &fn_args,
-                                        res,
-                                        &event_tx,
-                                        &mut heal_iterations_used,
-                                        &mut timeline,
-                                        turn,
-                                        &mut oscillation_detector,
-                                    );
-                                    continue;
-                                }
-
-                                // Policy and Approval check
-                                let mut needs_approval = false;
-                                let mut reason = String::new();
-                                let mut cmd_str = None;
-
-                                if fn_name == "exec_command"
-                                    && let Ok(val) =
-                                        serde_json::from_str::<serde_json::Value>(&fn_args)
-                                    && let Some(cmd) = val.get("command").and_then(|c| c.as_str())
-                                {
-                                    cmd_str = Some(cmd.to_string());
-                                    let decision = self
-                                        .exec_policy
-                                        .read()
-                                        .map(|ep| ep.evaluate(cmd))
-                                        .unwrap_or(Decision::Prompt);
-                                    match decision {
-                                        Decision::Deny => {
-                                            let _ = event_tx.send(EngineEvent::ToolCallStarted {
-                                                id: call_id.clone(),
-                                                name: fn_name.clone(),
-                                                args: fn_args.clone(),
-                                            });
-                                            let denial =
-                                                "Execution hard-denied by security policy."
-                                                    .to_string();
-                                            let _ = event_tx.send(EngineEvent::ToolCallFinished {
-                                                id: call_id.clone(),
-                                                output: denial.clone(),
-                                                success: false,
-                                            });
-                                            history.push(ChatMessage::tool_response(
-                                                call_id.clone(),
-                                                denial,
-                                            ));
-                                            continue;
-                                        }
-                                        Decision::Prompt => {
-                                            needs_approval = true;
-                                            reason = "Command requires interactive confirmation"
-                                                .to_string();
-                                        }
-                                        Decision::Allow => {
-                                            if self.approval_policy == ApprovalPolicy::OnRequest {
-                                                needs_approval = true;
-                                                reason = "Interactive approval required for shell execution".to_string();
-                                            }
-                                        }
                                     }
-                                }
-
-                                // File mutations can be approved per file for the rest of the
-                                // session. Without an explicit session exception every mutating
-                                // call is confirmed individually under OnRequest.
-                                if matches!(fn_name.as_str(), "write_file" | "edit" | "apply_patch")
-                                    && self.approval_policy == ApprovalPolicy::OnRequest
-                                {
-                                    let path = serde_json::from_str::<serde_json::Value>(&fn_args)
-                                        .ok()
-                                        .and_then(|value| {
-                                            value
-                                                .get("path")
-                                                .or_else(|| value.get("file_path"))
-                                                .and_then(|path| path.as_str())
-                                                .map(PathBuf::from)
-                                        });
-                                    if let Some(path) = path {
-                                        let allowed = self
-                                            .session_allowed_files
-                                            .read()
-                                            .map(|allowed| allowed.contains(&path))
-                                            .unwrap_or(false);
-                                        if !allowed {
-                                            needs_approval = true;
-                                            reason = format!(
-                                                "File modification requires interactive confirmation: {}",
-                                                path.display()
-                                            );
-                                        }
-                                    }
-                                }
-
-                                // Guardian automated review (report §2.2): enforced between
-                                // execpolicy evaluation and the interactive approval oneshot.
-                                // Denials short-circuit execution; reviewer errors degrade to a
-                                // warning Notice and normal approval flow (CLI parity).
-                                if guardian_required_for_call(&self.approval_policy, &self.guardian)
-                                {
-                                    let guardian = self.guardian.as_ref().unwrap();
-                                    let task_context = last_user_text(&history);
-                                    match guardian
-                                        .review(&turn_client, &fn_name, &fn_args, &task_context)
-                                        .await
-                                    {
-                                        Ok(assessment) if !assessment.approved => {
-                                            let _ = event_tx.send(EngineEvent::ToolCallStarted {
-                                                id: call_id.clone(),
-                                                name: fn_name.clone(),
-                                                args: fn_args.clone(),
-                                            });
-                                            let denial = format!(
-                                                "Tool execution blocked by safety reviewer: {}",
-                                                assessment.rationale
-                                            );
-                                            let _ = event_tx.send(EngineEvent::ToolCallFinished {
-                                                id: call_id.clone(),
-                                                output: denial.clone(),
-                                                success: false,
-                                            });
-                                            let _ = event_tx.send(EngineEvent::GuardianDenied {
-                                                rationale: assessment.rationale.clone(),
-                                            });
-                                            if self.persist_items {
-                                                let _ = self.storage.save_item(
-                                                    &uuid::Uuid::new_v4().to_string(),
-                                                    session_id,
-                                                    Some(&turn_id),
-                                                    "guardian_denial",
-                                                    &denial,
-                                                );
-                                            }
-                                            history.push(ChatMessage::tool_response(
-                                                call_id.clone(),
-                                                denial,
-                                            ));
-                                            continue;
-                                        }
-                                        Ok(_) => {
-                                            // Guardian approved on the user's behalf — skip the
-                                            // interactive approval oneshot (ApproveForMe semantics).
-                                            needs_approval = false;
-                                        }
-                                        Err(e) => {
-                                            let _ = event_tx.send(EngineEvent::Notice(
-                                                format!("Guardian review failed: {} — continuing with normal approval flow", e),
-                                                true,
-                                            ));
-                                        }
-                                    }
-                                }
-
-                                // §CollaborationModes: Plan Mode enforcement
-                                let plan_violation = if self.collaboration_mode
-                                    == CollaborationMode::Plan
-                                {
-                                    m31a_execpolicy::evaluate_plan_mode(&fn_name, Some(&fn_args))
-                                        .err()
                                 } else {
-                                    None
-                                };
-                                if let Some(violation) = plan_violation {
-                                    let blocked_reason = format!(
-                                        "Tool '{}' is blocked: Agent is in Plan Mode. {violation}. Call 'update_plan' to document proposed execution steps or switch to Default/Code Mode.",
-                                        fn_name
-                                    );
-                                    let _ = event_tx.send(EngineEvent::ToolCallStarted {
-                                        id: call_id.clone(),
-                                        name: fn_name.clone(),
-                                        args: fn_args.clone(),
-                                    });
-                                    let _ = event_tx.send(EngineEvent::ToolCallFinished {
-                                        id: call_id.clone(),
-                                        output: blocked_reason.clone(),
-                                        success: false,
-                                    });
-                                    history.push(ChatMessage::tool_response(
-                                        call_id.clone(),
-                                        blocked_reason,
-                                    ));
-                                    continue;
-                                }
-
-                                if needs_approval {
-                                    let (resp_tx, resp_rx) = oneshot::channel();
-                                    let pending = PendingApproval {
-                                        tool_call: call.clone(),
-                                        reason,
-                                        command: cmd_str,
+                                    let ctx = crate::dispatcher::DispatchContext {
+                                        session_id,
+                                        turn_id: &turn_id,
+                                        call_id: &call_id,
+                                        cancel_token: &cancel_token,
+                                        event_tx: &event_tx,
+                                        turn_client: Some(&turn_client),
+                                        task_context: &last_user_text(&history),
                                     };
-
-                                    let _ = event_tx.send(EngineEvent::ApprovalRequested {
-                                        approval: pending,
-                                        response_tx: resp_tx,
-                                    });
-
-                                    match resp_rx.await {
-                                        Ok(m31a_elicitation::ApprovalDecision::AllowOnce) => {
-                                            // Approved for this single invocation
-                                        }
-                                        Ok(m31a_elicitation::ApprovalDecision::AllowFile {
-                                            path,
-                                        }) => {
-                                            // Session-wide exception for this exact file.
-                                            if let Ok(mut allowed) =
-                                                self.session_allowed_files.write()
-                                            {
-                                                allowed.insert(PathBuf::from(path));
-                                            }
-                                        }
-                                        Ok(
-                                            m31a_elicitation::ApprovalDecision::AlwaysAllowPattern(
-                                                pattern,
-                                            ),
-                                        ) => {
-                                            let prog = pattern
-                                                .split_whitespace()
-                                                .next()
-                                                .unwrap_or(&pattern)
-                                                .to_string();
-                                            if let Ok(mut ep) = self.exec_policy.write() {
-                                                ep.add_prefix_rule(m31a_execpolicy::PrefixRule {
-                                                    program: prog,
-                                                    rest: Vec::new(),
-                                                    decision: m31a_execpolicy::Decision::Allow,
-                                                    justification: Some(
-                                                        "Interactively allowed by user pattern"
-                                                            .to_string(),
-                                                    ),
-                                                });
-                                            }
-                                        }
-                                        Ok(m31a_elicitation::ApprovalDecision::EditCommand {
-                                            new_command,
-                                        }) => {
-                                            // Interactive command modification: allows user edits before executing shell actions
-                                            if let Ok(mut parsed) =
-                                                serde_json::from_str::<serde_json::Value>(&fn_args)
-                                                && parsed.get("command").is_some()
-                                            {
-                                                parsed["command"] = serde_json::json!(new_command);
-                                                if let Ok(updated) = serde_json::to_string(&parsed)
-                                                {
-                                                    fn_args = updated;
-                                                }
-                                            }
-                                        }
-                                        Ok(m31a_elicitation::ApprovalDecision::Deny { reason }) => {
-                                            let _ = event_tx.send(EngineEvent::ToolCallStarted {
-                                                id: call_id.clone(),
-                                                name: fn_name.clone(),
-                                                args: fn_args.clone(),
-                                            });
-                                            // Interactive feedback on denial: guides model recovery with user clarification
-                                            let rejection_msg = if reason.trim().is_empty()
-                                                || reason == "Operation denied by user."
-                                                || reason == "Action rejected by user."
-                                            {
-                                                "Action rejected by user.".to_string()
-                                            } else {
-                                                format!(
-                                                    "Action rejected by user. User feedback/guidance: {}",
-                                                    reason
-                                                )
-                                            };
-                                            let _ = event_tx.send(EngineEvent::ToolCallFinished {
-                                                id: call_id.clone(),
-                                                output: rejection_msg.clone(),
-                                                success: false,
-                                            });
-                                            history.push(ChatMessage::tool_response(
-                                                call_id.clone(),
-                                                rejection_msg,
-                                            ));
-                                            continue;
-                                        }
-                                        Err(_) => {
-                                            let _ = event_tx.send(EngineEvent::ToolCallStarted {
-                                                id: call_id.clone(),
-                                                name: fn_name.clone(),
-                                                args: fn_args.clone(),
-                                            });
-                                            let rejection_msg =
-                                                "Action rejected by user (approval dismissed)."
-                                                    .to_string();
-                                            let _ = event_tx.send(EngineEvent::ToolCallFinished {
-                                                id: call_id.clone(),
-                                                output: rejection_msg.clone(),
-                                                success: false,
-                                            });
-                                            history.push(ChatMessage::tool_response(
-                                                call_id.clone(),
-                                                rejection_msg,
-                                            ));
-                                            continue;
-                                        }
-                                    }
-                                }
-
-                                // Execute tool
-                                let _ = event_tx.send(EngineEvent::ToolCallStarted {
-                                    id: call_id.clone(),
-                                    name: fn_name.clone(),
-                                    args: fn_args.clone(),
-                                });
-
-                                let effective_sandbox =
-                                    if self.collaboration_mode == CollaborationMode::Plan {
-                                        SandboxPolicy::ReadOnly
-                                    } else {
-                                        self.sandbox_policy
-                                    };
-                                let res = self
-                                    .tools
-                                    .execute(&fn_name, &fn_args, &self.cwd, effective_sandbox)
-                                    .await;
-                                // §4.4 PostToolUse hook gates result acceptance
-                                // (sequential path; the parallel allowlist skips
-                                // hooks by design).
-                                let res = match (res, &self.hooks) {
-                                    (Ok(out), Some(hooks)) => {
-                                        let decision = hooks
-                                            .dispatch(
-                                                HookEvent::PostToolUse,
-                                                &fn_name,
-                                                serde_json::json!({ "tool": fn_name, "result": out }),
-                                            )
-                                            .await;
-                                        match decision {
-                                            HookDisposition::Block(reason) => Err(anyhow::anyhow!(
-                                                "Result rejected by hook: {}",
-                                                reason
-                                            )),
-                                            _ => Ok(out),
-                                        }
-                                    }
-                                    (other, _) => other,
+                                    dispatcher.dispatch(&ctx, &fn_name, &fn_args).await
                                 };
                                 self.ingest_tool_result(
                                     &mut history,
@@ -1996,7 +1640,14 @@ impl AgentEngine {
                                 ),
                                 true,
                             ));
-                            tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
+                            tokio::select! {
+                                biased;
+                                _ = cancel_token.cancelled() => {
+                                    let _ = event_tx.send(EngineEvent::TurnFailed("Turn cancelled".to_string()));
+                                    break;
+                                }
+                                _ = tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)) => {}
+                            }
                             stream_attempt += 1;
                             continue;
                         }
@@ -2024,6 +1675,7 @@ impl AgentEngine {
                                 ));
                                 continue;
                             }
+                            turn_failed = true;
                             let _ = event_tx.send(EngineEvent::TurnFailed(err.to_string()));
                             break;
                         }
@@ -2057,15 +1709,22 @@ impl AgentEngine {
                                         true,
                                     ));
                                     turn_client = self.client.with_model(&fallback_cfg.model_id);
-                                    tokio::time::sleep(tokio::time::Duration::from_millis(
-                                        backoff_ms as u64,
-                                    ))
-                                    .await;
+                                    tokio::select! {
+                                        biased;
+                                        _ = cancel_token.cancelled() => {
+                                            let _ = event_tx.send(EngineEvent::TurnFailed("Turn cancelled".to_string()));
+                                            break;
+                                        }
+                                        _ = tokio::time::sleep(tokio::time::Duration::from_millis(
+                                            backoff_ms as u64,
+                                        )) => {}
+                                    }
                                     stream_attempt += 1;
                                     continue;
                                 }
                             }
 
+                            turn_failed = true;
                             let _ = event_tx.send(EngineEvent::TurnFailed(err.to_string()));
                             break;
                         }
@@ -2098,15 +1757,26 @@ impl AgentEngine {
             });
         }
 
+        if let Some(h) = heartbeat_handle {
+            h.abort();
+        }
+
+        let terminal_status = if cancel_token.is_cancelled() {
+            "aborted"
+        } else if turn_failed {
+            "crashed"
+        } else {
+            "completed"
+        };
+
         if let Some(claim) = &active_claim {
-            let status = if cancel_token.is_cancelled() {
-                "aborted"
-            } else {
-                "completed"
-            };
-            let _ = self
-                .storage
-                .update_execution_claim_status(&claim.claim_id, status);
+            let _ = self.storage.finalize_turn_and_claim(
+                session_id,
+                &current_turn_id,
+                current_turn_idx,
+                &claim.claim_id,
+                terminal_status,
+            );
         }
 
         Ok(())
