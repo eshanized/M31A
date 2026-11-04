@@ -134,6 +134,47 @@ impl Drop for MutationGuard {
     }
 }
 
+/// Recursively copies source files into an isolated directory for mutation testing,
+/// omitting build caches, version control directories, and dependencies.
+fn copy_dir_filtered(src: &Path, dst: &Path) -> Result<()> {
+    if src.is_file() {
+        if let Some(file_name) = src.file_name() {
+            fs::create_dir_all(dst)?;
+            let _ = fs::copy(src, dst.join(file_name));
+        }
+        return Ok(());
+    }
+    if !dst.exists() {
+        fs::create_dir_all(dst)?;
+    }
+
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        let file_name = entry.file_name();
+        let name_str = file_name.to_string_lossy();
+
+        if name_str == "target"
+            || name_str == ".git"
+            || name_str == "node_modules"
+            || name_str == ".cargo"
+            || name_str.starts_with(".memories")
+        {
+            continue;
+        }
+
+        let src_path = entry.path();
+        let dst_path = dst.join(&file_name);
+
+        if file_type.is_dir() {
+            copy_dir_filtered(&src_path, &dst_path)?;
+        } else if file_type.is_file() {
+            let _ = fs::copy(&src_path, &dst_path);
+        }
+    }
+    Ok(())
+}
+
 pub struct TestIntegrityAuditor;
 
 impl TestIntegrityAuditor {
@@ -543,6 +584,12 @@ impl TestIntegrityAuditor {
             || text.contains("could not compile")
             || text.contains("SyntaxError")
             || text.contains("compilation error")
+            || text.contains("Compilation error")
+            || text.contains("error: aborting due to")
+            || text.contains("IndentationError")
+            || text.contains("build failed")
+            || text.contains("Build failed")
+            || text.contains("error: failed to run custom build command")
         {
             // Compiler rejected the mutant - does NOT count as killed by test suite
             (false, Some(MutationStatus::CompileFailed), snip)
@@ -608,38 +655,38 @@ impl TestIntegrityAuditor {
             });
         }
 
-        // Apply mutation under RAII protection
-        let mut guard = MutationGuard::new(full_path.clone(), original_content.clone());
+        // Apply mutation in an isolated temporary source copy to prevent mutating active working tree
+        let temp_dir = tempfile::tempdir()?;
+        copy_dir_filtered(repo_root, temp_dir.path())?;
+
+        let rel_path = if target_file.is_absolute() {
+            target_file.strip_prefix(repo_root).unwrap_or_else(|_| {
+                target_file
+                    .file_name()
+                    .map(Path::new)
+                    .unwrap_or(target_file)
+            })
+        } else {
+            target_file
+        };
+        let isolated_target = temp_dir.path().join(rel_path);
+        if let Some(parent) = isolated_target.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+
         let mut new_lines = lines.clone();
         new_lines[mutation_line - 1] = &mutated_line;
         let mutated_content = new_lines.join("\n");
-        fs::write(&full_path, &mutated_content)?;
+        fs::write(&isolated_target, &mutated_content)?;
 
-        // Run test command with timeout
+        // Run test command with timeout in isolated directory
         let parts = shlex::split(test_command)
             .unwrap_or_else(|| vec!["cargo".to_string(), "test".to_string()]);
         let (killed, status, snippet) = Self::run_mutation_command_with_timeout(
             &parts,
-            repo_root,
+            temp_dir.path(),
             std::time::Duration::from_secs(10),
         );
-
-        // Restore original content immediately
-        if let Err(e) = guard.restore() {
-            eprintln!(
-                "[Mutation] Restoration failure on {}: {e}",
-                full_path.display()
-            );
-            return Ok(MutationResult {
-                target_file: target_file.to_path_buf(),
-                line_number: mutation_line,
-                original_code: original_line,
-                mutated_code: mutated_line,
-                killed,
-                status: Some(MutationStatus::RestorationFailed),
-                output_snippet: format!("Restoration failed: {e}"),
-            });
-        }
 
         Ok(MutationResult {
             target_file: target_file.to_path_buf(),
@@ -704,20 +751,39 @@ impl TestIntegrityAuditor {
             }
         }
 
+        // Run multi-point mutations in an isolated temporary source copy
+        let temp_dir = tempfile::tempdir()?;
+        copy_dir_filtered(repo_root, temp_dir.path())?;
+
+        let rel_path = if target_file.is_absolute() {
+            target_file.strip_prefix(repo_root).unwrap_or_else(|_| {
+                target_file
+                    .file_name()
+                    .map(Path::new)
+                    .unwrap_or(target_file)
+            })
+        } else {
+            target_file
+        };
+        let isolated_target = temp_dir.path().join(rel_path);
+        if let Some(parent) = isolated_target.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+
         let mut results = Vec::new();
         let parts = shlex::split(test_command)
             .unwrap_or_else(|| vec!["cargo".to_string(), "test".to_string()]);
-        let mut guard = MutationGuard::new(full_path.clone(), original_content.clone());
+        let mut guard = MutationGuard::new(isolated_target.clone(), original_content.clone());
 
         for (line_num, orig_line, mut_line) in mutation_candidates {
             let mut new_lines = lines.clone();
             new_lines[line_num - 1] = &mut_line;
             let mutated_content = new_lines.join("\n");
-            fs::write(&full_path, &mutated_content)?;
+            fs::write(&isolated_target, &mutated_content)?;
 
             let (killed, status, snippet) = Self::run_mutation_command_with_timeout(
                 &parts,
-                repo_root,
+                temp_dir.path(),
                 std::time::Duration::from_secs(10),
             );
 
@@ -732,8 +798,8 @@ impl TestIntegrityAuditor {
             });
         }
 
-        // Always restore original content
-        guard.restore()?;
+        // Restore inside isolated directory
+        let _ = guard.restore();
         Ok(results)
     }
 
@@ -1062,5 +1128,50 @@ mod tests {
             report.mutation_kill_rate, 0.0,
             "Empty mutations must default to 0.0 kill rate"
         );
+    }
+
+    #[test]
+    fn test_mutation_isolated_source_never_mutates_active_working_tree() {
+        use tempfile::tempdir;
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("logic.rs");
+        let pristine_content = "pub fn is_positive(x: i32) -> bool {\n    x == 0\n}\n";
+        fs::write(&file_path, pristine_content).unwrap();
+
+        let res = TestIntegrityAuditor::evaluate_mutation(dir.path(), &file_path, "false").unwrap();
+
+        assert!(res.killed);
+        // Ensure active working tree file was NEVER mutated
+        let current_content = fs::read_to_string(&file_path).unwrap();
+        assert_eq!(
+            current_content, pristine_content,
+            "Active working tree file must remain completely unmutated"
+        );
+    }
+
+    #[test]
+    fn test_mutation_does_not_classify_compiler_errors_as_killed() {
+        use tempfile::tempdir;
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("logic.rs");
+        fs::write(
+            &file_path,
+            "pub fn is_positive(x: i32) -> bool {\n    x == 0\n}\n",
+        )
+        .unwrap();
+
+        // Simulate a compiler failure
+        let res = TestIntegrityAuditor::evaluate_mutation(
+            dir.path(),
+            &file_path,
+            "sh -c 'echo \"error[E0308]: mismatched types\" >&2 && exit 101'",
+        )
+        .unwrap();
+
+        assert!(
+            !res.killed,
+            "Compiler errors must not be classified as killed"
+        );
+        assert_eq!(res.status, Some(MutationStatus::CompileFailed));
     }
 }
