@@ -181,6 +181,8 @@ pub struct App {
     pub turn_state: TurnStateMachine,
     pub session_epoch: u64,
     pub current_turn_id: Option<String>,
+    pub turn_start_time: Option<std::time::Instant>,
+    pub turn_ttft_ms: Option<u64>,
     pub active_persona: Option<String>,
     pub mcp_manager: Arc<McpManager>,
     pub tokens_used: u64,
@@ -536,6 +538,8 @@ impl App {
             watcher_opt = Some(watcher);
         }
 
+        let config_features = config.features.clone();
+
         let mut app = Self {
             config,
             cwd,
@@ -561,6 +565,8 @@ impl App {
             turn_state: crate::turn::TurnStateMachine::new(),
             session_epoch: 1,
             current_turn_id: None,
+            turn_start_time: None,
+            turn_ttft_ms: None,
             active_persona: None,
             mcp_manager,
             tokens_used: 0,
@@ -587,7 +593,11 @@ impl App {
             transcript_virtualizer,
             proc_supervisor,
             watcher: watcher_opt,
-            features_registry: Arc::new(m31a_core::features::FeatureRegistry::new()),
+            features_registry: {
+                let mut reg = m31a_core::features::FeatureRegistry::new();
+                reg.sync_from_map(&config_features);
+                Arc::new(reg)
+            },
             last_ctrl_c_press: None,
             quick_dials: {
                 let mut map = std::collections::BTreeMap::new();
@@ -1387,20 +1397,13 @@ impl App {
 
     /// Installs a durable prefix allow-rule in the in-memory policy used by this session.
     fn install_prefix_rule(&mut self, rule: &str, justification: &str) {
-        let parts: Vec<&str> = rule.split_whitespace().collect();
-        let Some((program, rest)) = parts.split_first() else {
-            return;
-        };
-        self.exec_policy
-            .add_prefix_rule(m31a_execpolicy::PrefixRule {
-                program: program.to_string(),
-                rest: rest
-                    .iter()
-                    .map(|token| m31a_execpolicy::PatternToken::Single(token.to_string()))
-                    .collect(),
-                decision: m31a_execpolicy::Decision::Allow,
-                justification: Some(format!("{justification}: {rule}")),
-            });
+        if let Ok(prefix_rule) = m31a_execpolicy::PrefixRule::from_pattern(
+            rule,
+            m31a_execpolicy::Decision::Allow,
+            Some(format!("{justification}: {rule}")),
+        ) {
+            self.exec_policy.add_prefix_rule(prefix_rule);
+        }
     }
 
     pub fn update_status_badges(&mut self) {
@@ -1789,39 +1792,20 @@ impl App {
         let _ = self.turn_state.transition_cancellation_requested(&turn_id);
         let _ = self.turn_state.transition_cancelling(&turn_id);
 
-        let event_tx = self.event_tx.clone();
-        let epoch = self.session_epoch;
-        let sess_id = self.session_id.clone();
-        let tid = turn_id.clone();
-        let cancel_op_id = format!("cancel-{}", uuid::Uuid::new_v4());
-
-        if let Ok(handle) = tokio::runtime::Handle::try_current() {
-            handle.spawn(async move {
-                // Do not indiscriminately terminate all processes in the global process supervisor.
-                // Running tools observe cancellation via the cancel_token.
-                // Emit correlated cancellation completion notice with distinct cancellation operation ID.
-                let mut correlation = EventCorrelation::new(&sess_id, epoch, &tid);
-                correlation.operation_id = cancel_op_id;
-                let _ = event_tx
-                    .send(TuiEvent::Correlated {
-                        correlation,
-                        event: Box::new(TuiEvent::TurnFailed(
-                            "Turn cancelled by user (Ctrl+C)".to_string(),
-                        )),
-                    })
-                    .await;
-            });
-        } else {
+        // Do not immediately force Idle or synthesize synthetic completion.
+        // The background engine observes cancel_token and terminates cleanly.
+        // Only if no async runtime is active (synchronous unit tests) do we force idle immediately.
+        if tokio::runtime::Handle::try_current().is_err() {
             self.turn_state.force_idle();
             self.current_turn_id = None;
+            self.turn_start_time = None;
+            self.turn_ttft_ms = None;
+            self.chat_widget.turn_state = crate::chatwidget::TurnExecutionState::Idle;
         }
 
-        // NOTE: Session epoch is preserved; do not increment session_epoch merely
-        // to suppress the current turn's completion event (§13.1).
         self.steer_tx = None;
-        self.chat_widget.turn_state = crate::chatwidget::TurnExecutionState::Idle;
         self.transcript.push(TranscriptItem::notice(
-            "Turn cancelled by user (Ctrl+C).",
+            "Turn cancellation requested (Ctrl+C)... waiting for execution to halt.",
             NoticeLevel::Warning,
         ));
         self.sync_virtualizer();
@@ -5080,6 +5064,8 @@ impl App {
         self.turn_state.force_idle();
         self.session_epoch += 1;
         self.current_turn_id = None;
+        self.turn_start_time = None;
+        self.turn_ttft_ms = None;
         self.steer_tx = None;
         self.chat_widget.turn_state = crate::chatwidget::TurnExecutionState::Idle;
 
@@ -5291,6 +5277,11 @@ impl App {
                 ) {
                     return;
                 }
+                if self.turn_ttft_ms.is_none()
+                    && let Some(start) = self.turn_start_time
+                {
+                    self.turn_ttft_ms = Some(start.elapsed().as_millis() as u64);
+                }
                 let turn_id = self.current_turn_id.clone().unwrap_or_default();
                 let _ = self.turn_state.transition_thinking(&turn_id, &chunk);
                 self.chat_widget.streaming_buffer.append_chunk(&chunk);
@@ -5311,6 +5302,11 @@ impl App {
                     TurnState::CancellationRequested { .. } | TurnState::Cancelling { .. }
                 ) {
                     return;
+                }
+                if self.turn_ttft_ms.is_none()
+                    && let Some(start) = self.turn_start_time
+                {
+                    self.turn_ttft_ms = Some(start.elapsed().as_millis() as u64);
                 }
                 let turn_id = self.current_turn_id.clone().unwrap_or_default();
                 let _ = self.turn_state.transition_streaming(&turn_id);
@@ -5482,22 +5478,31 @@ impl App {
                     }
                 }
                 let turn_id = self.current_turn_id.clone().unwrap_or_default();
+                let now = std::time::Instant::now();
+                let duration_ms = self
+                    .turn_start_time
+                    .take()
+                    .map(|t| (now - t).as_millis() as u64)
+                    .unwrap_or(0);
+                let ttft_ms = self.turn_ttft_ms.take().unwrap_or(duration_ms);
+
                 let _ = self.turn_state.transition_completed(
                     &turn_id,
                     usage.total_tokens as usize,
-                    400,
+                    duration_ms,
                 );
                 let _ = self.turn_state.transition_idle();
                 self.current_turn_id = None;
                 self.tokens_used += usage.total_tokens;
-                self.session_metrics.record_turn(
-                    &self.active_model,
-                    usage.prompt_tokens,
-                    usage.completion_tokens,
-                    0,
-                    usage.reasoning_tokens,
-                    400,
-                );
+                self.session_metrics
+                    .record_turn_metrics(m31a_analytics::TurnMetrics {
+                        model: self.active_model.clone(),
+                        prompt_tokens: usage.prompt_tokens,
+                        completion_tokens: usage.completion_tokens,
+                        reasoning_tokens: usage.reasoning_tokens,
+                        ttft_ms,
+                        duration_ms,
+                    });
                 self.steer_tx = None;
                 self.cancel_token = None;
                 let max_ctx = self.config.model_context_window;
@@ -5575,6 +5580,8 @@ impl App {
                 let _ = self.turn_state.transition_failed(&turn_id, &err);
                 let _ = self.turn_state.transition_idle();
                 self.current_turn_id = None;
+                self.turn_start_time = None;
+                self.turn_ttft_ms = None;
                 self.chat_widget.fail_turn(&err);
                 self.transcript.push(TranscriptItem::notice(
                     format!("Turn failed: {}", err),
@@ -5755,12 +5762,15 @@ impl App {
         engine.code_mode = self.code_mode.clone();
         engine.hooks = Some(self.hooks.clone());
         engine.collaboration_mode = self.collaboration_mode;
+        engine.dangerously_bypass = self.config.dangerously_bypass;
 
         let messages = self.chat_history.clone();
         let event_tx = self.event_tx.clone();
         let session_id = self.session_id.clone();
         let turn_id = uuid::Uuid::new_v4().to_string();
         self.current_turn_id = Some(turn_id.clone());
+        self.turn_start_time = Some(std::time::Instant::now());
+        self.turn_ttft_ms = None;
 
         if let Err(e) = self.turn_state.transition_submitted(&turn_id) {
             tracing::warn!("Failed to transition to Submitted: {e}");
