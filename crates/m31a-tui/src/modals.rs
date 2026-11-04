@@ -525,7 +525,8 @@ pub fn approval_action_shortcut(kind: ApprovalActionKind) -> &'static str {
 }
 
 fn suggest_rule_from_command(cmd: &str) -> Option<String> {
-    let tokens: Vec<&str> = cmd.split_whitespace().collect();
+    let tokens = shlex::split(cmd.trim())
+        .unwrap_or_else(|| cmd.split_whitespace().map(|s| s.to_string()).collect());
     if tokens.is_empty() {
         return None;
     }
@@ -536,7 +537,7 @@ fn suggest_rule_from_command(cmd: &str) -> Option<String> {
             Some(format!("{} {}", tokens[0], tokens[1]))
         }
     } else {
-        Some(tokens[0].to_string())
+        Some(tokens[0].clone())
     }
 }
 
