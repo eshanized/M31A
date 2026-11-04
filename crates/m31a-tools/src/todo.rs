@@ -289,6 +289,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_todowrite_lifecycle() {
+        let sess = "test_lifecycle_unique_thread";
         let items = vec![
             TodoItem {
                 content: "Implement edit tool".to_string(),
@@ -304,7 +305,9 @@ mod tests {
             },
         ];
 
-        let res = execute_todowrite(&TodoArgs { todos: items }).await.unwrap();
+        let res = execute_todowrite_scoped(sess, &TodoArgs { todos: items }, None)
+            .await
+            .unwrap();
         assert_eq!(res.completed_count, 1);
         assert_eq!(res.total_count, 3);
         assert!(res.summary.contains("1/3 completed"));
@@ -313,7 +316,7 @@ mod tests {
                 .contains("In progress: \"Implement todowrite tool\"")
         );
 
-        let current = get_current_todos().await;
+        let current = get_session_todos(sess, None).await;
         assert_eq!(current.len(), 3);
     }
 
