@@ -131,6 +131,77 @@ impl WorkloadIdentityExchange {
         }
         None
     }
+
+    /// Performs an HTTP token exchange with the remote STS / IdP endpoint.
+    /// If a valid unexpired cached token exists, it is returned immediately.
+    pub async fn exchange_token(
+        &self,
+        endpoint: &str,
+        client: Option<&reqwest::Client>,
+    ) -> Result<WorkloadIdentityToken> {
+        if let Some(cached) = self.get_valid_token() {
+            return Ok(cached);
+        }
+
+        let payload = self.compose_exchange_request()?;
+
+        let default_client;
+        let client = match client {
+            Some(c) => c,
+            None => {
+                default_client = reqwest::Client::builder()
+                    .timeout(Duration::from_secs(15))
+                    .build()?;
+                &default_client
+            }
+        };
+
+        let response = client
+            .post(endpoint)
+            .json(&payload)
+            .send()
+            .await
+            .with_context(|| {
+                format!("Failed to send workload identity exchange request to {endpoint}")
+            })?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            bail!("Workload identity token exchange failed with status {status}: {body}");
+        }
+
+        #[derive(Deserialize)]
+        struct RawTokenResponse {
+            access_token: String,
+            #[serde(default = "default_token_type")]
+            token_type: String,
+            #[serde(default = "default_expires_in")]
+            expires_in: u64,
+        }
+
+        fn default_token_type() -> String {
+            "Bearer".to_string()
+        }
+
+        fn default_expires_in() -> u64 {
+            3600
+        }
+
+        let body: RawTokenResponse = response
+            .json()
+            .await
+            .context("Failed to deserialize workload identity token exchange response")?;
+
+        let token = WorkloadIdentityToken {
+            access_token: body.access_token,
+            token_type: body.token_type,
+            expires_in_seconds: body.expires_in,
+        };
+
+        self.store_token(token.clone());
+        Ok(token)
+    }
 }
 
 #[cfg(test)]
