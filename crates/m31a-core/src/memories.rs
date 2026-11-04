@@ -58,7 +58,7 @@ impl Drop for FileLock {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MemoryItem {
     pub id: String,
     pub topic: String,
@@ -66,6 +66,69 @@ pub struct MemoryItem {
     pub citation_count: usize,
     pub last_used_at: Option<i64>,
     pub created_at: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub embedding: Option<Vec<f32>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ScoredMemoryItem {
+    pub item: MemoryItem,
+    pub lexical_score: f32,
+    pub semantic_score: f32,
+    pub hybrid_score: f32,
+}
+
+/// Computes cosine similarity between two dense embedding vectors.
+pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
+    if a.len() != b.len() || a.is_empty() {
+        return 0.0;
+    }
+    let mut dot = 0.0f32;
+    let mut norm_a = 0.0f32;
+    let mut norm_b = 0.0f32;
+    for (x, y) in a.iter().zip(b.iter()) {
+        dot += x * y;
+        norm_a += x * x;
+        norm_b += y * y;
+    }
+    let denom = norm_a.sqrt() * norm_b.sqrt();
+    if denom > 1e-6 {
+        (dot / denom).clamp(0.0, 1.0)
+    } else {
+        0.0
+    }
+}
+
+fn compute_lexical_score(query: &str, topic: &str, detail: &str) -> f32 {
+    let q = query.trim().to_ascii_lowercase();
+    if q.is_empty() {
+        return 0.0;
+    }
+    let topic_lower = topic.to_ascii_lowercase();
+    let detail_lower = detail.to_ascii_lowercase();
+
+    let mut score = 0.0f32;
+    if topic_lower == q {
+        score += 1.0;
+    } else if topic_lower.contains(&q) {
+        score += 0.8;
+    } else if detail_lower.contains(&q) {
+        score += 0.5;
+    }
+
+    let query_tokens: Vec<&str> = q.split_whitespace().filter(|w| !w.is_empty()).collect();
+    if !query_tokens.is_empty() {
+        let mut matched = 0usize;
+        for token in &query_tokens {
+            if topic_lower.contains(token) || detail_lower.contains(token) {
+                matched += 1;
+            }
+        }
+        let ratio = matched as f32 / query_tokens.len() as f32;
+        score += ratio * 0.4;
+    }
+
+    score.clamp(0.0, 1.0)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -141,6 +204,16 @@ impl MemoryManager {
 
     /// Consolidates a new fact or learning into persistent memory store with strict transactional isolation.
     pub fn consolidate_fact(&self, topic: &str, detail: &str) -> Result<MemoryItem> {
+        self.consolidate_fact_with_embedding(topic, detail, None)
+    }
+
+    /// Consolidates a fact with an optional dense vector embedding for hybrid retrieval.
+    pub fn consolidate_fact_with_embedding(
+        &self,
+        topic: &str,
+        detail: &str,
+        embedding: Option<Vec<f32>>,
+    ) -> Result<MemoryItem> {
         let _guard = MEMORY_LOCK.lock().unwrap();
         let _file_lock = FileLock::acquire(&self.lock_file())?;
 
@@ -162,6 +235,9 @@ impl MemoryManager {
                 items[idx].detail = detail.to_string();
                 items[idx].citation_count += 1;
                 items[idx].last_used_at = Some(now);
+                if embedding.is_some() {
+                    items[idx].embedding = embedding;
+                }
                 items[idx].clone()
             }
             None => {
@@ -173,6 +249,7 @@ impl MemoryManager {
                     citation_count: 1,
                     last_used_at: Some(now),
                     created_at: now,
+                    embedding,
                 };
                 items.push(new_item.clone());
                 new_item
@@ -223,15 +300,56 @@ impl MemoryManager {
         }
     }
 
-    /// Searches memories by keyword query in topic or detail.
-    pub fn search_memories(&self, query: &str) -> Vec<MemoryItem> {
-        let q = query.to_ascii_lowercase();
-        self.list_memory_items()
+    /// Performs hybrid search combining lexical scoring and dense vector semantic similarity.
+    /// If `query_embedding` is `None` (e.g. embedding service is offline or unconfigured),
+    /// it seamlessly falls back to pure local lexical scoring without failing.
+    pub fn search_memories_hybrid(
+        &self,
+        query: &str,
+        query_embedding: Option<&[f32]>,
+    ) -> Vec<ScoredMemoryItem> {
+        let items = self.list_memory_items();
+        let mut scored: Vec<ScoredMemoryItem> = items
             .into_iter()
-            .filter(|i| {
-                i.topic.to_ascii_lowercase().contains(&q)
-                    || i.detail.to_ascii_lowercase().contains(&q)
+            .filter_map(|item| {
+                let lex_score = compute_lexical_score(query, &item.topic, &item.detail);
+                let sem_score = match (query_embedding, &item.embedding) {
+                    (Some(q_emb), Some(item_emb)) => cosine_similarity(q_emb, item_emb),
+                    _ => 0.0,
+                };
+
+                let hybrid_score = if query_embedding.is_some() && item.embedding.is_some() {
+                    0.5 * lex_score + 0.5 * sem_score
+                } else {
+                    lex_score
+                };
+
+                if hybrid_score > 0.0 {
+                    Some(ScoredMemoryItem {
+                        item,
+                        lexical_score: lex_score,
+                        semantic_score: sem_score,
+                        hybrid_score,
+                    })
+                } else {
+                    None
+                }
             })
+            .collect();
+
+        scored.sort_by(|a, b| {
+            b.hybrid_score
+                .partial_cmp(&a.hybrid_score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        scored
+    }
+
+    /// Searches memories by keyword query in topic or detail using hybrid scoring with fallback.
+    pub fn search_memories(&self, query: &str) -> Vec<MemoryItem> {
+        self.search_memories_hybrid(query, None)
+            .into_iter()
+            .map(|s| s.item)
             .collect()
     }
 
@@ -250,8 +368,8 @@ impl MemoryManager {
         );
         fs::write(&summary_file, summary_content)?;
 
-        // Consolidate into structured store
-        let _ = self.consolidate_fact(&memory.title, &memory.raw_memory);
+        // Consolidate into structured store, propagating any persistence error
+        self.consolidate_fact(&memory.title, &memory.raw_memory)?;
 
         // Also append to raw_memories.md for backward compatibility
         let raw_file = self.memories_dir.join("raw_memories.md");
@@ -404,5 +522,45 @@ mod tests {
                 topic
             );
         }
+    }
+
+    #[test]
+    fn test_hybrid_search_and_offline_lexical_fallback() {
+        let tmp = tempdir().unwrap();
+        let mgr = MemoryManager::with_dir(tmp.path().to_path_buf());
+
+        // Consolidate facts with vector embeddings
+        let emb1 = vec![1.0, 0.0, 0.0];
+        let emb2 = vec![0.0, 1.0, 0.0];
+
+        mgr.consolidate_fact_with_embedding(
+            "Rust Performance",
+            "Use jemalloc and profile with flamegraphs",
+            Some(emb1.clone()),
+        )
+        .unwrap();
+
+        mgr.consolidate_fact_with_embedding(
+            "Python Virtualenv",
+            "Always activate .venv before running pip install",
+            Some(emb2.clone()),
+        )
+        .unwrap();
+
+        // 1. Hybrid search with query embedding matching Rust Performance
+        let query_emb = vec![0.95, 0.05, 0.0];
+        let scored = mgr.search_memories_hybrid("optimization", Some(&query_emb));
+        assert!(!scored.is_empty());
+        assert_eq!(scored[0].item.topic, "Rust Performance");
+        assert!(scored[0].semantic_score > 0.9);
+
+        // 2. Offline / None query embedding fallback to purely lexical search
+        let lexical_hits = mgr.search_memories("virtualenv");
+        assert_eq!(lexical_hits.len(), 1);
+        assert_eq!(lexical_hits[0].topic, "Python Virtualenv");
+
+        let rust_hits = mgr.search_memories("jemalloc");
+        assert_eq!(rust_hits.len(), 1);
+        assert_eq!(rust_hits[0].topic, "Rust Performance");
     }
 }
