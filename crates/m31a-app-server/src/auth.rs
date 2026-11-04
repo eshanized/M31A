@@ -492,6 +492,14 @@ pub enum AuthError {
     UnknownMethod(String),
     #[error("Access denied: stream ticket invalid, expired, or already used")]
     InvalidStreamTicket,
+    #[error("Access denied: missing target identifier for method '{0}'")]
+    MissingTargetIdentifier(String),
+    #[error(
+        "Access denied: conflicting resource identifiers: expected thread '{expected}', got '{actual}'"
+    )]
+    ConflictingResourceIdentifiers { expected: String, actual: String },
+    #[error("Access denied: target resource not found: {0}")]
+    ResourceNotFound(String),
     #[error("Storage error during authorization check: {0}")]
     StorageError(String),
 }
@@ -906,13 +914,86 @@ impl AuthManager {
         }
 
         if policy.requires_thread_ownership {
-            let thread_id = params
+            let mut candidate_thread_id = params
                 .get("thread_id")
-                .or_else(|| params.get("id"))
-                .or_else(|| params.get("parent_id"))
-                .and_then(|v| v.as_str());
-            if let Some(tid) = thread_id {
+                .or_else(|| {
+                    if method.starts_with("thread/") {
+                        params.get("id").or_else(|| params.get("parent_id"))
+                    } else {
+                        None
+                    }
+                })
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+
+            let cp_id = if method == "checkpoint/restore" {
+                params
+                    .get("checkpoint_id")
+                    .or_else(|| params.get("id"))
+                    .and_then(|v| v.as_str())
+            } else {
+                params.get("checkpoint_id").and_then(|v| v.as_str())
+            };
+
+            if let Some(cp_id) = cp_id {
+                let storage_lock = self.storage.lock().unwrap();
+                if let Some(storage) = storage_lock.as_ref() {
+                    match storage.get_checkpoint(cp_id) {
+                        Ok(Some(cp)) => {
+                            if let Some(ref explicit_tid) = candidate_thread_id
+                                && explicit_tid != &cp.thread_id
+                            {
+                                return Err(AuthError::ConflictingResourceIdentifiers {
+                                    expected: cp.thread_id,
+                                    actual: explicit_tid.clone(),
+                                });
+                            }
+                            candidate_thread_id = Some(cp.thread_id);
+                        }
+                        Ok(None) => {
+                            return Err(AuthError::ResourceNotFound(format!(
+                                "Checkpoint '{cp_id}' not found"
+                            )));
+                        }
+                        Err(e) => {
+                            return Err(AuthError::StorageError(e.to_string()));
+                        }
+                    }
+                }
+            }
+
+            if let Some(turn_id) = params.get("turn_id").and_then(|v| v.as_str()) {
+                let storage_lock = self.storage.lock().unwrap();
+                if let Some(storage) = storage_lock.as_ref()
+                    && let Ok(Some(turn)) = storage.get_turn(turn_id)
+                {
+                    if let Some(ref explicit_tid) = candidate_thread_id
+                        && explicit_tid != &turn.thread_id
+                    {
+                        return Err(AuthError::ConflictingResourceIdentifiers {
+                            expected: turn.thread_id,
+                            actual: explicit_tid.clone(),
+                        });
+                    }
+                    candidate_thread_id = Some(turn.thread_id);
+                }
+            }
+
+            if let Some(ref tid) = candidate_thread_id {
                 self.require_thread_access(tid, identity)?;
+            } else {
+                let has_resource_id = params.get("turn_id").is_some()
+                    || params.get("approval_id").is_some()
+                    || params.get("question_id").is_some();
+                if !has_resource_id {
+                    self.record_audit(
+                        Some(&identity.client_id),
+                        "rpc_authorization_failed",
+                        false,
+                        &format!("Missing target resource identifier for method '{}'", method),
+                    );
+                    return Err(AuthError::MissingTargetIdentifier(method.to_string()));
+                }
             }
         }
 
