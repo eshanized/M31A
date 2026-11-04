@@ -199,3 +199,110 @@ async fn test_tcp_server_protocol_roundtrip() {
     // 5. Test QUIT
     writer.write_all(b"QUIT\n").await.unwrap();
 }
+
+#[tokio::test]
+async fn test_tcp_server_credential_validation() {
+    let tmp = tempdir().unwrap();
+    let wal_path = tmp.path().join("auth_server.wal");
+
+    let node = Arc::new(TaskMeshNode::new(NodeId::new("auth-server-node"), &wal_path).unwrap());
+    node.scheduler.register_worker(NodeId::new("auth-w1"));
+
+    let server =
+        TaskMeshServer::new(Arc::clone(&node), "127.0.0.1:28473").with_auth_token("mesh-token-xyz");
+    tokio::spawn(async move {
+        server.run().await.unwrap();
+    });
+
+    tokio::time::sleep(Duration::from_millis(80)).await;
+
+    let stream = TcpStream::connect("127.0.0.1:28473").await.unwrap();
+    let (reader, mut writer) = stream.into_split();
+    let mut lines = BufReader::new(reader).lines();
+
+    // 1. Unauthenticated SUBMIT rejected
+    writer
+        .write_all(b"SUBMIT {\"image\": \"debian\"}\n")
+        .await
+        .unwrap();
+    let err_resp: serde_json::Value =
+        serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+    assert_eq!(err_resp["status"], "error");
+    assert!(
+        err_resp["message"]
+            .as_str()
+            .unwrap()
+            .contains("authentication required")
+    );
+
+    // 2. Bad token rejected
+    writer.write_all(b"AUTH bad-token\n").await.unwrap();
+    let bad_auth_resp: serde_json::Value =
+        serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+    assert_eq!(bad_auth_resp["status"], "error");
+
+    // 3. Good token accepted
+    writer.write_all(b"AUTH mesh-token-xyz\n").await.unwrap();
+    let good_auth_resp: serde_json::Value =
+        serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+    assert_eq!(good_auth_resp["status"], "ok");
+
+    // 4. Now SUBMIT succeeds
+    writer
+        .write_all(b"SUBMIT {\"image\": \"debian\"}\n")
+        .await
+        .unwrap();
+    let ok_submit: serde_json::Value =
+        serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+    assert_eq!(ok_submit["status"], "submitted");
+}
+
+#[tokio::test]
+async fn test_task_timeout_escalation_and_cancellation() {
+    let tmp = tempdir().unwrap();
+    let wal_path = tmp.path().join("timeout.wal");
+    let node = TaskMeshNode::new(NodeId::new("timeout-node"), &wal_path).unwrap();
+    node.scheduler.register_worker(NodeId::new("timeout-w1"));
+
+    let task_id = TaskId::new();
+    node.submit(TaskDefinition {
+        id: task_id,
+        name: "long_running".to_string(),
+        payload: serde_json::json!({ "sleep_ms": 5000 }),
+        priority: Priority::Normal,
+        max_retries: 1,
+        timeout_ms: 100,
+        created_at: 0,
+    })
+    .unwrap();
+
+    assert_eq!(node.get_status(&task_id), Some(TaskStatus::Pending));
+
+    // Cancel / escalate timeout
+    node.cancel_task(task_id, "Deadline exceeded (100ms limit)".to_string())
+        .unwrap();
+
+    let status = node.get_status(&task_id).unwrap();
+    assert!(
+        matches!(status, TaskStatus::Failed { ref reason, retry_count: 0 } if reason.contains("Deadline exceeded"))
+    );
+}
+
+#[tokio::test]
+async fn test_partition_handling_term_monotonicity() {
+    let membership = ClusterMembership::new(NodeId::new("node-1"), Duration::from_millis(50));
+    let peer = NodeId::new("node-2");
+
+    membership.record_heartbeat(peer.clone(), 0.1);
+
+    // Initial election
+    let (term1, leader1) = membership.elect_leader(NodeId::new("node-1"));
+    assert_eq!(term1, 1);
+    assert_eq!(leader1, NodeId::new("node-1"));
+
+    // Partition happens, election triggers new term
+    let (term2, leader2) = membership.elect_leader(NodeId::new("node-2"));
+    assert_eq!(term2, 2);
+    assert_eq!(leader2, NodeId::new("node-2"));
+    assert_eq!(membership.leader(), Some(NodeId::new("node-2")));
+}
