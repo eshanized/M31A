@@ -6,4 +6,4 @@ pub mod metrics;
 
 pub use charts::{render_bar, render_sparkline};
 pub use dashboard::AnalyticsDashboard;
-pub use metrics::SessionTokenMetrics;
+pub use metrics::{SessionTokenMetrics, TurnMetrics};
