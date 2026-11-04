@@ -31,3 +31,27 @@ pub use protocol::{
     parse_exec_source,
 };
 pub use runtime::{CodeModeError, CodeModeRuntime, ProcessLifecycleState, RuntimeExecutionOutcome};
+
+#[async_trait::async_trait]
+pub trait CodeModeToolDispatcher: Send + Sync {
+    async fn execute(
+        &self,
+        name: &str,
+        args: &str,
+        cwd: &std::path::Path,
+        policy: m31a_core::SandboxPolicy,
+    ) -> anyhow::Result<String>;
+}
+
+#[async_trait::async_trait]
+impl CodeModeToolDispatcher for m31a_tools::ToolRegistry {
+    async fn execute(
+        &self,
+        name: &str,
+        args: &str,
+        cwd: &std::path::Path,
+        policy: m31a_core::SandboxPolicy,
+    ) -> anyhow::Result<String> {
+        self.execute(name, args, cwd, policy).await
+    }
+}
