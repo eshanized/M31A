@@ -128,6 +128,29 @@ impl TaskMeshNode {
         Ok(())
     }
 
+    pub fn cancel_task(&self, task_id: TaskId, reason: String) -> Result<()> {
+        let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
+        let status = TaskStatus::Failed {
+            reason: format!("Cancelled: {reason}"),
+            retry_count: 0,
+        };
+
+        self.wal.append(&WalRecord::UpdateStatus {
+            id: task_id,
+            status: status.clone(),
+            timestamp: now,
+        })?;
+
+        self.task_states.lock().unwrap().insert(task_id, status);
+        self.metrics.record_failed();
+
+        let _ = self
+            .event_bus
+            .send(MeshEvent::TaskFailed { task_id, reason });
+
+        Ok(())
+    }
+
     pub fn get_status(&self, task_id: &TaskId) -> Option<TaskStatus> {
         self.task_states.lock().unwrap().get(task_id).cloned()
     }
