@@ -14,6 +14,7 @@ use crate::types::{Priority, TaskDefinition, TaskId};
 pub struct TaskMeshServer {
     node: Arc<TaskMeshNode>,
     bind_addr: String,
+    auth_token: Option<String>,
 }
 
 impl TaskMeshServer {
@@ -21,7 +22,13 @@ impl TaskMeshServer {
         Self {
             node,
             bind_addr: bind_addr.into(),
+            auth_token: None,
         }
+    }
+
+    pub fn with_auth_token(mut self, token: impl Into<String>) -> Self {
+        self.auth_token = Some(token.into());
+        self
     }
 
     pub async fn run(&self) -> Result<()> {
@@ -31,18 +38,24 @@ impl TaskMeshServer {
         loop {
             let (stream, peer) = listener.accept().await?;
             let node = Arc::clone(&self.node);
+            let auth_token = self.auth_token.clone();
 
             tokio::spawn(async move {
-                if let Err(e) = Self::handle_client(stream, node).await {
+                if let Err(e) = Self::handle_client(stream, node, auth_token).await {
                     error!(peer = %peer, error = %e, "Client connection handler error");
                 }
             });
         }
     }
 
-    pub async fn handle_client(mut stream: TcpStream, node: Arc<TaskMeshNode>) -> Result<()> {
+    pub async fn handle_client(
+        mut stream: TcpStream,
+        node: Arc<TaskMeshNode>,
+        auth_token: Option<String>,
+    ) -> Result<()> {
         let (reader, mut writer) = stream.split();
         let mut lines = BufReader::new(reader).lines();
+        let mut authenticated = auth_token.is_none();
 
         while let Some(line) = lines.next_line().await? {
             let line = line.trim();
@@ -54,7 +67,41 @@ impl TaskMeshServer {
             let command = parts.next().unwrap_or("");
             let arg = parts.next().unwrap_or("");
 
+            if !authenticated && command != "AUTH" && command != "PING" {
+                let err_resp = serde_json::json!({
+                    "status": "error",
+                    "message": "Unauthorized: authentication required"
+                });
+                writer
+                    .write_all(format!("{}\n", err_resp).as_bytes())
+                    .await?;
+                continue;
+            }
+
             match command {
+                "AUTH" => {
+                    if let Some(ref expected) = auth_token {
+                        if arg.trim() == expected.as_str() {
+                            authenticated = true;
+                            let ok_resp =
+                                serde_json::json!({ "status": "ok", "message": "Authenticated" });
+                            writer
+                                .write_all(format!("{}\n", ok_resp).as_bytes())
+                                .await?;
+                        } else {
+                            let err_resp = serde_json::json!({ "status": "error", "message": "Unauthorized: invalid credentials" });
+                            writer
+                                .write_all(format!("{}\n", err_resp).as_bytes())
+                                .await?;
+                        }
+                    } else {
+                        authenticated = true;
+                        let ok_resp = serde_json::json!({ "status": "ok", "message": "No authentication required" });
+                        writer
+                            .write_all(format!("{}\n", ok_resp).as_bytes())
+                            .await?;
+                    }
+                }
                 "PING" => {
                     writer.write_all(b"PONG\n").await?;
                 }
