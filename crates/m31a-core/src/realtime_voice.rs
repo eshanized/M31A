@@ -170,22 +170,69 @@ impl AudioDeviceManager {
             }
         }
 
-        if devices.is_empty() {
-            devices.push(AudioDevice {
-                name: "Default Microphone".to_string(),
-                channels: 1,
-                is_default: true,
-                kind: AudioDeviceKind::Input,
-            });
-            devices.push(AudioDevice {
-                name: "Default Speakers".to_string(),
-                channels: 2,
-                is_default: true,
-                kind: AudioDeviceKind::Output,
-            });
+        // Truthful reporting: do NOT inject fake devices when no hardware exists
+        devices
+    }
+}
+
+/// Adaptive Voice Activity Detector (VAD) measuring RMS energy and speech hangover.
+#[derive(Debug, Clone)]
+pub struct VoiceActivityDetector {
+    energy_threshold: u16,
+    hangover_frames: usize,
+    active_count: usize,
+    speech_detected: bool,
+}
+
+impl Default for VoiceActivityDetector {
+    fn default() -> Self {
+        Self::new(3000, 5) // ~3000 RMS threshold, 5 frames hangover
+    }
+}
+
+impl VoiceActivityDetector {
+    pub fn new(energy_threshold: u16, hangover_frames: usize) -> Self {
+        Self {
+            energy_threshold,
+            hangover_frames,
+            active_count: 0,
+            speech_detected: false,
+        }
+    }
+
+    /// Evaluates whether an incoming PCM audio frame contains human voice activity.
+    pub fn process_frame(&mut self, samples: &[i16]) -> bool {
+        if samples.is_empty() {
+            if self.active_count > 0 {
+                self.active_count -= 1;
+            } else {
+                self.speech_detected = false;
+            }
+            return self.speech_detected;
         }
 
-        devices
+        let mut sum_sq: f64 = 0.0;
+        for &s in samples {
+            let val = s as f64;
+            sum_sq += val * val;
+        }
+        let rms = ((sum_sq / samples.len() as f64).sqrt() as u32 * 65535 / 32767).min(65535) as u16;
+
+        if rms >= self.energy_threshold {
+            self.active_count = self.hangover_frames;
+            self.speech_detected = true;
+        } else if self.active_count > 0 {
+            self.active_count -= 1;
+            self.speech_detected = true;
+        } else {
+            self.speech_detected = false;
+        }
+
+        self.speech_detected
+    }
+
+    pub fn is_speech_active(&self) -> bool {
+        self.speech_detected
     }
 }
 
@@ -262,6 +309,8 @@ pub enum VoiceSessionStatus {
     Connected,
     Muted,
     Closed,
+    HardwareUnavailable,
+    ProviderUnsupported,
 }
 
 #[derive(Debug)]
@@ -270,6 +319,7 @@ pub struct VoiceSessionCoordinator {
     pub controls: AudioControls,
     pub mic_buffer: AudioJitterBuffer,
     pub speaker_buffer: AudioJitterBuffer,
+    pub vad: VoiceActivityDetector,
 }
 
 impl Default for VoiceSessionCoordinator {
@@ -285,11 +335,28 @@ impl VoiceSessionCoordinator {
             controls: AudioControls::default(),
             mic_buffer: AudioJitterBuffer::new(48000), // ~2s of 24kHz PCM
             speaker_buffer: AudioJitterBuffer::new(48000),
+            vad: VoiceActivityDetector::default(),
         }
     }
 
     pub fn start_session(&mut self) {
+        if AudioDeviceManager::enumerate_devices().is_empty() {
+            self.status = VoiceSessionStatus::HardwareUnavailable;
+        } else {
+            self.status = VoiceSessionStatus::Connected;
+        }
+    }
+
+    pub fn try_start_session(&mut self) -> Result<()> {
+        let devices = AudioDeviceManager::enumerate_devices();
+        if devices.is_empty() {
+            self.status = VoiceSessionStatus::HardwareUnavailable;
+            anyhow::bail!(
+                "Cannot start voice session: no audio input/output devices detected on host"
+            );
+        }
         self.status = VoiceSessionStatus::Connected;
+        Ok(())
     }
 
     pub fn stop_session(&mut self) {
@@ -305,8 +372,9 @@ impl VoiceSessionCoordinator {
         self.controls.speaker_suppressed = suppressed;
     }
 
-    /// Ingests incoming microphone samples (unless muted) and computes live audio levels.
+    /// Ingests incoming microphone samples (unless muted), updates VAD, and computes live audio levels.
     pub fn process_mic_input(&mut self, samples: &[i16]) -> AudioState {
+        self.vad.process_frame(samples);
         if !self.controls.microphone_muted {
             self.mic_buffer.push_samples(samples);
         }
