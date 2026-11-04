@@ -42,6 +42,48 @@ pub struct CloudTasksConfig {
     pub max_retries: u32,
 }
 
+impl CloudTasksConfig {
+    pub fn validate(&self) -> Result<()> {
+        if self.endpoint.trim().is_empty() {
+            anyhow::bail!("Cloud Tasks endpoint must not be empty");
+        }
+        match &self.auth {
+            CloudAuth::ApiKey { key } => {
+                if key.trim().is_empty() {
+                    anyhow::bail!("Cloud Tasks API key must not be empty");
+                }
+            }
+            CloudAuth::OAuth2 { token } => {
+                if token.trim().is_empty() {
+                    anyhow::bail!("Cloud Tasks OAuth2 token must not be empty");
+                }
+            }
+            CloudAuth::WorkloadIdentity { audience } => {
+                if audience.trim().is_empty() {
+                    anyhow::bail!("Cloud Tasks Workload Identity audience must not be empty");
+                }
+            }
+            CloudAuth::None => {}
+        }
+        if let Some(cert) = &self.tls_cert_path
+            && !std::path::Path::new(cert).exists()
+        {
+            anyhow::bail!("TLS certificate path does not exist: {}", cert);
+        }
+        if let Some(key) = &self.tls_key_path
+            && !std::path::Path::new(key).exists()
+        {
+            anyhow::bail!("TLS key path does not exist: {}", key);
+        }
+        if let Some(ca) = &self.ca_cert_path
+            && !std::path::Path::new(ca).exists()
+        {
+            anyhow::bail!("CA certificate path does not exist: {}", ca);
+        }
+        Ok(())
+    }
+}
+
 impl Default for CloudTasksConfig {
     fn default() -> Self {
         Self {
@@ -500,7 +542,7 @@ impl CloudTaskExecutor for LocalFallbackCloudTasksClient {
         let start = std::time::Instant::now();
 
         // Execute prompt command locally if it looks like a shell command
-        let output = if task.prompt.starts_with("!")
+        let (output, status, error) = if task.prompt.starts_with('!')
             || task.prompt.contains("cargo")
             || task.prompt.contains("ls")
             || task.prompt.contains("echo")
@@ -509,9 +551,16 @@ impl CloudTaskExecutor for LocalFallbackCloudTasksClient {
             let mut parts = cmd_str.split_whitespace();
             if let Some(cmd) = parts.next() {
                 let args: Vec<&str> = parts.collect();
+                let cwd = if !task.working_dir.is_empty()
+                    && std::path::Path::new(&task.working_dir).exists()
+                {
+                    std::path::PathBuf::from(&task.working_dir)
+                } else {
+                    std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+                };
                 let res = tokio::process::Command::new(cmd)
                     .args(&args)
-                    .current_dir(&task.working_dir)
+                    .current_dir(cwd)
                     .output()
                     .await;
                 match res {
@@ -519,43 +568,55 @@ impl CloudTaskExecutor for LocalFallbackCloudTasksClient {
                         let stdout = String::from_utf8_lossy(&o.stdout);
                         let stderr = String::from_utf8_lossy(&o.stderr);
                         if o.status.success() {
-                            if stdout.is_empty() {
+                            let text = if stdout.is_empty() {
                                 "Command succeeded with no output".to_string()
                             } else {
                                 stdout.to_string()
-                            }
+                            };
+                            (text, TaskStatusEnum::Completed, None)
                         } else {
-                            format!(
+                            let err_msg = format!(
                                 "Exit {}: {}{}",
                                 o.status.code().unwrap_or(-1),
                                 stdout,
                                 stderr
-                            )
+                            );
+                            (String::new(), TaskStatusEnum::Failed, Some(err_msg))
                         }
                     }
-                    Err(e) => format!("Execution error: {}", e),
+                    Err(e) => (
+                        String::new(),
+                        TaskStatusEnum::Failed,
+                        Some(format!("Execution spawn error: {e}")),
+                    ),
                 }
             } else {
-                format!("Executed task: {}", task.prompt)
+                (
+                    String::new(),
+                    TaskStatusEnum::Failed,
+                    Some("Empty command provided".to_string()),
+                )
             }
         } else {
-            format!("Completed task execution for objective: {}", task.prompt)
+            (
+                String::new(),
+                TaskStatusEnum::Failed,
+                Some(format!(
+                    "LocalFallbackCloudTasksClient only supports direct local commands (e.g. prefix with '!'). Task objective '{}' requires a connected remote Cloud Tasks endpoint.",
+                    task.prompt
+                )),
+            )
         };
 
         let duration_ms = start.elapsed().as_millis() as u64;
 
         Ok(TaskResult {
             task_id: task.id,
-            status: TaskStatusEnum::Completed,
+            status,
             output,
             tool_calls: vec![],
-            usage: TokenUsage {
-                prompt_tokens: (task.prompt.len() / 4) as u64,
-                completion_tokens: 30,
-                total_tokens: (task.prompt.len() / 4 + 30) as u64,
-                reasoning_tokens: 0,
-            },
-            error: None,
+            usage: TokenUsage::default(),
+            error,
             duration_ms,
         })
     }
@@ -624,18 +685,13 @@ impl CloudTaskExecutor for LocalFallbackCloudTasksClient {
                 task_id: agent.agent_id.clone(),
                 status: TaskStatusEnum::Completed,
                 output: format!(
-                    "Remote agent '{}' completed assigned turn lifecycle.",
+                    "Local fallback agent '{}' completed assigned turn lifecycle.",
                     agent_id
                 ),
                 tool_calls: vec![],
-                usage: TokenUsage {
-                    prompt_tokens: 150,
-                    completion_tokens: 75,
-                    total_tokens: 225,
-                    reasoning_tokens: 0,
-                },
+                usage: TokenUsage::default(),
                 error: None,
-                duration_ms: 120,
+                duration_ms: 10,
             })
         } else {
             anyhow::bail!("Agent '{}' not found", agent_id);
@@ -775,7 +831,7 @@ mod tests {
         // Execute discrete task
         let task = TaskSpec {
             id: "task-001".to_string(),
-            prompt: "Check compiler status".to_string(),
+            prompt: "!echo 'Check compiler status'".to_string(),
             model: "deepseek-ai/deepseek-r1".to_string(),
             tools: vec![ToolDefinition {
                 tool_type: "function".to_string(),
@@ -785,7 +841,7 @@ mod tests {
                     parameters: serde_json::json!({}),
                 },
             }],
-            working_dir: "/workspace".to_string(),
+            working_dir: ".".to_string(),
             env_vars: HashMap::new(),
             timeout_seconds: 60,
             max_tokens: Some(4096),
@@ -801,6 +857,31 @@ mod tests {
         let task_res = client.execute_task(task).await.expect("execute task");
         assert_eq!(task_res.task_id, "task-001");
         assert_eq!(task_res.status, TaskStatusEnum::Completed);
+        assert!(task_res.output.contains("Check compiler status"));
+
+        // Reject non-shell prompt without remote endpoint
+        let non_shell = TaskSpec {
+            id: "task-002".to_string(),
+            prompt: "Please write a summary of this repo".to_string(),
+            model: "deepseek-ai/deepseek-r1".to_string(),
+            tools: vec![],
+            working_dir: ".".to_string(),
+            env_vars: HashMap::new(),
+            timeout_seconds: 60,
+            max_tokens: None,
+            temperature: None,
+        };
+        let non_shell_res = client
+            .execute_task(non_shell)
+            .await
+            .expect("execute non-shell");
+        assert_eq!(non_shell_res.status, TaskStatusEnum::Failed);
+        assert!(
+            non_shell_res
+                .error
+                .unwrap()
+                .contains("requires a connected remote Cloud Tasks endpoint")
+        );
     }
 
     #[test]
