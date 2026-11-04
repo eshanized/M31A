@@ -31,6 +31,16 @@ pub struct BrowserConfig {
     pub viewport_width: u32,
     pub viewport_height: u32,
     pub mock_mode: bool,
+    #[serde(default)]
+    pub domain_allowlist: Vec<String>,
+    #[serde(default)]
+    pub domain_blocklist: Vec<String>,
+    #[serde(default = "default_page_load_timeout_secs")]
+    pub page_load_timeout_secs: u64,
+}
+
+fn default_page_load_timeout_secs() -> u64 {
+    30
 }
 
 impl Default for BrowserConfig {
@@ -42,6 +52,9 @@ impl Default for BrowserConfig {
             viewport_width: 1280,
             viewport_height: 800,
             mock_mode: false,
+            domain_allowlist: Vec::new(),
+            domain_blocklist: Vec::new(),
+            page_load_timeout_secs: 30,
         }
     }
 }
@@ -71,6 +84,145 @@ pub struct BrowserSession {
     is_mock: bool,
 }
 
+pub const MAX_WS_FRAME_SIZE: usize = 16 * 1024 * 1024; // 16 MB
+pub const MAX_WS_MESSAGE_SIZE: usize = 32 * 1024 * 1024; // 32 MB
+
+/// Validates and sanitizes a navigation URL against security policy and network boundaries.
+pub fn validate_and_sanitize_navigation_url(
+    raw_url: &str,
+    config: &BrowserConfig,
+) -> Result<String> {
+    let trimmed = raw_url.trim();
+    if trimmed.is_empty() {
+        bail!("Navigation URL cannot be empty");
+    }
+
+    if trimmed == "about:blank" || trimmed == "about:srcdoc" {
+        return Ok(trimmed.to_string());
+    }
+
+    let url_to_parse = if trimmed.contains("://") || trimmed.starts_with("about:") {
+        trimmed.to_string()
+    } else {
+        format!("https://{trimmed}")
+    };
+
+    let parsed = url::Url::parse(&url_to_parse)
+        .with_context(|| format!("Invalid URL format: '{raw_url}'"))?;
+
+    match parsed.scheme() {
+        "http" | "https" => {}
+        "about" => {
+            if parsed.as_str() == "about:blank" {
+                return Ok("about:blank".to_string());
+            }
+            bail!(
+                "Navigation to '{}' is prohibited: only 'about:blank' is permitted in about scheme",
+                raw_url
+            );
+        }
+        scheme => {
+            bail!(
+                "Unsupported navigation protocol '{}'. Only HTTP and HTTPS are permitted.",
+                scheme
+            );
+        }
+    }
+
+    let host_str = parsed
+        .host_str()
+        .ok_or_else(|| anyhow!("Navigation URL has no host"))?;
+
+    // Check cloud metadata and well-known local/internal hostnames
+    let lower_host = host_str.to_lowercase();
+    if lower_host == "localhost"
+        || lower_host.ends_with(".localhost")
+        || lower_host == "169.254.169.254"
+        || lower_host == "metadata.google.internal"
+        || lower_host == "100.100.100.200"
+        || lower_host == "instance-data"
+        || lower_host.ends_with(".internal")
+        || lower_host.ends_with(".local")
+    {
+        bail!(
+            "Navigation to private/metadata host '{}' is blocked by security policy",
+            host_str
+        );
+    }
+
+    // IP address inspection
+    let host_for_ip = host_str.trim_start_matches('[').trim_end_matches(']');
+    if let Ok(ip) = host_for_ip.parse::<std::net::IpAddr>() {
+        if ip.is_loopback() {
+            bail!("Navigation to loopback IP '{}' is prohibited", ip);
+        }
+        if ip.is_unspecified() {
+            bail!("Navigation to unspecified IP '{}' is prohibited", ip);
+        }
+        match ip {
+            std::net::IpAddr::V4(ipv4) => {
+                let octets = ipv4.octets();
+                // 169.254.0.0/16 Link local
+                if octets[0] == 169 && octets[1] == 254 {
+                    bail!("Navigation to link-local IP '{}' is prohibited", ipv4);
+                }
+                // 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 RFC 1918 Private networks
+                if octets[0] == 10
+                    || (octets[0] == 172 && (16..=31).contains(&octets[1]))
+                    || (octets[0] == 192 && octets[1] == 168)
+                {
+                    bail!(
+                        "Navigation to RFC 1918 private network IP '{}' is prohibited",
+                        ipv4
+                    );
+                }
+                // 255.255.255.255 Broadcast
+                if ipv4.is_broadcast() {
+                    bail!("Navigation to broadcast IP '{}' is prohibited", ipv4);
+                }
+            }
+            std::net::IpAddr::V6(ipv6) => {
+                let segments = ipv6.segments();
+                // fe80::/10 link local
+                if (segments[0] & 0xffc0) == 0xfe80 {
+                    bail!("Navigation to IPv6 link-local IP '{}' is prohibited", ipv6);
+                }
+                // fc00::/7 unique local address
+                if (segments[0] & 0xfe00) == 0xfc00 {
+                    bail!(
+                        "Navigation to IPv6 unique local address '{}' is prohibited",
+                        ipv6
+                    );
+                }
+            }
+        }
+    }
+
+    // Domain blocklist
+    for blocked in &config.domain_blocklist {
+        let b = blocked.to_lowercase();
+        if lower_host == b || lower_host.ends_with(&format!(".{b}")) {
+            bail!("Domain '{}' is explicitly blocked by policy", host_str);
+        }
+    }
+
+    // Domain allowlist
+    if !config.domain_allowlist.is_empty() {
+        let allowed = config.domain_allowlist.iter().any(|allowed_domain| {
+            let a = allowed_domain.to_lowercase();
+            lower_host == a || lower_host.ends_with(&format!(".{a}"))
+        });
+        if !allowed {
+            bail!(
+                "Domain '{}' is not present in allowed domain policy",
+                host_str
+            );
+        }
+    }
+
+    Ok(parsed.to_string())
+}
+
 /// Reads a single WebSocket frame according to RFC 6455.
 async fn read_ws_frame<R: AsyncReadExt + Unpin>(reader: &mut R) -> Result<(u8, bool, Vec<u8>)> {
     let mut header = [0u8; 2];
@@ -88,10 +240,26 @@ async fn read_ws_frame<R: AsyncReadExt + Unpin>(reader: &mut R) -> Result<(u8, b
     } else if initial_len == 127 {
         let mut len_bytes = [0u8; 8];
         reader.read_exact(&mut len_bytes).await?;
-        u64::from_be_bytes(len_bytes) as usize
+        let len = u64::from_be_bytes(len_bytes);
+        if len > MAX_WS_FRAME_SIZE as u64 {
+            bail!(
+                "WebSocket frame payload length ({} bytes) exceeds maximum limit of {} bytes",
+                len,
+                MAX_WS_FRAME_SIZE
+            );
+        }
+        len as usize
     } else {
         initial_len
     };
+
+    if payload_len > MAX_WS_FRAME_SIZE {
+        bail!(
+            "WebSocket frame payload length ({} bytes) exceeds maximum limit of {} bytes",
+            payload_len,
+            MAX_WS_FRAME_SIZE
+        );
+    }
 
     let mask = if masked {
         let mut m = [0u8; 4];
@@ -120,6 +288,12 @@ async fn read_ws_text_message<R: AsyncReadExt + Unpin>(reader: &mut R) -> Result
         let (opcode, fin, payload) = read_ws_frame(reader).await?;
         match opcode {
             0x1 | 0x0 => {
+                if message_bytes.len() + payload.len() > MAX_WS_MESSAGE_SIZE {
+                    bail!(
+                        "Reassembled WebSocket message exceeded limit of {} bytes",
+                        MAX_WS_MESSAGE_SIZE
+                    );
+                }
                 message_bytes.extend_from_slice(&payload);
                 if fin {
                     break;
@@ -129,9 +303,14 @@ async fn read_ws_text_message<R: AsyncReadExt + Unpin>(reader: &mut R) -> Result
                 bail!("WebSocket connection closed by peer");
             }
             0x9 => {
-                // Ping frame, ignore or continue
+                // Ping frame
             }
-            _ => {}
+            0xA => {
+                // Pong frame
+            }
+            other => {
+                debug!("Received unhandled WebSocket opcode: {other:#x}");
+            }
         }
     }
     String::from_utf8(message_bytes).map_err(|e| anyhow!("Invalid UTF-8 in WS frame: {}", e))
@@ -633,16 +812,9 @@ impl BrowserSession {
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
     }
 
-    /// Navigates the browser to the specified URL.
+    /// Navigates the browser to the specified URL enforcing safety policy and timeouts.
     pub async fn navigate(&self, url: &str) -> Result<String> {
-        let valid_url = if !url.starts_with("http://")
-            && !url.starts_with("https://")
-            && !url.starts_with("about:")
-        {
-            format!("https://{url}")
-        } else {
-            url.to_string()
-        };
+        let valid_url = validate_and_sanitize_navigation_url(url, &self.config)?;
 
         *self.current_url.lock().unwrap() = valid_url.clone();
         *self.current_title.lock().unwrap() = format!("Page - {valid_url}");
@@ -662,39 +834,49 @@ impl BrowserSession {
         });
 
         if self.cmd_tx.is_some() {
-            let _ = self
-                .send_cdp(
-                    "Page.navigate",
-                    Some(serde_json::json!({ "url": valid_url })),
-                )
-                .await?;
+            let timeout_dur = Duration::from_secs(self.config.page_load_timeout_secs);
+            let nav_url = valid_url.clone();
+            let nav_future = async {
+                self.send_cdp("Page.navigate", Some(serde_json::json!({ "url": nav_url })))
+                    .await?;
 
-            // Brief wait for initial DOM load
-            tokio::time::sleep(Duration::from_millis(300)).await;
+                // Brief wait for initial DOM load
+                tokio::time::sleep(Duration::from_millis(300)).await;
 
-            // Update real title and url from runtime
-            if let Ok(eval_res) = self
-                .send_cdp(
-                    "Runtime.evaluate",
-                    Some(serde_json::json!({
-                        "expression": "({ title: document.title, url: window.location.href })",
-                        "returnByValue": true
-                    })),
-                )
+                // Update real title and url from runtime
+                if let Ok(eval_res) = self
+                    .send_cdp(
+                        "Runtime.evaluate",
+                        Some(serde_json::json!({
+                            "expression": "({ title: document.title, url: window.location.href })",
+                            "returnByValue": true
+                        })),
+                    )
+                    .await
+                    && let Some(val) = eval_res.get("result").and_then(|r| r.get("value"))
+                {
+                    if let Some(t) = val.get("title").and_then(|v| v.as_str())
+                        && !t.is_empty()
+                    {
+                        *self.current_title.lock().unwrap() = t.to_string();
+                    }
+                    if let Some(u) = val.get("url").and_then(|v| v.as_str())
+                        && !u.is_empty()
+                    {
+                        *self.current_url.lock().unwrap() = u.to_string();
+                    }
+                }
+                Ok::<(), anyhow::Error>(())
+            };
+
+            tokio::time::timeout(timeout_dur, nav_future)
                 .await
-                && let Some(val) = eval_res.get("result").and_then(|r| r.get("value"))
-            {
-                if let Some(t) = val.get("title").and_then(|v| v.as_str())
-                    && !t.is_empty()
-                {
-                    *self.current_title.lock().unwrap() = t.to_string();
-                }
-                if let Some(u) = val.get("url").and_then(|v| v.as_str())
-                    && !u.is_empty()
-                {
-                    *self.current_url.lock().unwrap() = u.to_string();
-                }
-            }
+                .map_err(|_| {
+                    anyhow!(
+                        "Page navigation timed out after {}s",
+                        self.config.page_load_timeout_secs
+                    )
+                })??;
         }
 
         Ok(format!("Successfully navigated to {valid_url}"))
@@ -1389,25 +1571,46 @@ impl BrowserSession {
         ))
     }
 
-    /// Evaluates a JavaScript snippet in the page context.
+    /// Evaluates a JavaScript snippet in the page context with size limits, sanitization, and timeouts.
     pub async fn evaluate(&self, script: &str) -> Result<String> {
+        const MAX_SCRIPT_SIZE: usize = 256 * 1024; // 256 KB limit
+        if script.len() > MAX_SCRIPT_SIZE {
+            bail!(
+                "Script size ({} bytes) exceeds maximum allowable limit of {} bytes",
+                script.len(),
+                MAX_SCRIPT_SIZE
+            );
+        }
+        if script.contains('\0') {
+            bail!("Script contains prohibited null character");
+        }
+
+        let preview = if script.len() > 100 {
+            format!("{}...", &script[..100])
+        } else {
+            script.to_string()
+        };
+
         self.console_logs.lock().unwrap().push(ConsoleMessage {
             level: "log".to_string(),
-            text: format!("Evaluating script: {script}"),
+            text: format!("Evaluating script: {preview}"),
             timestamp_ms: chrono::Utc::now().timestamp_millis(),
             source: Some("console".to_string()),
         });
 
         if self.cmd_tx.is_some() {
-            let res = self
-                .send_cdp(
-                    "Runtime.evaluate",
-                    Some(serde_json::json!({
-                        "expression": script,
-                        "returnByValue": true
-                    })),
-                )
-                .await?;
+            let eval_future = self.send_cdp(
+                "Runtime.evaluate",
+                Some(serde_json::json!({
+                    "expression": script,
+                    "returnByValue": true,
+                    "timeout": 5000
+                })),
+            );
+
+            let res = tokio::time::timeout(Duration::from_secs(10), eval_future)
+                .await
+                .map_err(|_| anyhow!("JavaScript evaluation timed out after 10s"))??;
 
             if let Some(val) = res.get("result").and_then(|r| r.get("value")) {
                 return Ok(format!("Result: {val}"));
@@ -1420,6 +1623,10 @@ impl BrowserSession {
                     exception
                 ));
             }
+        }
+
+        if self.is_mock {
+            return Ok("Result: \"mock_evaluation\"".to_string());
         }
 
         Err(anyhow::anyhow!(
@@ -1481,6 +1688,14 @@ impl BrowserSession {
             .ok_or_else(|| anyhow!("Reference '{element_ref}' not found in current snapshot"))?;
         Ok((x, y))
     }
+
+    /// Cleanly closes the browser session via CDP.
+    pub async fn close(&self) -> Result<()> {
+        if self.cmd_tx.is_some() {
+            let _ = self.send_cdp("Browser.close", None).await;
+        }
+        Ok(())
+    }
 }
 
 impl Drop for BrowserSession {
@@ -1539,7 +1754,7 @@ mod tests {
 
         let net = session.get_network_records().await;
         assert!(!net.is_empty());
-        assert_eq!(net[0].url, "https://example.com");
+        assert!(net[0].url.starts_with("https://example.com"));
 
         // 7. Screenshot - returns error in mock mode (expected)
         let shot = session.screenshot(None).await;
@@ -1576,5 +1791,109 @@ mod tests {
         let diff = session.diff_heap_snapshots(&snap1, &snap2);
         assert!(diff.potential_leak);
         assert!(diff.analysis.contains("WARNING"));
+    }
+
+    #[test]
+    fn test_navigation_security_boundaries() {
+        let config = BrowserConfig::default();
+
+        // 1. Block cloud metadata service
+        assert!(
+            validate_and_sanitize_navigation_url(
+                "http://169.254.169.254/latest/meta-data",
+                &config
+            )
+            .is_err()
+        );
+        assert!(
+            validate_and_sanitize_navigation_url(
+                "http://metadata.google.internal/computeMetadata/v1/",
+                &config
+            )
+            .is_err()
+        );
+
+        // 2. Block localhost / loopback
+        assert!(validate_and_sanitize_navigation_url("http://localhost:8080", &config).is_err());
+        assert!(validate_and_sanitize_navigation_url("http://127.0.0.1:3000", &config).is_err());
+        assert!(validate_and_sanitize_navigation_url("http://[::1]:8080", &config).is_err());
+
+        // 3. Block private RFC 1918 networks
+        assert!(validate_and_sanitize_navigation_url("http://10.0.0.1", &config).is_err());
+        assert!(validate_and_sanitize_navigation_url("http://172.16.5.1", &config).is_err());
+        assert!(validate_and_sanitize_navigation_url("http://192.168.1.1", &config).is_err());
+
+        // 4. Block unsupported schemes
+        assert!(validate_and_sanitize_navigation_url("file:///etc/passwd", &config).is_err());
+        assert!(validate_and_sanitize_navigation_url("javascript:alert(1)", &config).is_err());
+
+        // 5. Allow public internet addresses
+        assert!(validate_and_sanitize_navigation_url("https://example.com", &config).is_ok());
+        assert!(validate_and_sanitize_navigation_url("about:blank", &config).is_ok());
+    }
+
+    #[test]
+    fn test_navigation_domain_allowlist_and_blocklist() {
+        let config = BrowserConfig {
+            domain_blocklist: vec!["evil.com".to_string(), "malware.org".to_string()],
+            domain_allowlist: vec!["trusted.org".to_string(), "example.com".to_string()],
+            ..Default::default()
+        };
+
+        assert!(validate_and_sanitize_navigation_url("https://evil.com", &config).is_err());
+        assert!(validate_and_sanitize_navigation_url("https://sub.evil.com", &config).is_err());
+        assert!(validate_and_sanitize_navigation_url("https://untrusted.com", &config).is_err());
+        assert!(validate_and_sanitize_navigation_url("https://trusted.org", &config).is_ok());
+        assert!(validate_and_sanitize_navigation_url("https://example.com", &config).is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_evaluate_script_bounds_and_sanitization() {
+        let config = BrowserConfig {
+            mock_mode: true,
+            ..Default::default()
+        };
+        let session = BrowserSession::launch(config).await.unwrap();
+
+        // Null character rejection
+        let null_res = session.evaluate("console.log('hi\0bye');").await;
+        assert!(null_res.is_err());
+        assert!(null_res.unwrap_err().to_string().contains("null character"));
+
+        // Script size limit rejection
+        let huge_script = "a".repeat(257 * 1024);
+        let size_res = session.evaluate(&huge_script).await;
+        assert!(size_res.is_err());
+        assert!(
+            size_res
+                .unwrap_err()
+                .to_string()
+                .contains("exceeds maximum allowable limit")
+        );
+
+        // Mock evaluation succeeds
+        let valid_eval = session.evaluate("2 + 2").await.unwrap();
+        assert!(valid_eval.contains("mock_evaluation"));
+    }
+
+    #[tokio::test]
+    async fn test_ws_frame_length_limit_rejection() {
+        // Construct an invalid frame claiming payload length > 16 MB (initial_len = 127 with 100 MB)
+        let mut frame_header = vec![
+            0x81, // FIN + Text
+            0x7F, // 127 -> 8-byte length follows
+        ];
+        // 100 MB = 104857600
+        let len_bytes = 104_857_600u64.to_be_bytes();
+        frame_header.extend_from_slice(&len_bytes);
+
+        let mut cursor = std::io::Cursor::new(frame_header);
+        let res = read_ws_frame(&mut cursor).await;
+        assert!(res.is_err());
+        assert!(
+            res.unwrap_err()
+                .to_string()
+                .contains("exceeds maximum limit")
+        );
     }
 }
