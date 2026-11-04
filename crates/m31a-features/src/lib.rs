@@ -819,31 +819,45 @@ impl FeatureFlagManager {
         if !path.exists() {
             return Ok(());
         }
-        let content = std::fs::read_to_string(&path)?;
-        let flags: HashMap<String, FeatureFlag> = serde_json::from_str(&content)?;
+        let content = std::fs::read_to_string(&path)
+            .with_context(|| format!("Failed to read feature flags file: {}", path.display()))?;
+        let flags: HashMap<String, FeatureFlag> = serde_json::from_str(&content)
+            .with_context(|| format!("Failed to parse feature flags JSON: {}", path.display()))?;
         *self.flags.try_write().expect("uncontended") = flags;
 
         let audit_path = self.storage_path.join("feature_flags_audit.json");
         if audit_path.exists() {
-            let content = std::fs::read_to_string(&audit_path)?;
-            let audit: Vec<AuditEntry> = serde_json::from_str(&content)?;
+            let content = std::fs::read_to_string(&audit_path).with_context(|| {
+                format!("Failed to read audit log file: {}", audit_path.display())
+            })?;
+            let audit: Vec<AuditEntry> = serde_json::from_str(&content).with_context(|| {
+                format!("Failed to parse audit log JSON: {}", audit_path.display())
+            })?;
             *self.audit_log.try_write().expect("uncontended") = audit;
         }
         Ok(())
     }
 
-    /// Save flags to storage (async, called from async context)
+    /// Save flags to storage atomically
     async fn save_to_storage(&self) -> Result<()> {
         std::fs::create_dir_all(&self.storage_path)?;
         let path = self.storage_path.join("feature_flags.json");
         let flags = self.flags.read().await.clone();
         let content = serde_json::to_string_pretty(&flags)?;
-        std::fs::write(path, content)?;
+        let tmp_path = self
+            .storage_path
+            .join(format!("feature_flags.{}.tmp", Uuid::new_v4()));
+        std::fs::write(&tmp_path, content)?;
+        std::fs::rename(&tmp_path, path)?;
 
         let audit_path = self.storage_path.join("feature_flags_audit.json");
         let audit = self.audit_log.read().await.clone();
-        let content = serde_json::to_string_pretty(&audit)?;
-        std::fs::write(audit_path, content)?;
+        let audit_content = serde_json::to_string_pretty(&audit)?;
+        let tmp_audit_path = self
+            .storage_path
+            .join(format!("feature_flags_audit.{}.tmp", Uuid::new_v4()));
+        std::fs::write(&tmp_audit_path, audit_content)?;
+        std::fs::rename(&tmp_audit_path, audit_path)?;
         Ok(())
     }
 
@@ -1117,19 +1131,46 @@ impl FeatureFlagManager {
 
         // Check dependencies
         for dep in &flag.dependencies {
-            if let Some(dep_flag) = self.flags.read().await.get(dep)
-                && dep_flag.state != FeatureState::Enabled
-            {
-                return Ok(EvaluationResult {
-                    flag_id: flag_id.to_string(),
-                    enabled: false,
-                    variant: None,
-                    reason: EvaluationReason::DependencyDisabled,
-                    timestamp: SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap()
-                        .as_secs(),
-                });
+            let flags_guard = self.flags.read().await;
+            match flags_guard.get(dep) {
+                Some(dep_flag) => {
+                    if dep_flag.state == FeatureState::Archived {
+                        return Ok(EvaluationResult {
+                            flag_id: flag_id.to_string(),
+                            enabled: false,
+                            variant: None,
+                            reason: EvaluationReason::Archived,
+                            timestamp: SystemTime::now()
+                                .duration_since(UNIX_EPOCH)
+                                .unwrap()
+                                .as_secs(),
+                        });
+                    }
+                    if dep_flag.state != FeatureState::Enabled {
+                        return Ok(EvaluationResult {
+                            flag_id: flag_id.to_string(),
+                            enabled: false,
+                            variant: None,
+                            reason: EvaluationReason::DependencyDisabled,
+                            timestamp: SystemTime::now()
+                                .duration_since(UNIX_EPOCH)
+                                .unwrap()
+                                .as_secs(),
+                        });
+                    }
+                }
+                None => {
+                    return Ok(EvaluationResult {
+                        flag_id: flag_id.to_string(),
+                        enabled: false,
+                        variant: None,
+                        reason: EvaluationReason::DependencyDisabled,
+                        timestamp: SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs(),
+                    });
+                }
             }
         }
 
@@ -1153,6 +1194,35 @@ impl FeatureFlagManager {
         if !flag.targeting.environments.is_empty()
             && !flag.targeting.environments.contains(&context.environment)
         {
+            return Ok(EvaluationResult {
+                flag_id: flag_id.to_string(),
+                enabled: false,
+                variant: None,
+                reason: EvaluationReason::TargetedDisabled,
+                timestamp: SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs(),
+            });
+        }
+
+        // Check custom attributes requirements
+        let custom_attrs_match = if flag.targeting.custom_attributes.is_empty() {
+            true
+        } else {
+            flag.targeting
+                .custom_attributes
+                .iter()
+                .all(|(k, allowed_vals)| {
+                    if let Some(actual) = context.custom_attributes.get(k) {
+                        allowed_vals.contains(actual)
+                    } else {
+                        false
+                    }
+                })
+        };
+
+        if !flag.targeting.custom_attributes.is_empty() && !custom_attrs_match {
             return Ok(EvaluationResult {
                 flag_id: flag_id.to_string(),
                 enabled: false,
@@ -1214,8 +1284,21 @@ impl FeatureFlagManager {
 
     /// Check if user is in rollout percentage
     fn check_rollout(&self, flag: &FeatureFlag, context: &EvaluationContext) -> Result<bool> {
-        let current_stage = &flag.rollout.stages[flag.rollout.current_stage];
-        let percentage = current_stage.percentage;
+        let percentage = match flag.rollout.strategy {
+            RolloutStrategy::Instant => flag.rollout.percentage,
+            RolloutStrategy::Manual => flag.rollout.percentage,
+            RolloutStrategy::Gradual | RolloutStrategy::Canary | RolloutStrategy::Ring => {
+                if flag.rollout.stages.is_empty() {
+                    flag.rollout.percentage
+                } else {
+                    let stage_idx = flag
+                        .rollout
+                        .current_stage
+                        .min(flag.rollout.stages.len() - 1);
+                    flag.rollout.stages[stage_idx].percentage
+                }
+            }
+        };
 
         if percentage >= 100 {
             return Ok(true);
@@ -1224,9 +1307,13 @@ impl FeatureFlagManager {
             return Ok(false);
         }
 
-        // Deterministic assignment based on user_id + flag_id
-        let user_id = context.user_id.as_deref().unwrap_or("anonymous");
-        let hash_input = format!("{}:{}", flag.id, user_id);
+        // Deterministic assignment based on user_id, session_id, or anonymous
+        let assign_key = context
+            .user_id
+            .as_deref()
+            .or(context.session_id.as_deref())
+            .unwrap_or("anonymous");
+        let hash_input = format!("{}:{}", flag.id, assign_key);
         let hash = self.hash_string(&hash_input);
         let bucket = (hash % 100) as u8;
 
@@ -1336,5 +1423,112 @@ mod tests {
         // web_search should be enabled for internal users in development
         let result = manager.evaluate("web_search", &context).await.unwrap();
         assert!(result.enabled);
+    }
+
+    #[tokio::test]
+    async fn test_empty_stages_instant_rollout_does_not_panic() {
+        let temp = tempfile::tempdir().unwrap();
+        let manager = FeatureFlagManager::new(temp.path().to_path_buf());
+
+        let context = EvaluationContext {
+            user_id: Some("user-1".to_string()),
+            groups: vec![],
+            environment: "production".to_string(),
+            custom_attributes: HashMap::new(),
+            session_id: None,
+        };
+
+        // unified_exec has strategy Instant with empty stages; must not panic
+        let res = manager.evaluate("unified_exec", &context).await.unwrap();
+        assert!(res.enabled);
+        assert_eq!(res.reason, EvaluationReason::RolloutEnabled);
+    }
+
+    #[tokio::test]
+    async fn test_custom_attributes_targeting_and_archived_dependency() {
+        let temp = tempfile::tempdir().unwrap();
+        let manager = FeatureFlagManager::new(temp.path().to_path_buf());
+
+        // Create base flag and dependent flag
+        let base_flag = FeatureFlag {
+            id: "base_feature".to_string(),
+            name: "Base Feature".to_string(),
+            description: "Base".to_string(),
+            category: FeatureCategory::Stable,
+            state: FeatureState::Archived,
+            rollout: RolloutConfig {
+                strategy: RolloutStrategy::Instant,
+                percentage: 100,
+                stages: vec![],
+                current_stage: 0,
+            },
+            targeting: TargetingRules::default(),
+            dependencies: vec![],
+            metadata: FeatureMetadata {
+                jira_ticket: None,
+                github_pr: None,
+                owner_team: "core".to_string(),
+                documentation_url: None,
+                migration_guide_url: None,
+                sunset_date: None,
+            },
+            created_at: 0,
+            updated_at: 0,
+            created_by: "test".to_string(),
+        };
+
+        let mut custom_map = HashMap::new();
+        custom_map.insert("tier".to_string(), vec!["enterprise".to_string()]);
+
+        let child_flag = FeatureFlag {
+            id: "child_feature".to_string(),
+            name: "Child Feature".to_string(),
+            description: "Child".to_string(),
+            category: FeatureCategory::Beta,
+            state: FeatureState::Enabled,
+            rollout: RolloutConfig {
+                strategy: RolloutStrategy::Instant,
+                percentage: 100,
+                stages: vec![],
+                current_stage: 0,
+            },
+            targeting: TargetingRules {
+                custom_attributes: custom_map,
+                ..Default::default()
+            },
+            dependencies: vec!["base_feature".to_string()],
+            metadata: FeatureMetadata {
+                jira_ticket: None,
+                github_pr: None,
+                owner_team: "core".to_string(),
+                documentation_url: None,
+                migration_guide_url: None,
+                sunset_date: None,
+            },
+            created_at: 0,
+            updated_at: 0,
+            created_by: "test".to_string(),
+        };
+
+        manager
+            .create_flag(base_flag, "test".to_string())
+            .await
+            .unwrap();
+        manager
+            .create_flag(child_flag, "test".to_string())
+            .await
+            .unwrap();
+
+        let ctx = EvaluationContext {
+            user_id: Some("u1".to_string()),
+            groups: vec![],
+            environment: "production".to_string(),
+            custom_attributes: HashMap::from([("tier".to_string(), "enterprise".to_string())]),
+            session_id: None,
+        };
+
+        let res = manager.evaluate("child_feature", &ctx).await.unwrap();
+        assert!(!res.enabled);
+        assert_eq!(res.reason, EvaluationReason::Archived);
     }
 }
