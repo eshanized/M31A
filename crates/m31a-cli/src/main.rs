@@ -515,6 +515,11 @@ enum Commands {
             help = "Use device code flow for headless/remote login"
         )]
         device_code: bool,
+        #[arg(
+            long = "browser",
+            help = "Use browser-based authorization code flow with PKCE"
+        )]
+        browser: bool,
     },
     #[command(about = "Log out and purge cached authentication credentials")]
     Logout,
@@ -1252,7 +1257,7 @@ async fn main() -> Result<()> {
         config.approval = ApprovalPolicy::ApproveForMe;
     }
     if cli.dangerously_bypass {
-        config.approval = ApprovalPolicy::Never;
+        config.dangerously_bypass = true;
         config.sandbox = SandboxPolicy::DangerFullAccess;
     }
 
@@ -2262,17 +2267,39 @@ async fn main() -> Result<()> {
         Some(Commands::Login {
             api_key,
             device_code,
+            browser,
         }) => {
             let config_dir = Config::config_dir();
             std::fs::create_dir_all(&config_dir)?;
-            let key_to_store = if let Some(key) = api_key {
-                key
+
+            let (key_to_store, oauth_token_opt) = if let Some(key) = api_key {
+                (key, None)
+            } else if browser {
+                println!(
+                    "{}",
+                    "Starting browser PKCE login flow (RFC 7636)...".cyan()
+                );
+                let client = reqwest::Client::new();
+                let config = m31a_core::AuthCodeFlowConfig::default();
+                let tok = m31a_core::execute_browser_pkce_flow(
+                    &client,
+                    &config,
+                    |auth_url| {
+                        println!("\n{}", "To authenticate with your browser:".bold());
+                        println!("  Open URL: {}\n", auth_url.green().underline());
+                        println!("Waiting for browser authorization redirect on local port (timeout 180s)...");
+                    },
+                    Duration::from_secs(180),
+                )
+                .await
+                .context("Browser authorization failed")?;
+                (tok.access_token.clone(), Some(tok))
             } else if device_code {
                 println!("{}", "Starting device code login flow (RFC 8628)...".cyan());
                 let client = reqwest::Client::new();
                 let config = m31a_core::DeviceAuthRequestConfig::default();
 
-                match m31a_core::execute_device_code_flow(&client, &config, |code_resp| {
+                let tok = m31a_core::execute_device_code_flow(&client, &config, |code_resp| {
                     println!("\n{}", "To authenticate this device:".bold());
                     if let Some(ref uri_complete) = code_resp.verification_uri_complete {
                         println!(
@@ -2291,26 +2318,15 @@ async fn main() -> Result<()> {
                     );
                 })
                 .await
-                {
-                    Ok(tok) => tok.access_token,
-                    Err(e) => {
-                        println!(
-                            "{}",
-                            format!(
-                                "Device login notice ({}). Using offline mock session token.",
-                                e
-                            )
-                            .yellow()
-                        );
-                        format!("m31a-auth-token-{}", &uuid::Uuid::new_v4().to_string()[..8])
-                    }
-                }
+                .context("Device code authentication failed")?;
+                (tok.access_token.clone(), Some(tok))
             } else {
                 print!("Enter NVIDIA NIM API Key or Backend Token: ");
                 io::stdout().flush()?;
                 let mut input = String::new();
                 io::stdin().read_line(&mut input)?;
-                input.trim().to_string()
+                let trimmed = input.trim().to_string();
+                (trimmed, None)
             };
 
             if key_to_store.is_empty() {
@@ -2325,6 +2341,38 @@ async fn main() -> Result<()> {
                 &key_to_store,
                 SecretScope::Global,
             )?;
+
+            if let Some(tok) = oauth_token_opt {
+                vault.set_secret(
+                    LocalSecretsNamespace::M31aAuth,
+                    "OAUTH_ACCESS_TOKEN",
+                    &tok.access_token,
+                    SecretScope::Global,
+                )?;
+                if let Some(ref refresh) = tok.refresh_token {
+                    vault.set_secret(
+                        LocalSecretsNamespace::M31aAuth,
+                        "OAUTH_REFRESH_TOKEN",
+                        refresh,
+                        SecretScope::Global,
+                    )?;
+                }
+                vault.set_secret(
+                    LocalSecretsNamespace::M31aAuth,
+                    "OAUTH_EXPIRES_AT",
+                    &tok.expires_at.to_string(),
+                    SecretScope::Global,
+                )?;
+                if let Some(ref account_id) = tok.account_id {
+                    vault.set_secret(
+                        LocalSecretsNamespace::M31aAuth,
+                        "OAUTH_ACCOUNT_ID",
+                        account_id,
+                        SecretScope::Global,
+                    )?;
+                }
+            }
+
             println!(
                 "{}",
                 "Successfully authenticated and saved credentials to vault."
@@ -2338,6 +2386,23 @@ async fn main() -> Result<()> {
             let config_dir = Config::config_dir();
             let vault_dir = config_dir.join("vault");
             if vault_dir.exists() {
+                if let Ok(vault) = m31a_core::LocalEncryptedVault::new(vault_dir.clone())
+                    && let Ok(Some(refresh_token)) =
+                        vault.get_secret(LocalSecretsNamespace::M31aAuth, "OAUTH_REFRESH_TOKEN")
+                {
+                    let client = reqwest::Client::new();
+                    let default_config = m31a_core::AuthCodeFlowConfig::default();
+                    if let Some(ref revoke_ep) = default_config.revocation_endpoint {
+                        let _ = m31a_core::revoke_oauth_token(
+                            &client,
+                            revoke_ep,
+                            &default_config.client_id,
+                            &refresh_token,
+                            Some("refresh_token"),
+                        )
+                        .await;
+                    }
+                }
                 let _ = std::fs::remove_dir_all(vault_dir);
             }
             println!(
@@ -3958,6 +4023,7 @@ async fn run_turn(
             m31a_core::prompts::CollaborationMode::Default
         },
         authoritative_system_prompt: Some(system_instructions.clone()),
+        dangerously_bypass: config.dangerously_bypass,
         ..engine
     };
 
@@ -4529,9 +4595,25 @@ mod tests {
             Some(Commands::Login {
                 api_key,
                 device_code,
+                browser,
             }) => {
                 assert_eq!(api_key, Some("nvapi-test12345".to_string()));
                 assert!(!device_code);
+                assert!(!browser);
+            }
+            _ => panic!("Expected Commands::Login"),
+        }
+
+        let cli_browser = Cli::try_parse_from(["m31a", "login", "--browser"]).unwrap();
+        match cli_browser.command {
+            Some(Commands::Login {
+                api_key,
+                device_code,
+                browser,
+            }) => {
+                assert_eq!(api_key, None);
+                assert!(!device_code);
+                assert!(browser);
             }
             _ => panic!("Expected Commands::Login"),
         }
