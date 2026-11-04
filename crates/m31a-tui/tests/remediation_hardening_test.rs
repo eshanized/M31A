@@ -1,6 +1,6 @@
 use m31a_core::{ApprovalPolicy, Config, SandboxPolicy};
 use m31a_provider::models::ModelInfo;
-use m31a_tui::app::App;
+use m31a_tui::app::{App, TuiEvent};
 use m31a_tui::icons::Icon;
 use m31a_tui::modals::{
     CommandPaletteGeometry, CommandPaletteItem, ConnectivityDetails, ConnectivityStatus,
@@ -604,14 +604,29 @@ async fn test_async_model_switch_lifecycle() {
     // Provider status message should indicate activation in progress
     assert!(app.provider_status_message.is_some());
 
-    // Event should be received from the background task
-    let evt = tokio::time::timeout(std::time::Duration::from_secs(3), app.event_rx.recv())
-        .await
-        .expect("probe event delivered")
-        .expect("channel open");
-
-    // Handle event in App
-    app.handle_tui_event(evt);
+    // Drain events until ModelActivationResult for target is received and processed
+    let mut activation_found = false;
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    while tokio::time::Instant::now() < deadline {
+        match tokio::time::timeout(std::time::Duration::from_millis(500), app.event_rx.recv()).await
+        {
+            Ok(Some(evt)) => {
+                let is_activation =
+                    matches!(&evt, TuiEvent::ModelActivationResult { slug, .. } if slug == target);
+                app.handle_tui_event(evt);
+                if is_activation {
+                    activation_found = true;
+                    break;
+                }
+            }
+            Ok(None) => break,
+            Err(_) => continue,
+        }
+    }
+    assert!(
+        activation_found,
+        "ModelActivationResult for target model must be delivered"
+    );
 
     // Verify atomic commit
     assert_eq!(app.active_model, target);
