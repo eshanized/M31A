@@ -18,6 +18,7 @@ use crossterm::{
 use futures_util::StreamExt;
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::io::stdout;
+use std::sync::Arc;
 use std::time::Duration;
 
 use crate::app::{App, AppStatus, TuiEvent};
@@ -230,6 +231,13 @@ pub fn handle_modal_key_event(app: &mut App, modal: ModalState, key: crossterm::
                     app.config
                         .features
                         .insert(key.as_str().to_string(), *enabled);
+                    if let Some(reg) = Arc::get_mut(&mut app.features_registry) {
+                        reg.set_enabled(*key, *enabled);
+                    } else {
+                        let mut new_reg = (*app.features_registry).clone();
+                        new_reg.set_enabled(*key, *enabled);
+                        app.features_registry = Arc::new(new_reg);
+                    }
                     if let Err(e) = app.config.save() {
                         tracing::warn!("Failed to persist config after feature toggle: {e}");
                     }
