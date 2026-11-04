@@ -1549,6 +1549,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "tracing",
+ "url",
  "uuid",
  "which",
 ]
@@ -1634,6 +1635,7 @@ name = "m31a-code-mode"
 version = "0.1.13"
 dependencies = [
  "anyhow",
+ "async-trait",
  "chrono",
  "libc",
  "m31a-core",
@@ -1775,8 +1777,10 @@ name = "m31a-extension-api"
 version = "0.1.13"
 dependencies = [
  "anyhow",
+ "dirs",
  "libloading",
  "m31a-core",
+ "reqwest 0.12.28",
  "semver",
  "serde",
  "serde_json",
@@ -1785,6 +1789,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "toml",
+ "tracing",
 ]
 
 [[package]]
