@@ -181,6 +181,127 @@ pub fn compute_sigv4_signature(signing_key: &[u8], string_to_sign: &str) -> Resu
     Ok(to_hex(&sig))
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SigV4SignedHeaders {
+    pub authorization: String,
+    pub x_amz_date: String,
+    pub x_amz_content_sha256: String,
+    pub x_amz_security_token: Option<String>,
+}
+
+/// Parameters for calculating an AWS SigV4 authorization signature.
+pub struct SigV4Parameters<'a> {
+    pub method: &'a str,
+    pub uri: &'a str,
+    pub query_params: &'a [(&'a str, &'a str)],
+    pub headers: &'a [(&'a str, &'a str)],
+    pub payload: &'a [u8],
+    pub keys: &'a AwsAccessKeys,
+    pub region: &'a str,
+    pub service: &'a str,
+    pub amz_date: &'a str, // Format: YYYYMMDDTHHMMSSZ, e.g. "20261104T120000Z"
+}
+
+/// Generates the canonical request string, signed headers string, and payload hash.
+pub fn generate_canonical_request(
+    method: &str,
+    uri: &str,
+    query_params: &[(&str, &str)],
+    headers: &[(&str, &str)],
+    payload: &[u8],
+) -> (String, String, String) {
+    let method_upper = method.to_uppercase();
+    let canonical_uri = if uri.is_empty() { "/" } else { uri };
+
+    // Query string: sort by key, format key=val&...
+    let mut sorted_query = query_params.to_vec();
+    sorted_query.sort_by(|a, b| a.0.cmp(b.0));
+    let canonical_query_str = sorted_query
+        .iter()
+        .map(|(k, v)| format!("{}={}", k, v))
+        .collect::<Vec<_>>()
+        .join("&");
+
+    // Canonical headers: lowercased, trimmed, sorted by name
+    let mut header_map: HashMap<String, String> = HashMap::new();
+    for (k, v) in headers {
+        let key_lower = k.to_ascii_lowercase();
+        header_map.insert(key_lower, v.trim().to_string());
+    }
+
+    let mut sorted_header_keys: Vec<String> = header_map.keys().cloned().collect();
+    sorted_header_keys.sort();
+
+    let mut canonical_headers = String::new();
+    for k in &sorted_header_keys {
+        canonical_headers.push_str(&format!("{}:{}\n", k, header_map[k]));
+    }
+
+    let signed_headers = sorted_header_keys.join(";");
+    let hashed_payload = to_hex(&Sha256::digest(payload));
+
+    let canonical_request = format!(
+        "{}\n{}\n{}\n{}\n{}\n{}",
+        method_upper,
+        canonical_uri,
+        canonical_query_str,
+        canonical_headers,
+        signed_headers,
+        hashed_payload
+    );
+
+    (canonical_request, signed_headers, hashed_payload)
+}
+
+/// Signs an HTTP request using AWS SigV4 specification.
+pub fn sign_sigv4_request(params: &SigV4Parameters) -> Result<SigV4SignedHeaders> {
+    let date_stamp = if params.amz_date.len() >= 8 {
+        &params.amz_date[..8]
+    } else {
+        anyhow::bail!("Invalid amz_date format; expected YYYYMMDDTHHMMSSZ");
+    };
+
+    let (canonical_request, signed_headers, hashed_payload) = generate_canonical_request(
+        params.method,
+        params.uri,
+        params.query_params,
+        params.headers,
+        params.payload,
+    );
+
+    let hashed_canonical_request = to_hex(&Sha256::digest(canonical_request.as_bytes()));
+    let credential_scope = format!(
+        "{}/{}/{}/aws4_request",
+        date_stamp, params.region, params.service
+    );
+
+    let string_to_sign = format!(
+        "AWS4-HMAC-SHA256\n{}\n{}\n{}",
+        params.amz_date, credential_scope, hashed_canonical_request
+    );
+
+    let signing_key = derive_sigv4_signing_key(
+        &params.keys.secret_access_key,
+        date_stamp,
+        params.region,
+        params.service,
+    )?;
+
+    let signature = compute_sigv4_signature(&signing_key, &string_to_sign)?;
+
+    let authorization = format!(
+        "AWS4-HMAC-SHA256 Credential={}/{}, SignedHeaders={}, Signature={}",
+        params.keys.access_key_id, credential_scope, signed_headers, signature
+    );
+
+    Ok(SigV4SignedHeaders {
+        authorization,
+        x_amz_date: params.amz_date.to_string(),
+        x_amz_content_sha256: hashed_payload,
+        x_amz_security_token: params.keys.session_token.clone(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -251,5 +372,46 @@ aws_secret_access_key = SECRETDEFAULT
             "AWS4-HMAC-SHA256\n20130524T000000Z\n20130524/us-east-1/s3/aws4_request\nexample_hash";
         let signature = compute_sigv4_signature(&key, string_to_sign).unwrap();
         assert_eq!(signature.len(), 64);
+    }
+
+    #[test]
+    fn test_sigv4_canonical_request_and_sign_request() {
+        let keys = AwsAccessKeys {
+            access_key_id: "AKIDEXAMPLE".to_string(),
+            secret_access_key: "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY".to_string(),
+            session_token: Some("session-tok-123".to_string()),
+        };
+
+        let headers = [
+            ("Host", "bedrock.us-east-1.amazonaws.com"),
+            ("x-amz-date", "20261104T120000Z"),
+        ];
+
+        let params = SigV4Parameters {
+            method: "POST",
+            uri: "/model/anthropic.claude-v2/invoke",
+            query_params: &[],
+            headers: &headers,
+            payload: b"{\"prompt\": \"Hello\"}",
+            keys: &keys,
+            region: "us-east-1",
+            service: "bedrock",
+            amz_date: "20261104T120000Z",
+        };
+
+        let signed = sign_sigv4_request(&params).unwrap();
+        assert!(signed.authorization.starts_with(
+            "AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20261104/us-east-1/bedrock/aws4_request"
+        ));
+        assert!(
+            signed
+                .authorization
+                .contains("SignedHeaders=host;x-amz-date")
+        );
+        assert_eq!(signed.x_amz_date, "20261104T120000Z");
+        assert_eq!(
+            signed.x_amz_security_token,
+            Some("session-tok-123".to_string())
+        );
     }
 }
