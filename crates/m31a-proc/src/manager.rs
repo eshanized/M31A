@@ -386,14 +386,16 @@ impl ProcessManager {
         // Graceful termination
         #[cfg(unix)]
         {
-            // Send SIGTERM to process group or pid
+            // Send SIGTERM to entire process group and pid
             unsafe {
-                libc::kill(pid as i32, libc::SIGTERM);
+                let pgid = pid as i32;
+                let _ = libc::kill(-pgid, libc::SIGTERM);
+                let _ = libc::kill(pgid, libc::SIGTERM);
             }
 
             // Wait for grace period
             let grace = Duration::from_millis(self.inner.config.termination_grace_period_ms);
-            let check_interval = Duration::from_millis(100);
+            let check_interval = Duration::from_millis(50);
             let mut elapsed = Duration::from_millis(0);
             let mut exited = false;
 
@@ -408,9 +410,11 @@ impl ProcessManager {
             }
 
             if !exited {
-                // Force kill with SIGKILL
+                // Force kill entire process group with SIGKILL
                 unsafe {
-                    libc::kill(pid as i32, libc::SIGKILL);
+                    let pgid = pid as i32;
+                    let _ = libc::kill(-pgid, libc::SIGKILL);
+                    let _ = libc::kill(pgid, libc::SIGKILL);
                 }
                 let mut st = p.status.write().await;
                 *st = ProcessStatus::Terminated { signal: 9 };
@@ -484,7 +488,9 @@ impl ProcessManager {
     #[cfg(unix)]
     fn kill_pid_force(&self, pid: u32) {
         unsafe {
-            libc::kill(pid as i32, libc::SIGKILL);
+            let pgid = pid as i32;
+            let _ = libc::kill(-pgid, libc::SIGKILL);
+            let _ = libc::kill(pgid, libc::SIGKILL);
         }
     }
 
