@@ -5,7 +5,6 @@
 use anyhow::{Context, Result};
 use m31a_core::SandboxPolicy;
 use m31a_core::types::{FunctionDefinition, ToolDefinition};
-use m31a_tools::ToolRegistry;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
@@ -18,7 +17,7 @@ pub use crate::protocol::{
     PUBLIC_TOOL_NAME as EXEC_TOOL_NAME, WAIT_TOOL_NAME, build_exec_tool_description,
     build_wait_tool_description, parse_exec_source,
 };
-use crate::runtime::CodeModeRuntime;
+use crate::runtime::{CodeModeRuntime, ProcessLifecycleState};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecPragma {
@@ -42,6 +41,7 @@ pub struct CellState {
     pub output_accumulator: String,
     pub is_finished: bool,
     pub unconsumed_offset: usize,
+    pub lifecycle_state: ProcessLifecycleState,
 }
 
 #[derive(Clone)]
@@ -140,7 +140,7 @@ impl CodeModeOrchestrator {
     pub async fn execute_batch(
         &self,
         source: &str,
-        registry: &ToolRegistry,
+        dispatcher: &(dyn crate::CodeModeToolDispatcher + Send + Sync),
         cwd: &Path,
         policy: SandboxPolicy,
     ) -> Result<String> {
@@ -149,17 +149,19 @@ impl CodeModeOrchestrator {
         let cell_id = format!("cell_{}", Uuid::new_v4().simple());
         let outcome = self
             .runtime
-            .run(&parsed.code, registry, cwd, policy, parsed.yield_time_ms)
+            .run(&parsed.code, dispatcher, cwd, policy, parsed.yield_time_ms)
             .await?;
 
+        let is_finished = !outcome.yielded || outcome.status.is_terminal();
         let mut cell = CellState {
             cell_id: cell_id.clone(),
             output_accumulator: outcome.output.clone(),
-            is_finished: !outcome.yielded,
+            is_finished,
             unconsumed_offset: 0,
+            lifecycle_state: outcome.status,
         };
 
-        let result = if outcome.yielded {
+        let result = if outcome.yielded && !outcome.status.is_terminal() {
             let out = self.truncate_to_budget(&cell.output_accumulator, parsed.max_output_tokens);
             cell.unconsumed_offset = cell.output_accumulator.len();
             self.cells.lock().unwrap().insert(cell_id.clone(), cell);
@@ -188,6 +190,7 @@ impl CodeModeOrchestrator {
 
         if terminate {
             cell.is_finished = true;
+            cell.lifecycle_state = ProcessLifecycleState::Cancelled;
             return Ok(format!("Cell {} terminated by user request.", cell_id));
         }
 
@@ -197,7 +200,7 @@ impl CodeModeOrchestrator {
         let budget = max_tokens.unwrap_or(DEFAULT_MAX_OUTPUT_TOKENS);
         let out = self.truncate_to_budget(slice, budget);
 
-        if cell.is_finished {
+        if cell.is_finished || cell.lifecycle_state.is_terminal() {
             Ok(format!("Cell {} finished.\n\n{}", cell_id, out))
         } else {
             Ok(format!(
@@ -224,6 +227,7 @@ impl CodeModeOrchestrator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use m31a_tools::ToolRegistry;
 
     #[tokio::test]
     async fn test_orchestrator_nested_tools_and_store() {
