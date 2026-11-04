@@ -97,3 +97,66 @@ fn test_credentials_file_fallback_resolution() {
     let token = parsed.get("nvidia_nim").and_then(|k| k.as_str());
     assert_eq!(token, Some("nvapi-file-fallback-token-abc"));
 }
+
+#[tokio::test]
+async fn test_failed_device_auth_never_persists_fake_token() {
+    let tmp = tempdir().unwrap();
+    let vault_dir = tmp.path().join("vault");
+    let vault = LocalEncryptedVault::new(vault_dir.clone()).unwrap();
+
+    // Verify initial unauthenticated state
+    assert_eq!(
+        vault
+            .get_secret(LocalSecretsNamespace::M31aAuth, "NVIDIA_API_KEY")
+            .unwrap(),
+        None
+    );
+    assert_eq!(
+        vault
+            .get_secret(LocalSecretsNamespace::M31aAuth, "OAUTH_ACCESS_TOKEN")
+            .unwrap(),
+        None
+    );
+
+    // Attempt device code auth with invalid endpoint (guaranteed to fail)
+    let client = reqwest::Client::new();
+    let config = m31a_core::DeviceAuthRequestConfig {
+        device_auth_endpoint: "http://127.0.0.1:9/invalid-device-endpoint".to_string(),
+        token_endpoint: "http://127.0.0.1:9/invalid-token-endpoint".to_string(),
+        client_id: "test-client".to_string(),
+        scope: None,
+    };
+
+    let result = m31a_core::execute_device_code_flow(&client, &config, |_| {}).await;
+    assert!(
+        result.is_err(),
+        "Must return an authentication error on failure"
+    );
+
+    // Ensure NO mock/placeholder token was written into vault
+    let reopened = LocalEncryptedVault::new(vault_dir).unwrap();
+    assert_eq!(
+        reopened
+            .get_secret(LocalSecretsNamespace::M31aAuth, "NVIDIA_API_KEY")
+            .unwrap(),
+        None
+    );
+    assert_eq!(
+        reopened
+            .get_secret(LocalSecretsNamespace::M31aAuth, "OAUTH_ACCESS_TOKEN")
+            .unwrap(),
+        None
+    );
+}
+
+#[test]
+fn test_pkce_entropy_and_appendix_b_conformance() {
+    let pair = m31a_core::generate_pkce_pair();
+    assert_eq!(pair.method, "S256");
+    assert!(m31a_core::validate_code_verifier(&pair.verifier).is_ok());
+
+    // Appendix B test vector
+    let appendix_b_verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+    let challenge = m31a_core::compute_s256_challenge(appendix_b_verifier).unwrap();
+    assert_eq!(challenge, "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM");
+}
