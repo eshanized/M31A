@@ -334,6 +334,22 @@ impl FeatureRegistry {
             }
         }
     }
+
+    /// Syncs feature overrides from a map (e.g. from `Config.features`).
+    pub fn sync_from_map(&mut self, map: &std::collections::HashMap<String, bool>) {
+        for (k, v) in map {
+            if let Some(key) = FeatureKey::from_str_name(k) {
+                self.set_enabled(key, *v);
+            }
+        }
+    }
+
+    /// Exports active overrides to a key-value map.
+    pub fn sync_to_map(&self, map: &mut std::collections::HashMap<String, bool>) {
+        for (k, v) in &self.overrides {
+            map.insert(k.as_str().to_string(), *v);
+        }
+    }
 }
 
 /// Resolves a legacy (pre-cleanup) feature key to its real successor
