@@ -44,19 +44,16 @@ pub fn verify_fd_mounts(mounts: &[String]) -> io::Result<()> {
         if flags < 0 {
             return Err(io::Error::last_os_error());
         }
-        // Take temporary reference to verify
-        let file = unsafe { File::from_raw_fd(descriptor) };
+        // Borrow file reference without taking ownership
+        let file = std::mem::ManuallyDrop::new(unsafe { File::from_raw_fd(descriptor) });
         let result =
             unsafe { libc::fcntl(file.as_raw_fd(), libc::F_SETFD, flags | libc::FD_CLOEXEC) };
         if result < 0 {
-            // Leak file to prevent close on drop if invalid fcntl
-            std::mem::forget(file);
             return Err(io::Error::last_os_error());
         }
 
         let destination = Path::new(destination);
         if !destination.is_absolute() {
-            std::mem::forget(file);
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 format!(
@@ -71,7 +68,6 @@ pub fn verify_fd_mounts(mounts: &[String]) -> io::Result<()> {
         if (descriptor_metadata.dev(), descriptor_metadata.ino())
             != (destination_metadata.dev(), destination_metadata.ino())
         {
-            std::mem::forget(file);
             return Err(io::Error::new(
                 io::ErrorKind::PermissionDenied,
                 format!(
@@ -80,9 +76,6 @@ pub fn verify_fd_mounts(mounts: &[String]) -> io::Result<()> {
                 ),
             ));
         }
-
-        // Avoid dropping file descriptor so it remains available for mounting
-        std::mem::forget(file);
     }
 
     Ok(())
