@@ -126,18 +126,16 @@ impl GoalBackwardVerifier {
                 ));
             }
 
-            // Check wiring
+            // Check wiring with real module and import analysis
             let mut wired_in = Vec::new();
             for (src, importer) in wiring_pairs {
                 if src == art {
                     let imp_full = repo_root.join(importer);
                     if imp_full.exists()
                         && let Ok(content) = std::fs::read_to_string(&imp_full)
+                        && is_component_wired(src, &content)
                     {
-                        let stem = src.file_stem().and_then(|s| s.to_str()).unwrap_or_default();
-                        if content.contains(stem) {
-                            wired_in.push(importer.clone());
-                        }
+                        wired_in.push(importer.clone());
                     }
                 }
             }
@@ -519,6 +517,112 @@ impl GoalBackwardVerifier {
     }
 }
 
+/// Extracts the logical module/package name from a source artifact path.
+pub fn extract_module_name(path: &Path) -> Option<String> {
+    let file_name = path.file_name()?.to_str()?;
+    if file_name == "mod.rs"
+        || file_name == "__init__.py"
+        || file_name == "index.ts"
+        || file_name == "index.js"
+    {
+        path.parent()?.file_name()?.to_str().map(|s| s.to_string())
+    } else {
+        path.file_stem()?.to_str().map(|s| s.to_string())
+    }
+}
+
+fn has_word_boundary(text: &str, word: &str) -> bool {
+    if word.is_empty() {
+        return false;
+    }
+    let mut start = 0;
+    while let Some(pos) = text[start..].find(word) {
+        let abs_pos = start + pos;
+        let before_ok = if abs_pos == 0 {
+            true
+        } else {
+            let prev = text[..abs_pos].chars().next_back().unwrap();
+            !prev.is_alphanumeric() && prev != '_'
+        };
+        let end_pos = abs_pos + word.len();
+        let after_ok = if end_pos == text.len() {
+            true
+        } else {
+            let next = text[end_pos..].chars().next().unwrap();
+            !next.is_alphanumeric() && next != '_'
+        };
+
+        if before_ok && after_ok {
+            return true;
+        }
+        start = abs_pos + word.len();
+    }
+    false
+}
+
+/// Performs semantic module/import analysis to determine if a component is wired into an importer.
+/// Replaces naive raw substring matching with language-aware import and module declaration checks.
+pub fn is_component_wired(src_artifact: &Path, importer_content: &str) -> bool {
+    let mod_name = match extract_module_name(src_artifact) {
+        Some(m) if !m.is_empty() => m,
+        _ => return false,
+    };
+
+    for line in importer_content.lines() {
+        let trimmed = line.trim();
+        // Skip comment lines
+        if trimmed.starts_with("//")
+            || trimmed.starts_with('#')
+            || trimmed.starts_with("/*")
+            || trimmed.starts_with('*')
+        {
+            continue;
+        }
+
+        // 1. Rust module declarations: (pub )?mod <mod_name>;
+        if let Some(rest) = trimmed
+            .strip_prefix("pub mod ")
+            .or_else(|| trimmed.strip_prefix("pub(crate) mod "))
+            .or_else(|| trimmed.strip_prefix("pub(super) mod "))
+            .or_else(|| trimmed.strip_prefix("mod "))
+        {
+            let decl = rest.trim_end_matches(';').trim();
+            if decl == mod_name {
+                return true;
+            }
+        }
+
+        // 2. Rust `use` statements: use ...::mod_name...
+        if (trimmed.starts_with("use ") || trimmed.starts_with("pub use "))
+            && has_word_boundary(trimmed, &mod_name)
+        {
+            return true;
+        }
+
+        // 3. Python imports: import foo, from foo import, from .foo import
+        if (trimmed.starts_with("import ") || trimmed.starts_with("from "))
+            && has_word_boundary(trimmed, &mod_name)
+        {
+            return true;
+        }
+
+        // 4. JS/TS imports: import ... from './foo' or require('./foo')
+        if (trimmed.contains("from ") || trimmed.contains("require("))
+            && has_word_boundary(trimmed, &mod_name)
+        {
+            return true;
+        }
+
+        // 5. Explicit qualified path usage: mod_name::...
+        let qualified = format!("{}::", mod_name);
+        if trimmed.contains(&qualified) {
+            return true;
+        }
+    }
+
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -652,5 +756,47 @@ mod tests {
                 .any(|g| g.contains("executed zero tests"))
         );
         assert!(!report.test_results[0].passed);
+    }
+
+    #[test]
+    fn test_is_component_wired_real_module_analysis() {
+        let rust_src = Path::new("crates/m31a-core/src/auth.rs");
+        let mod_rs_src = Path::new("crates/m31a-core/src/secrets/mod.rs");
+
+        // 1. Valid Rust mod declaration
+        assert!(is_component_wired(rust_src, "pub mod auth;\n"));
+        assert!(is_component_wired(rust_src, "pub(crate) mod auth;"));
+        assert!(is_component_wired(rust_src, "mod auth;\n"));
+
+        // 2. Valid Rust use declaration
+        assert!(is_component_wired(rust_src, "use crate::auth::login;\n"));
+        assert!(is_component_wired(rust_src, "pub use auth;\n"));
+
+        // 3. mod.rs parent package resolution
+        assert!(is_component_wired(mod_rs_src, "pub mod secrets;\n"));
+        assert!(is_component_wired(mod_rs_src, "use crate::secrets::vault;"));
+
+        // 4. Substring in irrelevant variable or comment must NOT match
+        assert!(!is_component_wired(
+            rust_src,
+            "// We should authorize this user\n"
+        ));
+        assert!(!is_component_wired(
+            rust_src,
+            "let authentication_token = \"xyz\";\n"
+        ));
+        assert!(!is_component_wired(rust_src, "let is_authentic = true;\n"));
+
+        // 5. Python & TS imports
+        let py_src = Path::new("services/billing.py");
+        assert!(is_component_wired(
+            py_src,
+            "from services.billing import charge_card\n"
+        ));
+        assert!(is_component_wired(py_src, "import billing\n"));
+        assert!(!is_component_wired(
+            py_src,
+            "let user_billing_code = 123;\n"
+        ));
     }
 }
