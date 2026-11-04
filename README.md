@@ -388,6 +388,8 @@ npm test --prefix sdk/typescript
 - [Extensions, Skills & MCP Integration](docs/EXTENSIONS_AND_SKILLS.md)
 - [Multi-Agent Swarm & Distributed Mesh](docs/SWARM_AND_MULTI_AGENT.md)
 - [TUI Architecture](docs/tui/TUI-ARCHITECTURE.md)
+- [Deep Implementation Gap & Production Remediation Report](docs/reports/DEEP_IMPLEMENTATION_GAP_REMEDIATION_REPORT.md)
+- [Logical Bug & Security Remediation Report](docs/reports/LOGICAL_BUG_REMEDIATION_REPORT.md)
 - [Roadmap](ROADMAP.md)
 - [Changelog](CHANGELOG.md)
 
