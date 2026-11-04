@@ -14,6 +14,16 @@ use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 use tokio::sync::Semaphore;
 
+/// Execution backend kind for background or remote tasks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionBackendKind {
+    LocalProcess,
+    LocalAgent,
+    RemoteCloudTask,
+    RemoteDistributedAgent,
+}
+
 /// Status of an asynchronous background task.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "state", rename_all = "snake_case")]
@@ -21,6 +31,8 @@ pub enum CloudTaskStatus {
     Queued,
     Running {
         started_at: u64,
+        #[serde(default)]
+        pid: Option<u32>,
     },
     Completed {
         exit_code: i32,
@@ -51,6 +63,14 @@ pub struct PersistedTaskRecord {
     pub status: CloudTaskStatus,
     pub output: Option<CloudTaskOutput>,
     pub created_at: u64,
+    #[serde(default = "default_backend_local_process")]
+    pub backend: ExecutionBackendKind,
+    #[serde(default)]
+    pub pid: Option<u32>,
+}
+
+fn default_backend_local_process() -> ExecutionBackendKind {
+    ExecutionBackendKind::LocalProcess
 }
 
 struct TaskInternal {
@@ -59,6 +79,8 @@ struct TaskInternal {
     output: Option<CloudTaskOutput>,
     abort_handle: Option<tokio::task::AbortHandle>,
     created_at: u64,
+    backend: ExecutionBackendKind,
+    pid: Option<u32>,
 }
 
 /// Asynchronous task coordinator managing distributed task execution, polling, and status reporting.
@@ -110,14 +132,46 @@ impl CloudTaskManager {
                 {
                     max_id = n;
                 }
+
+                // Startup recovery: reconcile running or queued tasks
+                let status = match &r.status {
+                    CloudTaskStatus::Running { pid, .. } => {
+                        let is_alive = pid
+                            .map(|p| {
+                                #[cfg(unix)]
+                                {
+                                    unsafe { libc::kill(p as i32, 0) == 0 }
+                                }
+                                #[cfg(not(unix))]
+                                {
+                                    false
+                                }
+                            })
+                            .unwrap_or(false);
+                        if is_alive {
+                            r.status.clone()
+                        } else {
+                            CloudTaskStatus::Failed {
+                                error: "Process terminated or lost while host was offline (startup recovery)".to_string(),
+                            }
+                        }
+                    }
+                    CloudTaskStatus::Queued => CloudTaskStatus::Failed {
+                        error: "Task queue lost due to host restart".to_string(),
+                    },
+                    other => other.clone(),
+                };
+
                 map.insert(
                     r.task_id,
                     TaskInternal {
                         command: r.command,
-                        status: r.status,
+                        status,
                         output: r.output,
                         abort_handle: None,
                         created_at: r.created_at,
+                        backend: r.backend,
+                        pid: r.pid,
                     },
                 );
             }
@@ -145,24 +199,47 @@ impl CloudTaskManager {
                     status: v.status.clone(),
                     output: v.output.clone(),
                     created_at: v.created_at,
+                    backend: v.backend,
+                    pid: v.pid,
                 })
                 .collect();
             if let Ok(json) = serde_json::to_string_pretty(&records) {
                 if let Some(parent) = path.parent() {
                     let _ = std::fs::create_dir_all(parent);
                 }
-                let _ = std::fs::write(path, json);
+                let tmp_path = path.with_extension(format!("tmp.{}", uuid::Uuid::new_v4()));
+                if std::fs::write(&tmp_path, json).is_ok() {
+                    let _ = std::fs::rename(&tmp_path, path);
+                }
             }
         }
     }
 
-    /// Submit a command for asynchronous background execution.
+    /// Submit a command for asynchronous background execution defaulting to local process backend.
     pub fn submit(
         &self,
         command_str: &str,
         cwd: &Path,
         env: HashMap<String, String>,
         timeout_secs: u64,
+    ) -> String {
+        self.submit_with_backend(
+            command_str,
+            cwd,
+            env,
+            timeout_secs,
+            ExecutionBackendKind::LocalProcess,
+        )
+    }
+
+    /// Submit a task specifying the target execution backend.
+    pub fn submit_with_backend(
+        &self,
+        command_str: &str,
+        cwd: &Path,
+        env: HashMap<String, String>,
+        timeout_secs: u64,
+        backend: ExecutionBackendKind,
     ) -> String {
         let count = self.next_counter.fetch_add(1, Ordering::SeqCst);
         let task_id = format!("task-{}", count);
@@ -181,6 +258,8 @@ impl CloudTaskManager {
                     output: None,
                     abort_handle: None,
                     created_at: now_unix,
+                    backend,
+                    pid: None,
                 },
             );
         }
@@ -205,10 +284,15 @@ impl CloudTaskManager {
                         status: v.status.clone(),
                         output: v.output.clone(),
                         created_at: v.created_at,
+                        backend: v.backend,
+                        pid: v.pid,
                     })
                     .collect();
                 if let Ok(json) = serde_json::to_string_pretty(&records) {
-                    let _ = std::fs::write(path, json);
+                    let tmp_path = path.with_extension(format!("tmp.{}", uuid::Uuid::new_v4()));
+                    if std::fs::write(&tmp_path, json).is_ok() {
+                        let _ = std::fs::rename(&tmp_path, path);
+                    }
                 }
             }
         };
@@ -229,20 +313,23 @@ impl CloudTaskManager {
                 }
             };
 
-            let now_unix = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
-
+            // If backend is remote, local runner cannot pretend to execute remote tasks
+            if backend == ExecutionBackendKind::RemoteCloudTask
+                || backend == ExecutionBackendKind::RemoteDistributedAgent
             {
                 let mut map = tasks_map.write().unwrap();
                 if let Some(t) = map.get_mut(&task_id_clone) {
-                    t.status = CloudTaskStatus::Running {
-                        started_at: now_unix,
+                    t.status = CloudTaskStatus::Failed {
+                        error: format!(
+                            "Backend {:?} requested, but remote coordinator is not configured in local background runner",
+                            backend
+                        ),
                     };
                 }
+                drop(map);
+                flush_helper(&tasks_map);
+                return;
             }
-            flush_helper(&tasks_map);
 
             let start_instant = Instant::now();
             let mut cmd = Command::new("bash");
@@ -251,6 +338,14 @@ impl CloudTaskManager {
             cmd.envs(&env);
             cmd.stdout(Stdio::piped());
             cmd.stderr(Stdio::piped());
+
+            #[cfg(unix)]
+            unsafe {
+                cmd.pre_exec(|| {
+                    libc::setpgid(0, 0);
+                    Ok(())
+                });
+            }
 
             let mut child = match cmd.spawn() {
                 Ok(c) => c,
@@ -267,8 +362,72 @@ impl CloudTaskManager {
                 }
             };
 
+            let pid = child.id();
+            let now_unix = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+
+            {
+                let mut map = tasks_map.write().unwrap();
+                if let Some(t) = map.get_mut(&task_id_clone) {
+                    t.status = CloudTaskStatus::Running {
+                        started_at: now_unix,
+                        pid,
+                    };
+                    t.pid = pid;
+                }
+            }
+            flush_helper(&tasks_map);
+
             let stdout_pipe = child.stdout.take();
             let stderr_pipe = child.stderr.take();
+
+            const MAX_STREAM_BYTES: usize = 1024 * 1024; // 1 MB limit
+
+            let stdout_handle = tokio::spawn(async move {
+                let mut output = Vec::new();
+                if let Some(mut r) = stdout_pipe {
+                    let mut chunk = [0u8; 8192];
+                    while let Ok(n) = r.read(&mut chunk).await {
+                        if n == 0 {
+                            break;
+                        }
+                        if output.len() < MAX_STREAM_BYTES {
+                            let take = n.min(MAX_STREAM_BYTES - output.len());
+                            output.extend_from_slice(&chunk[..take]);
+                            if output.len() == MAX_STREAM_BYTES {
+                                output.extend_from_slice(
+                                    b"\n[TRUNCATED: Output exceeded 1MB limit]\n",
+                                );
+                            }
+                        }
+                    }
+                }
+                String::from_utf8_lossy(&output).to_string()
+            });
+
+            let stderr_handle = tokio::spawn(async move {
+                let mut output = Vec::new();
+                if let Some(mut r) = stderr_pipe {
+                    let mut chunk = [0u8; 8192];
+                    while let Ok(n) = r.read(&mut chunk).await {
+                        if n == 0 {
+                            break;
+                        }
+                        if output.len() < MAX_STREAM_BYTES {
+                            let take = n.min(MAX_STREAM_BYTES - output.len());
+                            output.extend_from_slice(&chunk[..take]);
+                            if output.len() == MAX_STREAM_BYTES {
+                                output.extend_from_slice(
+                                    b"\n[TRUNCATED: Stderr exceeded 1MB limit]\n",
+                                );
+                            }
+                        }
+                    }
+                }
+                String::from_utf8_lossy(&output).to_string()
+            });
 
             let timeout_duration =
                 Duration::from_secs(if timeout_secs == 0 { 300 } else { timeout_secs });
@@ -277,21 +436,10 @@ impl CloudTaskManager {
 
             match status_res {
                 Ok(Ok(exit_status)) => {
-                    let mut stdout = String::new();
-                    if let Some(mut r) = stdout_pipe {
-                        let mut buf = Vec::new();
-                        let _ = r.read_to_end(&mut buf).await;
-                        stdout = String::from_utf8_lossy(&buf).to_string();
-                    }
-
-                    let mut stderr = String::new();
-                    if let Some(mut r) = stderr_pipe {
-                        let mut buf = Vec::new();
-                        let _ = r.read_to_end(&mut buf).await;
-                        stderr = String::from_utf8_lossy(&buf).to_string();
-                    }
-
+                    let stdout = stdout_handle.await.unwrap_or_default();
+                    let stderr = stderr_handle.await.unwrap_or_default();
                     let exit_code = exit_status.code().unwrap_or(-1);
+
                     let mut map = tasks_map.write().unwrap();
                     if let Some(t) = map.get_mut(&task_id_clone) {
                         t.status = CloudTaskStatus::Completed {
@@ -309,6 +457,8 @@ impl CloudTaskManager {
                     }
                 }
                 Ok(Err(e)) => {
+                    stdout_handle.abort();
+                    stderr_handle.abort();
                     let mut map = tasks_map.write().unwrap();
                     if let Some(t) = map.get_mut(&task_id_clone) {
                         t.status = CloudTaskStatus::Failed {
@@ -317,7 +467,16 @@ impl CloudTaskManager {
                     }
                 }
                 Err(_) => {
+                    #[cfg(unix)]
+                    if let Some(p) = pid {
+                        unsafe {
+                            libc::kill(-(p as i32), libc::SIGKILL);
+                        }
+                    }
                     let _ = child.kill().await;
+                    stdout_handle.abort();
+                    stderr_handle.abort();
+
                     let mut map = tasks_map.write().unwrap();
                     if let Some(t) = map.get_mut(&task_id_clone) {
                         t.status = CloudTaskStatus::Failed {
@@ -345,6 +504,12 @@ impl CloudTaskManager {
         map.get(task_id).map(|t| t.status.clone())
     }
 
+    /// Query the execution backend kind of a registered task.
+    pub fn get_backend(&self, task_id: &str) -> Option<ExecutionBackendKind> {
+        let map = self.tasks.read().unwrap();
+        map.get(task_id).map(|t| t.backend)
+    }
+
     /// Retrieve task outputs if the task has completed.
     pub fn get_output(&self, task_id: &str) -> Option<CloudTaskOutput> {
         let map = self.tasks.read().unwrap();
@@ -357,6 +522,13 @@ impl CloudTaskManager {
         if let Some(t) = map.get_mut(task_id) {
             if let Some(ref handle) = t.abort_handle {
                 handle.abort();
+            }
+            #[cfg(unix)]
+            if let Some(p) = t.pid {
+                unsafe {
+                    libc::kill(-(p as i32), libc::SIGTERM);
+                    libc::kill(-(p as i32), libc::SIGKILL);
+                }
             }
             t.status = CloudTaskStatus::Cancelled;
             drop(map);
@@ -554,5 +726,61 @@ mod tests {
         assert!(bytes_applied > 0);
         let read_back = std::fs::read_to_string(&target_file).unwrap();
         assert!(read_back.contains("best attempt output"));
+    }
+
+    #[tokio::test]
+    async fn test_cloud_task_startup_recovery_for_dead_process() {
+        let temp = tempfile::tempdir().unwrap();
+        let persist_file = temp.path().join("cloud_tasks.json");
+
+        // Write a record that simulates an in-flight task whose process died while offline
+        let dummy_record = PersistedTaskRecord {
+            task_id: "task-999".to_string(),
+            command: "echo orphan".to_string(),
+            status: CloudTaskStatus::Running {
+                started_at: 1000,
+                pid: Some(99999999), // nonexistent PID
+            },
+            output: None,
+            created_at: 1000,
+            backend: ExecutionBackendKind::LocalProcess,
+            pid: Some(99999999),
+        };
+        let json = serde_json::to_string_pretty(&vec![dummy_record]).unwrap();
+        std::fs::write(&persist_file, json).unwrap();
+
+        let manager = CloudTaskManager::with_persistence(persist_file, 2);
+        let status = manager.status("task-999");
+        assert!(matches!(
+            status,
+            Some(CloudTaskStatus::Failed { ref error }) if error.contains("startup recovery")
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_cloud_task_rejects_unsupported_remote_backend_without_fake_success() {
+        let manager = CloudTaskManager::new(2);
+        let cwd = std::env::current_dir().unwrap();
+
+        let task_id = manager.submit_with_backend(
+            "cargo test",
+            &cwd,
+            HashMap::new(),
+            10,
+            ExecutionBackendKind::RemoteCloudTask,
+        );
+
+        // Wait for immediate fail
+        for _ in 0..50 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            if let Some(CloudTaskStatus::Failed { ref error }) = manager.status(&task_id) {
+                assert!(error.contains("remote coordinator is not configured"));
+                break;
+            }
+        }
+        assert_eq!(
+            manager.get_backend(&task_id),
+            Some(ExecutionBackendKind::RemoteCloudTask)
+        );
     }
 }
