@@ -292,6 +292,29 @@ impl ToolRegistry {
         self.mcp_manager.clone()
     }
 
+    /// Dynamically discovers and registers tools provided by loaded plugins into the callable tool surface.
+    pub async fn register_plugin_tools(&self) -> usize {
+        let tools = self.plugin_manager.all_tools().await;
+        let mut count = 0;
+        if let Ok(mut dyn_tools) = self.dynamic_tools.write() {
+            for (plugin_name, tool) in tools {
+                let scoped_name = format!("{}:{}", plugin_name, tool.name);
+                if !dyn_tools.iter().any(|d| d.function.name == scoped_name) {
+                    dyn_tools.push(ToolDefinition {
+                        tool_type: "function".to_string(),
+                        function: FunctionDefinition {
+                            name: scoped_name,
+                            description: format!("[Plugin: {}] {}", plugin_name, tool.description),
+                            parameters: tool.input_schema,
+                        },
+                    });
+                    count += 1;
+                }
+            }
+        }
+        count
+    }
+
     pub fn definitions(&self) -> Vec<ToolDefinition> {
         let mut builtins = vec![
             ToolDefinition {
@@ -5072,7 +5095,13 @@ impl ToolRegistry {
                 let task_id = self
                     .cloud_tasks
                     .submit(cmd_str, cwd, HashMap::new(), timeout);
-                Ok(format!("Submitted cloud background task: {task_id}"))
+                let backend = self
+                    .cloud_tasks
+                    .get_backend(&task_id)
+                    .unwrap_or(m31a_core::ExecutionBackendKind::LocalProcess);
+                Ok(format!(
+                    "Submitted background task: {task_id} (backend: {backend:?})"
+                ))
             }
             "poll_cloud_task" => {
                 let task_id = args
@@ -5082,8 +5111,10 @@ impl ToolRegistry {
                 match self.cloud_tasks.status(task_id) {
                     Some(status) => {
                         let output = self.cloud_tasks.get_output(task_id);
+                        let backend = self.cloud_tasks.get_backend(task_id);
                         let json = serde_json::json!({
                             "task_id": task_id,
+                            "backend": backend,
                             "status": status,
                             "output": output
                         });
@@ -5186,13 +5217,21 @@ impl ToolRegistry {
                     _ => crate::plugin_install::DiscoverableToolAction::Install,
                 };
 
+                let trusted_user_confirmed = args
+                    .get("trusted_user_confirmed")
+                    .or_else(|| args.get("_trusted_approval"))
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+
                 let res = crate::plugin_install::handle_request_plugin_install(
                     crate::plugin_install::RequestPluginInstallArgs {
                         tool_id: tool_id.to_string(),
                         tool_type,
                         action_type,
                         suggest_reason: suggest_reason.to_string(),
+                        user_confirmed: None,
                     },
+                    trusted_user_confirmed,
                 );
                 Ok(serde_json::to_string_pretty(&res)?)
             }
@@ -5664,13 +5703,6 @@ impl ToolRegistry {
                     accessible_connectors.push(m31a_core::AppInfo::new(app_id, name));
                 }
 
-                if accessible_connectors.is_empty() {
-                    accessible_connectors.push(m31a_core::AppInfo::new(
-                        "app_postgres",
-                        "PostgreSQL Database Connector",
-                    ));
-                }
-
                 let merged = m31a_core::merge_connectors(builtin_connectors, accessible_connectors);
                 let filtered = m31a_core::filter_connectors(&merged, query);
                 Ok(serde_json::to_string_pretty(&filtered)?)
@@ -5939,12 +5971,12 @@ impl ToolRegistry {
             }
             _ => {
                 // Check if it's a registered plugin tool
-                if let Some((plugin_name, tool_name)) = name.split_once(':')
-                    && let Ok(res) = self
+                if let Some((plugin_name, tool_name)) = name.split_once(':') {
+                    let res = self
                         .plugin_manager
                         .execute_tool(plugin_name, tool_name, args.clone())
                         .await
-                {
+                        .with_context(|| format!("Plugin tool execution failed for '{name}'"))?;
                     return Ok(res.to_string());
                 }
                 Err(anyhow!("Unknown tool: {}", name))
@@ -6425,9 +6457,16 @@ mod tests {
             )
             .await
             .unwrap();
-        assert!(sub_res.contains("Submitted cloud background task:"));
+        assert!(sub_res.contains("Submitted background task:"));
 
-        let task_id = sub_res.split(": ").nth(1).unwrap().trim();
+        let task_id = sub_res
+            .split(": ")
+            .nth(1)
+            .unwrap()
+            .split_whitespace()
+            .next()
+            .unwrap()
+            .trim();
 
         // Poll task until finished
         let mut finished = false;
@@ -6614,14 +6653,25 @@ mod tests {
         assert!(list_res.contains("github-mcp"));
         assert!(list_res.contains("sqlite-mcp"));
 
-        // 2. request_plugin_install
-        let req_res = registry.execute(
+        // 2. request_plugin_install - without host confirmation fails closed
+        let unconfirmed_res = registry.execute(
             "request_plugin_install",
             r#"{"tool_id": "github-mcp", "tool_type": "plugin", "action_type": "install", "suggest_reason": "Need GitHub tools"}"#,
             &cwd,
             SandboxPolicy::WorkspaceWrite,
         ).await.unwrap();
+        assert!(unconfirmed_res.contains("\"completed\": false"));
+        assert!(unconfirmed_res.contains("\"user_confirmed\": false"));
+
+        // 3. request_plugin_install - with trusted host confirmation succeeds
+        let req_res = registry.execute(
+            "request_plugin_install",
+            r#"{"tool_id": "github-mcp", "tool_type": "plugin", "action_type": "install", "suggest_reason": "Need GitHub tools", "trusted_user_confirmed": true}"#,
+            &cwd,
+            SandboxPolicy::WorkspaceWrite,
+        ).await.unwrap();
         assert!(req_res.contains("\"completed\": true"));
+        assert!(req_res.contains("\"user_confirmed\": true"));
         assert!(req_res.contains("github-mcp"));
     }
 
