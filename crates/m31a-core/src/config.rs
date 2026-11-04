@@ -46,6 +46,9 @@ pub struct Config {
     #[serde(default = "default_approval")]
     pub approval: ApprovalPolicy,
 
+    #[serde(default)]
+    pub dangerously_bypass: bool,
+
     #[serde(default = "default_approvals_reviewer")]
     pub approvals_reviewer: String,
 
@@ -355,6 +358,8 @@ pub struct ConfigProfile {
     #[serde(default)]
     pub approval: Option<ApprovalPolicy>,
     #[serde(default)]
+    pub dangerously_bypass: Option<bool>,
+    #[serde(default)]
     pub api_base: Option<String>,
     #[serde(default)]
     pub reasoning_effort: Option<String>,
@@ -529,6 +534,7 @@ impl Default for Config {
             system_prompt: None,
             sandbox: default_sandbox(),
             approval: default_approval(),
+            dangerously_bypass: false,
             approvals_reviewer: default_approvals_reviewer(),
             auto_review: None,
             allow_login_shell: true,
@@ -892,6 +898,7 @@ impl Config {
             system_prompt: overlay.system_prompt.or(base.system_prompt),
             sandbox: overlay.sandbox,
             approval: overlay.approval,
+            dangerously_bypass: overlay.dangerously_bypass || base.dangerously_bypass,
             approvals_reviewer: overlay.approvals_reviewer,
             auto_review: overlay.auto_review.or(base.auto_review),
             allow_login_shell: overlay.allow_login_shell,
@@ -936,6 +943,9 @@ impl Config {
         }
         if let Some(a) = prof.approval {
             base.approval = a;
+        }
+        if let Some(db) = prof.dangerously_bypass {
+            base.dangerously_bypass = db;
         }
         if let Some(b) = prof.api_base {
             base.api_base = b;
