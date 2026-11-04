@@ -25,8 +25,10 @@ pub enum PatternToken {
 impl PatternToken {
     pub fn matches(&self, token: &str) -> bool {
         match self {
-            PatternToken::Single(expected) => expected == token,
-            PatternToken::Alts(alternatives) => alternatives.iter().any(|alt| alt == token),
+            PatternToken::Single(expected) => expected == "*" || expected == token,
+            PatternToken::Alts(alternatives) => {
+                alternatives.iter().any(|alt| alt == "*" || alt == token)
+            }
         }
     }
 }
@@ -37,6 +39,39 @@ pub struct PrefixRule {
     pub rest: Vec<PatternToken>,
     pub decision: Decision,
     pub justification: Option<String>,
+}
+
+impl PrefixRule {
+    pub fn from_pattern(
+        pattern: &str,
+        decision: Decision,
+        justification: Option<String>,
+    ) -> Result<Self> {
+        let trimmed = pattern.trim();
+        if trimmed.is_empty() {
+            anyhow::bail!("Cannot create PrefixRule from empty pattern");
+        }
+        let tokens = shlex::split(trimmed).ok_or_else(|| {
+            anyhow::anyhow!(
+                "Failed to parse command pattern '{}': invalid shell quoting",
+                pattern
+            )
+        })?;
+        if tokens.is_empty() {
+            anyhow::bail!("Cannot create PrefixRule from empty pattern");
+        }
+        let program = tokens[0].clone();
+        let rest = tokens[1..]
+            .iter()
+            .map(|t| PatternToken::Single(t.clone()))
+            .collect();
+        Ok(PrefixRule {
+            program,
+            rest,
+            decision,
+            justification,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -210,26 +245,12 @@ impl ExecPolicy {
         for cmd in decomposed {
             let prog = &cmd[0];
             let args = &cmd[1..];
-            let mut cmd_match = RuleMatch {
-                decision: Decision::Prompt,
-                matched_tokens: cmd.clone(),
-                justification: Some(format!(
-                    "Sub-command `{prog}` requires user approval (unlisted in safe allowlist)"
-                )),
-            };
-
+            let mut matching_rules: Vec<&PrefixRule> = Vec::new();
             for rule in &self.prefix_rules {
                 if &rule.program == prog {
                     if rule.rest.is_empty() {
-                        cmd_match = RuleMatch {
-                            decision: rule.decision,
-                            matched_tokens: vec![prog.clone()],
-                            justification: rule.justification.clone(),
-                        };
-                        break;
-                    }
-
-                    if args.len() >= rule.rest.len() {
+                        matching_rules.push(rule);
+                    } else if args.len() >= rule.rest.len() {
                         let mut matched = true;
                         for (pat, arg) in rule.rest.iter().zip(&args[..rule.rest.len()]) {
                             if !pat.matches(arg) {
@@ -238,17 +259,50 @@ impl ExecPolicy {
                             }
                         }
                         if matched {
-                            let mut tokens_slice = vec![prog.clone()];
-                            tokens_slice.extend_from_slice(&args[..rule.rest.len()]);
-                            cmd_match = RuleMatch {
-                                decision: rule.decision,
-                                matched_tokens: tokens_slice,
-                                justification: rule.justification.clone(),
-                            };
-                            break;
+                            matching_rules.push(rule);
                         }
                     }
                 }
+            }
+
+            let mut cmd_match = RuleMatch {
+                decision: Decision::Prompt,
+                matched_tokens: cmd.clone(),
+                justification: Some(format!(
+                    "Sub-command `{prog}` requires user approval (unlisted in safe allowlist)"
+                )),
+            };
+
+            // Rule precedence:
+            // 1. Deny rule always wins (fail-closed, cannot be overridden by allow)
+            // 2. Longest matching prefix rule (highest specificity)
+            // 3. Strictest decision on tie (Prompt > Allow)
+            if let Some(deny_rule) = matching_rules.iter().find(|r| r.decision == Decision::Deny) {
+                let mut tokens_slice = vec![prog.clone()];
+                tokens_slice.extend_from_slice(&args[..deny_rule.rest.len().min(args.len())]);
+                cmd_match = RuleMatch {
+                    decision: Decision::Deny,
+                    matched_tokens: tokens_slice,
+                    justification: deny_rule.justification.clone(),
+                };
+            } else if !matching_rules.is_empty() {
+                let best_rule = matching_rules
+                    .into_iter()
+                    .max_by(|a, b| {
+                        a.rest
+                            .len()
+                            .cmp(&b.rest.len())
+                            .then_with(|| a.decision.cmp(&b.decision))
+                    })
+                    .unwrap();
+
+                let mut tokens_slice = vec![prog.clone()];
+                tokens_slice.extend_from_slice(&args[..best_rule.rest.len().min(args.len())]);
+                cmd_match = RuleMatch {
+                    decision: best_rule.decision,
+                    matched_tokens: tokens_slice,
+                    justification: best_rule.justification.clone(),
+                };
             }
 
             all_matched_tokens.extend(cmd_match.matched_tokens);
