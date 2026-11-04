@@ -8,7 +8,6 @@ use anyhow::{Context, Result};
 use chrono::Utc;
 use m31a_core::SandboxPolicy;
 use m31a_sandbox::runner::SandboxRunner;
-use m31a_tools::ToolRegistry;
 use regex::Regex;
 use serde_json::{Map, Value, json};
 use std::collections::HashMap;
@@ -21,16 +20,30 @@ use std::time::{Duration, Instant};
 use tokio::io::AsyncWriteExt;
 
 /// Process lifecycle states for the Code Mode supervisor.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ProcessLifecycleState {
-    Created,
+    Initialized,
     Running,
     Yielded,
     Completed,
     TimedOut,
-    Cancelled,
-    Failed,
     ResourceExhausted,
+    Failed,
+    Cancelled,
+}
+
+impl ProcessLifecycleState {
+    pub fn is_terminal(&self) -> bool {
+        matches!(
+            self,
+            ProcessLifecycleState::Completed
+                | ProcessLifecycleState::TimedOut
+                | ProcessLifecycleState::ResourceExhausted
+                | ProcessLifecycleState::Failed
+                | ProcessLifecycleState::Cancelled
+        )
+    }
 }
 
 /// Typed errors produced during Code Mode sandboxed supervisor execution.
@@ -153,7 +166,7 @@ impl CodeModeRuntime {
     pub async fn run(
         &self,
         code: &str,
-        registry: &ToolRegistry,
+        dispatcher: &(dyn crate::CodeModeToolDispatcher + Send + Sync),
         cwd: &Path,
         policy: SandboxPolicy,
         yield_time_ms: u64,
@@ -180,12 +193,12 @@ impl CodeModeRuntime {
         // If JS engine (bun or node) is present, use sandboxed external isolate
         if let Some(ref binary) = self.js_runtime_binary {
             return self
-                .run_ipc_runner(binary, code, registry, cwd, policy, yield_time_ms)
+                .run_ipc_runner(binary, code, dispatcher, cwd, policy, yield_time_ms)
                 .await;
         }
 
         // High-fidelity in-process confined interpreter (only used when no external JS runtime binary is available)
-        self.run_confined_interpreter(code, registry, cwd, policy, yield_time_ms)
+        self.run_confined_interpreter(code, dispatcher, cwd, policy, yield_time_ms)
             .await
     }
 
@@ -252,7 +265,7 @@ impl CodeModeRuntime {
         &self,
         binary: &str,
         user_code: &str,
-        registry: &ToolRegistry,
+        dispatcher: &(dyn crate::CodeModeToolDispatcher + Send + Sync),
         cwd: &Path,
         policy: SandboxPolicy,
         yield_time_ms: u64,
@@ -558,7 +571,7 @@ global.tools = new Proxy({}, {
 
                                                 output_acc
                                                     .push_str(&format!(">>> Tool: {}\n", name));
-                                                match registry
+                                                match dispatcher
                                                     .execute(name, &args_str, cwd, policy)
                                                     .await
                                                 {
@@ -623,16 +636,17 @@ global.tools = new Proxy({}, {
                 match &e {
                     CodeModeError::ResourceExhausted(_) => {
                         termination_reason = ProcessLifecycleState::ResourceExhausted;
-                        yielded = true;
+                        yielded = false;
                     }
                     _ => {
                         termination_reason = ProcessLifecycleState::Failed;
+                        yielded = false;
                     }
                 }
                 output_acc.push_str(&format!("Execution error: {e}\n"));
             }
             Err(_elapsed) => {
-                yielded = true;
+                yielded = false;
                 termination_reason = ProcessLifecycleState::TimedOut;
                 output_acc.push_str("[TIMEOUT: Execution exceeded time limit]\n");
             }
@@ -670,14 +684,14 @@ global.tools = new Proxy({}, {
     pub async fn run_confined_interpreter(
         &self,
         code: &str,
-        registry: &ToolRegistry,
+        dispatcher: &(dyn crate::CodeModeToolDispatcher + Send + Sync),
         cwd: &Path,
         policy: SandboxPolicy,
         yield_time_ms: u64,
     ) -> Result<RuntimeExecutionOutcome> {
         let mut interp = ConfinedInterpreter::new(
             self.kv_store.clone(),
-            registry,
+            dispatcher,
             cwd,
             policy,
             self.limits.clone(),
@@ -690,11 +704,11 @@ global.tools = new Proxy({}, {
     pub async fn run_fallback_evaluator(
         &self,
         code: &str,
-        registry: &ToolRegistry,
+        dispatcher: &(dyn crate::CodeModeToolDispatcher + Send + Sync),
         cwd: &Path,
         policy: SandboxPolicy,
     ) -> Result<RuntimeExecutionOutcome> {
-        self.run_confined_interpreter(code, registry, cwd, policy, 30_000)
+        self.run_confined_interpreter(code, dispatcher, cwd, policy, 30_000)
             .await
     }
 }
@@ -770,7 +784,7 @@ fn base64_decode(data: &str) -> Option<Vec<u8>> {
 
 struct ConfinedInterpreter<'a> {
     kv_store: Arc<Mutex<HashMap<String, Value>>>,
-    registry: &'a ToolRegistry,
+    dispatcher: &'a (dyn crate::CodeModeToolDispatcher + Send + Sync),
     cwd: &'a Path,
     policy: SandboxPolicy,
     limits: RuntimeExecutionLimits,
@@ -787,7 +801,7 @@ struct ConfinedInterpreter<'a> {
 impl<'a> ConfinedInterpreter<'a> {
     fn new(
         kv_store: Arc<Mutex<HashMap<String, Value>>>,
-        registry: &'a ToolRegistry,
+        dispatcher: &'a (dyn crate::CodeModeToolDispatcher + Send + Sync),
         cwd: &'a Path,
         policy: SandboxPolicy,
         limits: RuntimeExecutionLimits,
@@ -796,7 +810,7 @@ impl<'a> ConfinedInterpreter<'a> {
         let timeout = Duration::from_millis(yield_time_ms.min(limits.timeout_ms));
         Self {
             kv_store,
-            registry,
+            dispatcher,
             cwd,
             policy,
             limits,
@@ -813,7 +827,8 @@ impl<'a> ConfinedInterpreter<'a> {
 
     fn check_limits(&mut self) -> Result<()> {
         if self.start_time.elapsed() > self.timeout {
-            self.yielded = true;
+            self.yielded = false;
+            self.exited = true;
             anyhow::bail!("Script execution time limit reached");
         }
         Ok(())
@@ -842,23 +857,30 @@ impl<'a> ConfinedInterpreter<'a> {
             }
             return Ok(RuntimeExecutionOutcome {
                 output: self.output.clone(),
-                yielded: self.yielded,
+                yielded: false,
                 notifications: self.notifications.clone(),
-                status: if self.yielded {
-                    ProcessLifecycleState::Yielded
-                } else {
-                    ProcessLifecycleState::Completed
-                },
+                status: ProcessLifecycleState::Completed,
             });
         }
 
         // 2. Tokenize and execute script statements
+        let mut timed_out = false;
+        let mut resource_exhausted = false;
+        let mut execution_failed = false;
         let statements = parse_script_statements(trimmed);
         for stmt in &statements {
             if self.yielded || self.exited {
                 break;
             }
             if let Err(e) = self.execute_statement(stmt).await {
+                let err_msg = e.to_string();
+                if err_msg.contains("time limit reached") {
+                    timed_out = true;
+                } else if err_msg.contains("budget exceeded") {
+                    resource_exhausted = true;
+                } else {
+                    execution_failed = true;
+                }
                 if !self.yielded && !self.exited {
                     self.append_output(&format!("Runtime Error: {e}"));
                 }
@@ -866,33 +888,25 @@ impl<'a> ConfinedInterpreter<'a> {
             }
         }
 
-        // 3. Fallback: If nothing was produced and no keywords used, evaluate as direct command
-        if self.output.is_empty()
-            && !self.yielded
-            && !self.exited
-            && !statements.is_empty()
-            && let Ok(res) = self
-                .registry
-                .execute(
-                    "exec_command",
-                    &serde_json::json!({ "command": trimmed }).to_string(),
-                    self.cwd,
-                    self.policy,
-                )
-                .await
-        {
-            self.output = res;
-        }
+        let status = if timed_out {
+            self.append_output("[TIMEOUT: Execution exceeded time limit]");
+            ProcessLifecycleState::TimedOut
+        } else if resource_exhausted {
+            ProcessLifecycleState::ResourceExhausted
+        } else if execution_failed {
+            ProcessLifecycleState::Failed
+        } else if self.yielded {
+            ProcessLifecycleState::Yielded
+        } else {
+            ProcessLifecycleState::Completed
+        };
+        let yielded = self.yielded && !status.is_terminal();
 
         Ok(RuntimeExecutionOutcome {
             output: self.output.clone(),
-            yielded: self.yielded,
+            yielded,
             notifications: self.notifications.clone(),
-            status: if self.yielded {
-                ProcessLifecycleState::Yielded
-            } else {
-                ProcessLifecycleState::Completed
-            },
+            status,
         })
     }
 
@@ -937,6 +951,22 @@ impl<'a> ConfinedInterpreter<'a> {
                     }
                 }
             }
+            ScriptStatement::While { condition, body } => loop {
+                self.check_limits()?;
+                if self.yielded || self.exited {
+                    break;
+                }
+                let cond_val = self.eval_expr(condition).await?;
+                if !is_truthy(&cond_val) {
+                    break;
+                }
+                for s in body {
+                    if self.yielded || self.exited {
+                        break;
+                    }
+                    self.execute_statement(s).await?;
+                }
+            },
             ScriptStatement::ForOf {
                 var_name,
                 iterable,
@@ -951,6 +981,7 @@ impl<'a> ConfinedInterpreter<'a> {
                 };
 
                 for item in items {
+                    self.check_limits()?;
                     if self.yielded || self.exited {
                         break;
                     }
@@ -962,6 +993,77 @@ impl<'a> ConfinedInterpreter<'a> {
                         self.execute_statement(s).await?;
                     }
                 }
+            }
+            ScriptStatement::ForC {
+                init,
+                condition,
+                step,
+                body,
+            } => {
+                if let Some(i) = init {
+                    self.execute_statement(i).await?;
+                }
+                loop {
+                    self.check_limits()?;
+                    if self.yielded || self.exited {
+                        break;
+                    }
+                    if let Some(c) = condition {
+                        let val = self.eval_expr(c).await?;
+                        if !is_truthy(&val) {
+                            break;
+                        }
+                    }
+                    for s in body {
+                        if self.yielded || self.exited {
+                            break;
+                        }
+                        self.execute_statement(s).await?;
+                    }
+                    if let Some(st) = step {
+                        self.execute_statement(st).await?;
+                    }
+                }
+            }
+            ScriptStatement::TryCatch {
+                try_body,
+                catch_var,
+                catch_body,
+            } => {
+                let mut caught_err: Option<String> = None;
+                for s in try_body {
+                    if self.yielded || self.exited {
+                        break;
+                    }
+                    if let Err(e) = self.execute_statement(s).await {
+                        caught_err = Some(e.to_string());
+                        break;
+                    }
+                }
+                if let Some(err_str) = caught_err {
+                    if let Some(var_name) = catch_var {
+                        let mut err_obj = serde_json::Map::new();
+                        err_obj.insert("message".to_string(), Value::String(err_str));
+                        self.vars.insert(var_name.clone(), Value::Object(err_obj));
+                    }
+                    for s in catch_body {
+                        if self.yielded || self.exited {
+                            break;
+                        }
+                        self.execute_statement(s).await?;
+                    }
+                }
+            }
+            ScriptStatement::Throw(expr) => {
+                let val = self.eval_expr(expr).await?;
+                let msg = if let Some(m) = val.get("message").and_then(Value::as_str) {
+                    m.to_string()
+                } else if let Some(s) = val.as_str() {
+                    s.to_string()
+                } else {
+                    val.to_string()
+                };
+                anyhow::bail!("{msg}");
             }
             ScriptStatement::Expr(expr) => {
                 self.eval_expr(expr).await?;
@@ -1032,7 +1134,7 @@ impl<'a> ConfinedInterpreter<'a> {
 
         self.append_output(&format!(">>> Tool: {tool_name}"));
         match self
-            .registry
+            .dispatcher
             .execute(tool_name, &args_str, self.cwd, self.policy)
             .await
         {
@@ -1062,6 +1164,7 @@ impl<'a> ConfinedInterpreter<'a> {
     async fn eval_expr_inner(&mut self, expr: &str) -> Result<Value> {
         self.check_limits()?;
         let trimmed = expr.trim();
+        let trimmed = trimmed.strip_prefix("await ").unwrap_or(trimmed).trim();
         if trimmed.is_empty() {
             return Ok(Value::Null);
         }
@@ -1096,6 +1199,49 @@ impl<'a> ConfinedInterpreter<'a> {
             return Ok(Value::Null);
         }
 
+        if let Some(rest) = trimmed.strip_prefix("process.stdout.write(") {
+            let inner = strip_matching_paren(rest)?;
+            let v = self.eval_expr(&inner).await?;
+            let s = if let Some(st) = v.as_str() {
+                st.to_string()
+            } else {
+                v.to_string()
+            };
+            if s.len() > 65_536 {
+                anyhow::bail!("IPC line size exceeded maximum allowed boundary of 65536 bytes");
+            }
+            self.append_output(&s);
+            return Ok(Value::Null);
+        }
+
+        if let Some(rest) = trimmed.strip_prefix("new Error(") {
+            let inner = strip_matching_paren(rest)?;
+            let msg_val = self.eval_expr(&inner).await?;
+            let msg = msg_val.as_str().unwrap_or("Error").to_string();
+            let mut map = Map::new();
+            map.insert("__type".to_string(), Value::String("Error".to_string()));
+            map.insert("message".to_string(), Value::String(msg));
+            return Ok(Value::Object(map));
+        }
+
+        if let Some(var) = trimmed.strip_suffix("++") {
+            let var = var.trim();
+            if let Some(v) = self.vars.get_mut(var) {
+                let n = v.as_i64().unwrap_or(0);
+                *v = json!(n + 1);
+                return Ok(json!(n));
+            }
+        }
+
+        if let Some(var) = trimmed.strip_prefix("++") {
+            let var = var.trim();
+            if let Some(v) = self.vars.get_mut(var) {
+                let n = v.as_i64().unwrap_or(0) + 1;
+                *v = json!(n);
+                return Ok(json!(n));
+            }
+        }
+
         if let Some(rest) = trimmed.strip_prefix("notify(") {
             let inner = strip_matching_paren(rest)?;
             let v = self.eval_expr(&inner).await?;
@@ -1104,7 +1250,9 @@ impl<'a> ConfinedInterpreter<'a> {
             } else {
                 v.to_string()
             };
-            self.notifications.push(s);
+            if self.notifications.len() < 100 {
+                self.notifications.push(s);
+            }
             return Ok(Value::Null);
         }
 
@@ -1682,6 +1830,10 @@ fn eval_method_call(target: &Value, method: &str, args: &[Value]) -> Option<Valu
                     .collect();
                 Some(Value::String(sub))
             }
+            "repeat" => {
+                let count = args.first().and_then(Value::as_u64).unwrap_or(0) as usize;
+                Some(Value::String(s.repeat(count.min(100_000))))
+            }
             "indexOf" => {
                 let sub = args.first().and_then(Value::as_str).unwrap_or("");
                 Some(json!(s.find(sub).map(|i| i as i64).unwrap_or(-1)))
@@ -1832,11 +1984,27 @@ enum ScriptStatement {
         then_body: Vec<ScriptStatement>,
         else_body: Option<Vec<ScriptStatement>>,
     },
+    While {
+        condition: String,
+        body: Vec<ScriptStatement>,
+    },
     ForOf {
         var_name: String,
         iterable: String,
         body: Vec<ScriptStatement>,
     },
+    ForC {
+        init: Option<Box<ScriptStatement>>,
+        condition: Option<String>,
+        step: Option<Box<ScriptStatement>>,
+        body: Vec<ScriptStatement>,
+    },
+    TryCatch {
+        try_body: Vec<ScriptStatement>,
+        catch_var: Option<String>,
+        catch_body: Vec<ScriptStatement>,
+    },
+    Throw(String),
     Expr(String),
     Exit,
     YieldControl,
@@ -1864,6 +2032,52 @@ fn parse_script_statements(source: &str) -> Vec<ScriptStatement> {
             continue;
         }
 
+        // `throw ...`
+        if let Some(rest) = trimmed.strip_prefix("throw ") {
+            stmts.push(ScriptStatement::Throw(rest.trim().to_string()));
+            continue;
+        }
+
+        // `while (condition) { ... }`
+        if trimmed.starts_with("while ") || trimmed.starts_with("while(") {
+            let mut block_text = trimmed.to_string();
+            let mut brace_count =
+                block_text.matches('{').count() as i32 - block_text.matches('}').count() as i32;
+
+            while brace_count > 0 && lines.peek().is_some() {
+                let next_line = lines.next().unwrap();
+                block_text.push('\n');
+                block_text.push_str(next_line);
+                brace_count +=
+                    next_line.matches('{').count() as i32 - next_line.matches('}').count() as i32;
+            }
+
+            if let Some(while_stmt) = parse_while_block(&block_text) {
+                stmts.push(while_stmt);
+                continue;
+            }
+        }
+
+        // `try { ... } catch (e) { ... }`
+        if trimmed.starts_with("try ") || trimmed.starts_with("try{") || trimmed == "try" {
+            let mut block_text = trimmed.to_string();
+            let mut brace_count =
+                block_text.matches('{').count() as i32 - block_text.matches('}').count() as i32;
+
+            while (brace_count > 0 || !block_text.contains("catch")) && lines.peek().is_some() {
+                let next_line = lines.next().unwrap();
+                block_text.push('\n');
+                block_text.push_str(next_line);
+                brace_count +=
+                    next_line.matches('{').count() as i32 - next_line.matches('}').count() as i32;
+            }
+
+            if let Some(try_catch) = parse_try_catch_block(&block_text) {
+                stmts.push(try_catch);
+                continue;
+            }
+        }
+
         // `if (condition) { ... } else { ... }`
         if trimmed.starts_with("if ") || trimmed.starts_with("if(") {
             let mut block_text = trimmed.to_string();
@@ -1884,7 +2098,7 @@ fn parse_script_statements(source: &str) -> Vec<ScriptStatement> {
             }
         }
 
-        // `for (const x of items) { ... }`
+        // `for (const x of items) { ... }` or `for (let i = 0; i < N; i++) { ... }`
         if trimmed.starts_with("for ") || trimmed.starts_with("for(") {
             let mut block_text = trimmed.to_string();
             let mut brace_count =
@@ -1898,7 +2112,7 @@ fn parse_script_statements(source: &str) -> Vec<ScriptStatement> {
                     next_line.matches('{').count() as i32 - next_line.matches('}').count() as i32;
             }
 
-            if let Some(for_stmt) = parse_for_of_block(&block_text) {
+            if let Some(for_stmt) = parse_for_block(&block_text) {
                 stmts.push(for_stmt);
                 continue;
             }
@@ -1967,31 +2181,99 @@ fn parse_if_block(text: &str) -> Option<ScriptStatement> {
     })
 }
 
-fn parse_for_of_block(text: &str) -> Option<ScriptStatement> {
+fn parse_while_block(text: &str) -> Option<ScriptStatement> {
     let open_paren = text.find('(')?;
     let close_paren = find_matching_delimiter(text, open_paren, '(', ')')?;
-    let header = &text[open_paren + 1..close_paren];
-
-    let (var_part, iter_part) = header.split_once(" of ")?;
-    let var_name = var_part
-        .trim()
-        .strip_prefix("const ")
-        .or_else(|| var_part.trim().strip_prefix("let "))
-        .or_else(|| var_part.trim().strip_prefix("var "))
-        .unwrap_or(var_part.trim())
-        .trim()
-        .to_string();
+    let condition = text[open_paren + 1..close_paren].trim().to_string();
 
     let open_brace = text[close_paren..].find('{')? + close_paren;
     let close_brace = find_matching_delimiter(text, open_brace, '{', '}')?;
     let body_text = &text[open_brace + 1..close_brace];
     let body = parse_script_statements(body_text);
 
-    Some(ScriptStatement::ForOf {
-        var_name,
-        iterable: iter_part.trim().to_string(),
-        body,
+    Some(ScriptStatement::While { condition, body })
+}
+
+fn parse_try_catch_block(text: &str) -> Option<ScriptStatement> {
+    let try_idx = text.find("try")?;
+    let open_brace = text[try_idx..].find('{')? + try_idx;
+    let close_brace = find_matching_delimiter(text, open_brace, '{', '}')?;
+    let try_body_text = &text[open_brace + 1..close_brace];
+    let try_body = parse_script_statements(try_body_text);
+
+    let remainder = text[close_brace + 1..].trim();
+    let catch_idx = remainder.find("catch")?;
+    let after_catch = remainder[catch_idx + 5..].trim();
+
+    let (catch_var, catch_body_text) = if after_catch.starts_with('(') {
+        let close_p = find_matching_delimiter(after_catch, 0, '(', ')')?;
+        let var_name = after_catch[1..close_p].trim().to_string();
+        let open_b = after_catch[close_p..].find('{')? + close_p;
+        let close_b = find_matching_delimiter(after_catch, open_b, '{', '}')?;
+        (Some(var_name), &after_catch[open_b + 1..close_b])
+    } else {
+        let open_b = after_catch.find('{')?;
+        let close_b = find_matching_delimiter(after_catch, open_b, '{', '}')?;
+        (None, &after_catch[open_b + 1..close_b])
+    };
+
+    let catch_body = parse_script_statements(catch_body_text);
+
+    Some(ScriptStatement::TryCatch {
+        try_body,
+        catch_var,
+        catch_body,
     })
+}
+
+fn parse_for_block(text: &str) -> Option<ScriptStatement> {
+    let open_paren = text.find('(')?;
+    let close_paren = find_matching_delimiter(text, open_paren, '(', ')')?;
+    let header = &text[open_paren + 1..close_paren];
+
+    let open_brace = text[close_paren..].find('{')? + close_paren;
+    let close_brace = find_matching_delimiter(text, open_brace, '{', '}')?;
+    let body_text = &text[open_brace + 1..close_brace];
+    let body = parse_script_statements(body_text);
+
+    if let Some((var_part, iter_part)) = header.split_once(" of ") {
+        let var_name = var_part
+            .trim()
+            .strip_prefix("const ")
+            .or_else(|| var_part.trim().strip_prefix("let "))
+            .or_else(|| var_part.trim().strip_prefix("var "))
+            .unwrap_or(var_part.trim())
+            .trim()
+            .to_string();
+        return Some(ScriptStatement::ForOf {
+            var_name,
+            iterable: iter_part.trim().to_string(),
+            body,
+        });
+    }
+
+    if header.contains(';') {
+        let parts: Vec<&str> = header.split(';').collect();
+        if parts.len() == 3 {
+            let init = parse_script_statements(parts[0])
+                .into_iter()
+                .next()
+                .map(Box::new);
+            let condition = Some(parts[1].trim().to_string());
+            let step = parse_script_statements(parts[2])
+                .into_iter()
+                .next()
+                .map(Box::new);
+            return Some(ScriptStatement::ForC {
+                init,
+                condition,
+                step,
+                body,
+            });
+        }
+    }
+
+    None
 }
 
 fn find_matching_delimiter(text: &str, start_idx: usize, open: char, close: char) -> Option<usize> {
@@ -2120,6 +2402,7 @@ fn compare_values(a: &Value, b: &Value) -> Option<std::cmp::Ordering> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use m31a_tools::ToolRegistry;
 
     #[tokio::test]
     async fn test_runtime_fallback_store_and_text() {
