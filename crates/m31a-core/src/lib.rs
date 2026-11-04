@@ -127,7 +127,9 @@ pub use cloud_config::{
     CloudConfigService, CloudConfigTomlBundle, CloudRequirementsFragment,
     CloudRequirementsTomlBundle, DEFAULT_CACHE_TTL as DEFAULT_CLOUD_CONFIG_CACHE_TTL,
 };
-pub use cloud_task::{CloudTaskManager, CloudTaskOutput, CloudTaskStatus};
+pub use cloud_task::{
+    CloudTaskManager, CloudTaskOutput, CloudTaskStatus, ExecutionBackendKind, PersistedTaskRecord,
+};
 pub use collaboration_templates::{
     CollaborationContext, CollaborationModeKind, CollaborationTemplateEngine,
 };
@@ -222,9 +224,11 @@ pub use message_history::{
     HistoryBatchEntry, HistoryEntry, append_history, lookup_history_batch, trim_history_if_needed,
 };
 pub use oauth_flow::{
-    DEFAULT_AUTH_URL, DEFAULT_DEVICE_POLL_INTERVAL_SECS, DeviceAuthRequestConfig,
-    DeviceCodeResponse, DevicePollResult, OAuthToken, PkcePair, execute_device_code_flow,
-    generate_pkce_pair, poll_device_token_once, request_device_code,
+    AuthCodeFlowConfig, DEFAULT_AUTH_URL, DEFAULT_DEVICE_POLL_INTERVAL_SECS,
+    DeviceAuthRequestConfig, DeviceCodeResponse, DevicePollResult, OAuthToken, PkcePair,
+    compute_s256_challenge, execute_browser_pkce_flow, execute_device_code_flow,
+    generate_pkce_pair, poll_device_token_once, refresh_oauth_token, request_device_code,
+    revoke_oauth_token, validate_code_verifier,
 };
 pub use otel_trace::{SpanTimer, TraceContext, W3C_TRACEPARENT_HEADER};
 pub use otel_trace_websocket::{
