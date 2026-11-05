@@ -1578,57 +1578,46 @@ async fn main() -> Result<()> {
             }
         },
 
-        Some(Commands::Features { cmd }) => match cmd {
-            FeaturesCommands::List => {
-                let manager = m31a_features::FeatureFlagManager::new(
-                    Config::config_dir().join("features.json"),
-                );
-                let flags = manager.list_flags().await;
-                println!("{}", "M31A Feature Flags:".bold());
-                for f in &flags {
-                    let enabled = config
-                        .features
-                        .get(&f.id)
-                        .copied()
-                        .unwrap_or(matches!(f.state, m31a_features::FeatureState::Enabled));
-                    let status = if enabled {
-                        "enabled".green()
-                    } else {
-                        "disabled".dimmed()
-                    };
-                    println!(
-                        "- {:<22} {:<16} {:<10} {}",
-                        f.id.cyan(),
-                        format!("[{:?}]", f.category).dimmed(),
-                        status,
-                        f.description
-                    );
-                }
-                for (k, v) in &config.features {
-                    if !flags.iter().any(|f| &f.id == k) {
-                        let status = if *v {
+        Some(Commands::Features { cmd }) => {
+            let features_dir = Config::config_dir().join("features");
+            let manager = m31a_features::FeatureFlagManager::new(features_dir)?;
+            match cmd {
+                FeaturesCommands::List => {
+                    let flags = manager.list_flags().await;
+                    println!("{}", "M31A Feature Flags:".bold());
+                    for f in &flags {
+                        let enabled = matches!(f.state, m31a_features::FeatureState::Enabled);
+                        let status = if enabled {
                             "enabled".green()
                         } else {
                             "disabled".dimmed()
                         };
-                        println!("- {:<22} {:<16} {:<10} (custom flag)", k.cyan(), status, "");
+                        println!(
+                            "- {:<28} {:<16} {:<10} {}",
+                            f.id.cyan(),
+                            format!("[{:?}]", f.category).dimmed(),
+                            status,
+                            f.description
+                        );
                     }
+                    Ok(())
                 }
-                Ok(())
+                FeaturesCommands::Enable { key } => {
+                    manager.enable_flag(&key, "cli".to_string()).await?;
+                    config.features.insert(key.clone(), true);
+                    let _ = config.save();
+                    println!("{} feature `{}`", "Enabled".green(), key);
+                    Ok(())
+                }
+                FeaturesCommands::Disable { key } => {
+                    manager.disable_flag(&key, "cli".to_string()).await?;
+                    config.features.insert(key.clone(), false);
+                    let _ = config.save();
+                    println!("{} feature `{}`", "Disabled".yellow(), key);
+                    Ok(())
+                }
             }
-            FeaturesCommands::Enable { key } => {
-                config.features.insert(key.clone(), true);
-                config.save()?;
-                println!("{} feature `{}`", "Enabled".green(), key);
-                Ok(())
-            }
-            FeaturesCommands::Disable { key } => {
-                config.features.insert(key.clone(), false);
-                config.save()?;
-                println!("{} feature `{}`", "Disabled".yellow(), key);
-                Ok(())
-            }
-        },
+        }
 
         Some(Commands::Archive { id }) => {
             let storage = Storage::open_default()?;
