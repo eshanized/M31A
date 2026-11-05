@@ -22,6 +22,9 @@ semver = { workspace = true }
 reqwest = { workspace = true }
 tracing = { workspace = true }
 dirs = { workspace = true }
+tar = "0.4"
+flate2 = "1.0"
+url = "2.5"
 
 [dev-dependencies]
 tempfile = { workspace = true }
