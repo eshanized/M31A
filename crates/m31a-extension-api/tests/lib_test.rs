@@ -35,6 +35,9 @@ impl M31APlugin for TestEmbeddedPlugin {
             config_schema: None,
             sha256: None,
             signature: None,
+            publisher_key: None,
+            manifest_version: 1,
+            abi_version: 1,
         }
     }
 
