@@ -9,7 +9,6 @@ use m31a_core::types::{TokenUsage, ToolCall, ToolDefinition};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tonic::transport::{Channel, ClientTlsConfig, Endpoint};
-use uuid::Uuid;
 
 pub mod proto {
     #![allow(clippy::result_large_err)]
@@ -516,25 +515,26 @@ impl CloudTaskExecutor for CloudTasksClientWrapper {
     }
 }
 
-/// Local execution and fallback client for offline/containerized tasks
-#[derive(Clone)]
-pub struct LocalFallbackCloudTasksClient {
-    running_agents: std::sync::Arc<tokio::sync::RwLock<HashMap<String, AgentHandleWrapper>>>,
-    agent_inputs: std::sync::Arc<tokio::sync::RwLock<HashMap<String, Vec<String>>>>,
+/// Typed errors for cloud task operations and local fallback execution
+#[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
+pub enum CloudTasksError {
+    #[error("Local agent spawning is unsupported without an attached multi-agent engine")]
+    UnsupportedAgentRuntime,
+    #[error("Cloud Tasks service is unavailable: {0}")]
+    Unavailable(String),
+    #[error("Agent '{0}' not found")]
+    AgentNotFound(String),
+    #[error("Local agent input execution is unsupported without an attached multi-agent engine")]
+    UnsupportedInputExecution,
 }
 
-impl Default for LocalFallbackCloudTasksClient {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+/// Local execution and fallback client for offline/containerized tasks
+#[derive(Clone, Default)]
+pub struct LocalFallbackCloudTasksClient;
 
 impl LocalFallbackCloudTasksClient {
     pub fn new() -> Self {
-        Self {
-            running_agents: std::sync::Arc::new(tokio::sync::RwLock::new(HashMap::new())),
-            agent_inputs: std::sync::Arc::new(tokio::sync::RwLock::new(HashMap::new())),
-        }
+        Self
     }
 }
 
@@ -543,12 +543,9 @@ impl CloudTaskExecutor for LocalFallbackCloudTasksClient {
     async fn execute_task(&self, task: TaskSpec) -> Result<TaskResult> {
         let start = std::time::Instant::now();
 
-        // Execute prompt command locally if it looks like a shell command
-        let (output, status, error) = if task.prompt.starts_with('!')
-            || task.prompt.contains("cargo")
-            || task.prompt.contains("ls")
-            || task.prompt.contains("echo")
-        {
+        // Only allow explicit direct command invocations prefixed with '!'
+        // Natural language descriptions containing words like 'cargo', 'ls', 'echo' MUST NOT execute commands.
+        let (output, status, error) = if task.prompt.starts_with('!') {
             let cmd_str = task.prompt.trim_start_matches('!').trim();
             let mut parts = cmd_str.split_whitespace();
             if let Some(cmd) = parts.next() {
@@ -623,161 +620,42 @@ impl CloudTaskExecutor for LocalFallbackCloudTasksClient {
         })
     }
 
-    async fn spawn_agent(&self, req: SpawnAgentRequest) -> Result<AgentHandleWrapper> {
-        let handle = AgentHandleWrapper {
-            agent_id: Uuid::new_v4().to_string(),
-            session_id: req.session_id,
-            status: AgentStatusEnum::Ready,
-            capabilities: if req.capabilities.is_empty() {
-                vec![
-                    "fs".to_string(),
-                    "terminal".to_string(),
-                    "tools".to_string(),
-                ]
-            } else {
-                req.capabilities
-            },
-            created_at: chrono::Utc::now().to_rfc3339(),
-        };
-
-        self.running_agents
-            .write()
-            .await
-            .insert(handle.agent_id.clone(), handle.clone());
-        Ok(handle)
+    async fn spawn_agent(&self, _req: SpawnAgentRequest) -> Result<AgentHandleWrapper> {
+        // Fail closed: Do not invent fake agent runtimes when no engine is attached.
+        Err(CloudTasksError::UnsupportedAgentRuntime.into())
     }
 
     async fn get_capabilities(&self) -> Result<ExecutionCapabilitiesWrapper> {
         let num_cpus = std::thread::available_parallelism()
             .map(|p| p.get() as u32)
-            .unwrap_or(4);
+            .unwrap_or(1);
         Ok(ExecutionCapabilitiesWrapper {
-            supports_file_ops: true,
-            supports_process_exec: true,
-            supports_network: true,
+            supports_file_ops: false,
+            supports_process_exec: false,
+            supports_network: false,
             supports_gpu: false,
-            max_concurrent_agents: 16,
-            max_memory_mb: 16384,
+            max_concurrent_agents: 0,
+            max_memory_mb: 0,
             max_cpu_cores: num_cpus,
-            available_models: vec![
-                "nvidia/nemotron-3.5-lightning-30b-a3b".to_string(),
-                "deepseek-ai/deepseek-r1".to_string(),
-            ],
-            supported_tools: vec![
-                "exec_command".to_string(),
-                "read_file".to_string(),
-                "write_file".to_string(),
-                "apply_patch".to_string(),
-            ],
+            available_models: vec![],
+            supported_tools: vec![],
         })
     }
 
-    async fn send_agent_input(&self, agent_id: &str, input: String) -> Result<()> {
-        let agents = self.running_agents.read().await;
-        if !agents.contains_key(agent_id) {
-            anyhow::bail!("Agent '{}' not found", agent_id);
-        }
-        self.agent_inputs
-            .write()
-            .await
-            .entry(agent_id.to_string())
-            .or_default()
-            .push(input);
-        Ok(())
+    async fn send_agent_input(&self, _agent_id: &str, _input: String) -> Result<()> {
+        Err(CloudTasksError::UnsupportedInputExecution.into())
     }
 
-    async fn wait_agent(&self, agent_id: &str) -> Result<TaskResult> {
-        let agents = self.running_agents.read().await;
-        let agent = agents
-            .get(agent_id)
-            .ok_or_else(|| anyhow::anyhow!("Agent '{}' not found", agent_id))?
-            .clone();
-        drop(agents);
-
-        let inputs = self.agent_inputs.write().await.remove(agent_id);
-        let start = std::time::Instant::now();
-
-        let (output, status, error) = if let Some(inputs) = inputs
-            && !inputs.is_empty()
-        {
-            let mut combined_output = String::new();
-            let mut final_status = TaskStatusEnum::Completed;
-            let mut first_error = None;
-
-            for raw_input in inputs {
-                let cmd_str = raw_input.trim_start_matches('!').trim();
-                let res = tokio::process::Command::new("sh")
-                    .arg("-c")
-                    .arg(cmd_str)
-                    .output()
-                    .await;
-
-                match res {
-                    Ok(o) => {
-                        let stdout = String::from_utf8_lossy(&o.stdout);
-                        let stderr = String::from_utf8_lossy(&o.stderr);
-                        if o.status.success() {
-                            if !stdout.is_empty() {
-                                combined_output.push_str(&stdout);
-                            }
-                        } else {
-                            final_status = TaskStatusEnum::Failed;
-                            let err_msg = format!(
-                                "Exit {}: {}{}",
-                                o.status.code().unwrap_or(-1),
-                                stdout,
-                                stderr
-                            );
-                            first_error = Some(err_msg);
-                            break;
-                        }
-                    }
-                    Err(e) => {
-                        final_status = TaskStatusEnum::Failed;
-                        first_error = Some(format!("Local command spawn error: {e}"));
-                        break;
-                    }
-                }
-            }
-
-            if combined_output.is_empty() && final_status == TaskStatusEnum::Completed {
-                combined_output = "Command succeeded with no output".to_string();
-            }
-
-            (combined_output, final_status, first_error)
-        } else {
-            (
-                String::new(),
-                TaskStatusEnum::Failed,
-                Some(
-                    "No input was provided to the local fallback agent before wait_agent"
-                        .to_string(),
-                ),
-            )
-        };
-
-        let duration_ms = start.elapsed().as_millis() as u64;
-
-        Ok(TaskResult {
-            task_id: agent.agent_id,
-            status,
-            output,
-            tool_calls: vec![],
-            usage: TokenUsage::default(),
-            error,
-            duration_ms,
-        })
+    async fn wait_agent(&self, _agent_id: &str) -> Result<TaskResult> {
+        Err(CloudTasksError::UnsupportedAgentRuntime.into())
     }
 
-    async fn close_agent(&self, agent_id: &str) -> Result<()> {
-        self.running_agents.write().await.remove(agent_id);
-        self.agent_inputs.write().await.remove(agent_id);
+    async fn close_agent(&self, _agent_id: &str) -> Result<()> {
         Ok(())
     }
 
     async fn list_agents(&self) -> Result<Vec<AgentHandleWrapper>> {
-        let agents = self.running_agents.read().await;
-        Ok(agents.values().cloned().collect())
+        Ok(vec![])
     }
 }
 
@@ -869,13 +747,13 @@ mod tests {
     async fn test_mock_cloud_tasks_executor_lifecycle() {
         let client = MockCloudTasksClient::new();
 
-        // Capabilities
+        // Truthful capabilities when unattached
         let caps = client.get_capabilities().await.expect("capabilities");
-        assert!(caps.supports_file_ops);
-        assert!(caps.supports_process_exec);
-        assert!(caps.max_concurrent_agents >= 10);
+        assert!(!caps.supports_file_ops);
+        assert!(!caps.supports_process_exec);
+        assert_eq!(caps.max_concurrent_agents, 0);
 
-        // Spawn agent
+        // Spawn agent fails closed with typed error
         let spawn_req = SpawnAgentRequest::new(
             "session-alpha".to_string(),
             "nvidia/nemotron-3.5-lightning-30b-a3b".to_string(),
@@ -883,36 +761,12 @@ mod tests {
             vec!["fs".to_string(), "terminal".to_string()],
             "/workspace".to_string(),
         );
-        let agent = client.spawn_agent(spawn_req).await.expect("spawn agent");
-        assert_eq!(agent.session_id, "session-alpha");
-        assert_eq!(agent.status, AgentStatusEnum::Ready);
+        let spawn_res = client.spawn_agent(spawn_req).await;
+        assert!(spawn_res.is_err());
+        let err_str = spawn_res.unwrap_err().to_string();
+        assert!(err_str.contains("unsupported without an attached multi-agent engine"));
 
-        // Send input
-        client
-            .send_agent_input(&agent.agent_id, "echo build target".to_string())
-            .await
-            .expect("send input");
-
-        // Wait for agent
-        let wait_res = client
-            .wait_agent(&agent.agent_id)
-            .await
-            .expect("wait agent");
-        assert_eq!(wait_res.status, TaskStatusEnum::Completed);
-
-        // Verify genuine failure propagation: non-zero exit MUST fail honestly
-        client
-            .send_agent_input(&agent.agent_id, "exit 7".to_string())
-            .await
-            .expect("send input");
-        let fail_res = client
-            .wait_agent(&agent.agent_id)
-            .await
-            .expect("wait agent");
-        assert_eq!(fail_res.status, TaskStatusEnum::Failed);
-        assert!(fail_res.error.unwrap().contains("7"));
-
-        // Execute discrete task
+        // Execute discrete task with explicit '!' prefix succeeds
         let task = TaskSpec {
             id: "task-001".to_string(),
             prompt: "!echo 'Check compiler status'".to_string(),
