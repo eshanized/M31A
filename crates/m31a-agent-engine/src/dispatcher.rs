@@ -381,14 +381,16 @@ impl AuthoritativeToolDispatcher {
                                     }
                                     _ => m31a_tools::DiscoverableToolAction::Install,
                                 };
-                                let host_approval = m31a_tools::HostPluginApproval::with_context(
+                                if let Ok(host_approval) = m31a_tools::HostPluginApproval::issue_host_approval(
                                     tool_id,
                                     action,
-                                    Some(ctx.session_id),
-                                    Some(ctx.turn_id),
-                                    Some(ctx.call_id),
-                                );
-                                self.tools.grant_host_plugin_approval(host_approval);
+                                    ctx.session_id,
+                                    ctx.turn_id,
+                                    ctx.call_id,
+                                    std::time::Duration::from_secs(120),
+                                ) {
+                                    self.tools.grant_host_plugin_approval(host_approval);
+                                }
                             }
                         }
                         Ok(m31a_elicitation::ApprovalDecision::AllowFile { path }) => {
@@ -495,6 +497,12 @@ impl AuthoritativeToolDispatcher {
             args: current_args.clone(),
         });
 
+        let tool_call_ctx = m31a_tools::ToolCallContext {
+            session_id: ctx.session_id,
+            turn_id: ctx.turn_id,
+            call_id: ctx.call_id,
+        };
+
         let exec_result = tokio::select! {
             biased;
             _ = ctx.cancel_token.cancelled() => {
@@ -505,7 +513,13 @@ impl AuthoritativeToolDispatcher {
                 });
                 anyhow::bail!("Tool execution cancelled by user");
             }
-            res = self.tools.execute(fn_name, &current_args, &self.cwd, effective_sandbox) => res,
+            res = self.tools.execute_with_call_context(
+                fn_name,
+                &current_args,
+                &self.cwd,
+                effective_sandbox,
+                Some(&tool_call_ctx),
+            ) => res,
         };
 
         // Step 12: Cancellation check
