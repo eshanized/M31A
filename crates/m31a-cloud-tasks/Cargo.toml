@@ -21,7 +21,7 @@ uuid = { workspace = true }
 chrono = { workspace = true }
 
 [build-dependencies]
-tonic-build = "0.12"
+tonic-build = "0.14"
 
 [features]
 default = []
