@@ -67,6 +67,11 @@ pub fn shared_daemon_socket_directory() -> PathBuf {
     PathBuf::from(home).join(".config").join("m31a")
 }
 
+/// Returns the canonical path for the default daemon socket file.
+pub fn default_daemon_socket_path() -> PathBuf {
+    shared_daemon_socket_directory().join("m31a-daemon.sock")
+}
+
 /// Checks whether a socket file is stale by attempting an asynchronous connection.
 /// Returns `Ok(true)` if the socket file exists but refuses connections (dead daemon).
 /// Returns `Ok(false)` if a daemon actively answers or path doesn't exist.
@@ -116,21 +121,58 @@ pub async fn unlink_stale_socket_if_needed(socket_path: impl AsRef<Path>) -> io:
 }
 
 /// Binds a Unix domain socket listener after preparing the directory, preventing symlink attacks,
-/// cleaning any stale socket file, and enforcing restrictive 0600 file permissions on Unix.
+/// cleaning any stale socket file, rejecting non-socket paths or active sockets, and enforcing
+/// restrictive 0600 file permissions on Unix.
 pub async fn bind_unix_listener(socket_path: impl AsRef<Path>) -> io::Result<UnixListener> {
     let path = socket_path.as_ref();
     if let Some(parent) = path.parent() {
         prepare_private_socket_directory(parent).await?;
     }
 
-    // Guard against symlink attacks: if the target is a symlink, remove it before binding
-    if let Ok(meta) = tokio::fs::symlink_metadata(path).await
-        && meta.file_type().is_symlink()
-    {
-        tokio::fs::remove_file(path).await?;
-    }
+    // Validate existing path using symlink_metadata
+    match tokio::fs::symlink_metadata(path).await {
+        Ok(meta) => {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::FileTypeExt;
+                if meta.file_type().is_symlink() {
+                    return Err(io::Error::new(
+                        ErrorKind::AlreadyExists,
+                        format!(
+                            "Socket path '{}' is a symlink; rejecting symlink",
+                            path.display()
+                        ),
+                    ));
+                }
+                if !meta.file_type().is_socket() {
+                    return Err(io::Error::new(
+                        ErrorKind::AlreadyExists,
+                        format!(
+                            "Socket path '{}' exists and is not a socket file",
+                            path.display()
+                        ),
+                    ));
+                }
+            }
 
-    let _ = unlink_stale_socket_if_needed(path).await;
+            // Path is a socket file. Check if an active server is listening.
+            if is_stale_socket_path(path).await? {
+                tokio::fs::remove_file(path).await?;
+            } else {
+                return Err(io::Error::new(
+                    ErrorKind::AddrInUse,
+                    format!(
+                        "Socket path '{}' is already in use by an active server",
+                        path.display()
+                    ),
+                ));
+            }
+        }
+        Err(e) if e.kind() == ErrorKind::NotFound => {
+            // Path does not exist, safe to proceed
+        }
+        Err(e) => return Err(e),
+    }
 
     let listener = match UnixListener::bind(path) {
         Ok(l) => l,
@@ -154,7 +196,7 @@ pub async fn bind_unix_listener(socket_path: impl AsRef<Path>) -> io::Result<Uni
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let _ = tokio::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).await;
+        tokio::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).await?;
     }
 
     Ok(listener)
@@ -181,6 +223,52 @@ mod tests {
             let meta = std::fs::metadata(&sock_dir).unwrap();
             assert_eq!(meta.permissions().mode() & 0o777, 0o700);
         }
+    }
+
+    #[tokio::test]
+    async fn test_bind_unix_listener_modes_and_symlink_rejection() {
+        let tmp = tempdir().unwrap();
+        let sock_path = tmp.path().join("test_secure.sock");
+
+        // 1. Bind listener and assert permissions
+        let listener = bind_unix_listener(&sock_path).await.expect("bind listener");
+        assert!(sock_path.exists());
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let meta = std::fs::symlink_metadata(&sock_path).unwrap();
+            assert_eq!(meta.permissions().mode() & 0o777, 0o600);
+        }
+
+        // 2. Active socket preservation: trying to bind again on active socket must fail with AddrInUse
+        let err = bind_unix_listener(&sock_path).await.unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::AddrInUse);
+
+        drop(listener);
+        tokio::fs::remove_file(&sock_path).await.unwrap();
+
+        // 3. Symlink rejection
+        let target_file = tmp.path().join("real_target.txt");
+        tokio::fs::write(&target_file, b"content").await.unwrap();
+
+        #[cfg(unix)]
+        {
+            let symlink_path = tmp.path().join("symlink.sock");
+            std::os::unix::fs::symlink(&target_file, &symlink_path).unwrap();
+            let err = bind_unix_listener(&symlink_path).await.unwrap_err();
+            assert_eq!(err.kind(), ErrorKind::AlreadyExists);
+            assert!(err.to_string().contains("symlink"));
+        }
+
+        // 4. Regular file rejection
+        let regular_path = tmp.path().join("regular.sock");
+        tokio::fs::write(&regular_path, b"not a socket")
+            .await
+            .unwrap();
+        let err = bind_unix_listener(&regular_path).await.unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::AlreadyExists);
+        assert!(err.to_string().contains("not a socket file"));
     }
 
     #[tokio::test]
