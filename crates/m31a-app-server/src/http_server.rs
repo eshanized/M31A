@@ -1,9 +1,20 @@
 //! HTTP, Server-Sent Events (SSE), and REST Gateway for M31A App Server.
 //!
-//! Provides a hardened, authenticated asynchronous HTTP/1.1 server on top of
-//! Tokio TCP streams, enforcing client identity boundaries, revocable token auth,
-//! thread ownership isolation, strict CORS policies, bounded resource limits,
-//! and per-client SSE event isolation.
+//! Provides a hardened, local-first asynchronous HTTP/1.1 server on top of
+//! Tokio TCP streams, enforcing loopback-only network exposure, strict Origin and
+//! Host header validation (DNS rebinding protection), bounded resource limits,
+//! and per-thread SSE event filtering in a sovereign single-user environment.
+//!
+//! ## Local-First Security Boundary Threat Model
+//! M31A does not implement first-party user authentication tokens (no passwords, accounts,
+//! or bearer tokens). Instead, local single-user security is enforced via:
+//! - OS user ownership and process isolation.
+//! - Private filesystem directories (0700) and socket permissions (0600).
+//! - Loopback-only HTTP binding (127.0.0.1 or ::1).
+//! - Host header validation to reject DNS rebinding attacks.
+//! - Origin header validation to reject unauthorized browser cross-origin requests.
+//! - Workspace trust boundaries.
+//! - Sandboxed execution policies and host-mediated human approvals.
 
 use anyhow::{Context, Result};
 use serde_json::Value;
@@ -16,7 +27,6 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Semaphore;
 use tracing::{error, info, warn};
 
-use crate::auth::ClientIdentity;
 use crate::protocol::{AppServer, JsonRpcRequest, JsonRpcResponse};
 
 /// Configuration options for the HTTP daemon.
@@ -25,8 +35,6 @@ pub struct HttpServerConfig {
     pub bind_addr: SocketAddr,
     pub cors_allow_all: bool,
     pub allowed_origins: Vec<String>,
-    pub require_auth: bool,
-    pub auth_token: Option<String>,
     pub max_body_size: usize,
     pub max_header_bytes: usize,
     pub header_timeout_ms: u64,
@@ -40,8 +48,6 @@ impl Default for HttpServerConfig {
             bind_addr: "127.0.0.1:4096".parse().unwrap(),
             cors_allow_all: false,
             allowed_origins: Vec::new(),
-            require_auth: true,
-            auth_token: None,
             max_body_size: 10 * 1024 * 1024, // 10MB
             max_header_bytes: 32 * 1024,     // 32KB
             header_timeout_ms: 10_000,
@@ -296,24 +302,12 @@ async fn handle_connection(
         .await;
     }
 
-    // Local application access model: single-user local-first execution context
-    let client_identity = ClientIdentity::trusted_local();
-
     // Route dispatch
     if (path == "/events" || path == "/api/events") && method == "GET" {
         let filter_thread_id = query_params.get("thread_id").cloned();
-        if let Some(ref tid) = filter_thread_id
-            && let Err(e) = server
-                .auth_manager
-                .require_thread_access(tid, &client_identity)
-        {
-            return send_forbidden(&mut write_half, &e.to_string(), allowed_origin.as_deref())
-                .await;
-        }
         return stream_sse_events(
             &mut write_half,
             server,
-            client_identity,
             filter_thread_id,
             allowed_origin.as_deref(),
         )
@@ -347,9 +341,7 @@ async fn handle_connection(
             }
         };
 
-        let resp = server
-            .handle_request_with_identity(req_json, Some(&client_identity))
-            .await;
+        let resp = server.handle_request(req_json).await;
         let bytes = serde_json::to_vec(&resp)?;
         return send_response(
             &mut write_half,
@@ -361,7 +353,6 @@ async fn handle_connection(
         )
         .await;
     }
-
     if path == "/api/models" && method == "GET" {
         let models_req = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
@@ -369,9 +360,7 @@ async fn handle_connection(
             method: "models/list".to_string(),
             params: None,
         };
-        let resp = server
-            .handle_request_with_identity(models_req, Some(&client_identity))
-            .await;
+        let resp = server.handle_request(models_req).await;
         let bytes = serde_json::to_vec(&resp.result.unwrap_or(Value::Null))?;
         return send_response(
             &mut write_half,
@@ -391,9 +380,7 @@ async fn handle_connection(
             method: "thread/list".to_string(),
             params: Some(serde_json::json!({ "limit": 50 })),
         };
-        let resp = server
-            .handle_request_with_identity(list_req, Some(&client_identity))
-            .await;
+        let resp = server.handle_request(list_req).await;
         let bytes = serde_json::to_vec(&resp.result.unwrap_or(Value::Null))?;
         return send_response(
             &mut write_half,
@@ -408,13 +395,8 @@ async fn handle_connection(
 
     if path == "/api/threads" && method == "POST" {
         let mut body_val: Value = serde_json::from_slice(&body).unwrap_or(serde_json::json!({}));
-        // Remove caller-controlled allow_untrusted flag
         if let Some(map) = body_val.as_object_mut() {
             map.remove("allow_untrusted");
-            map.insert(
-                "client_id".to_string(),
-                Value::String(client_identity.client_id.clone()),
-            );
         }
 
         let create_req = JsonRpcRequest {
@@ -423,9 +405,7 @@ async fn handle_connection(
             method: "thread/create".to_string(),
             params: Some(body_val),
         };
-        let resp = server
-            .handle_request_with_identity(create_req, Some(&client_identity))
-            .await;
+        let resp = server.handle_request(create_req).await;
 
         if let Some(err) = resp.error {
             let bytes = serde_json::to_vec(&err)?;
@@ -441,12 +421,6 @@ async fn handle_connection(
         }
 
         let res_val = resp.result.unwrap_or(Value::Null);
-        if let Some(id) = res_val.get("id").and_then(|v| v.as_str()) {
-            server
-                .auth_manager
-                .register_thread_owner(id, &client_identity.client_id);
-        }
-
         let bytes = serde_json::to_vec(&res_val)?;
         return send_response(
             &mut write_half,
@@ -461,26 +435,14 @@ async fn handle_connection(
 
     if let Some(thread_sub) = path.strip_prefix("/api/threads/") {
         if let Some((thread_id, sub)) = thread_sub.split_once('/') {
-            if let Err(e) = server
-                .auth_manager
-                .require_thread_access(thread_id, &client_identity)
-            {
-                return send_forbidden(&mut write_half, &e.to_string(), allowed_origin.as_deref())
-                    .await;
-            }
-
             if sub == "turns" && method == "POST" {
                 let mut body_val: Value =
                     serde_json::from_slice(&body).unwrap_or(serde_json::json!({}));
                 if let Some(map) = body_val.as_object_mut() {
-                    map.remove("allow_untrusted"); // Remove caller-controlled trust escalation
+                    map.remove("allow_untrusted");
                     map.insert(
                         "thread_id".to_string(),
                         Value::String(thread_id.to_string()),
-                    );
-                    map.insert(
-                        "client_id".to_string(),
-                        Value::String(client_identity.client_id.clone()),
                     );
                 }
                 let turn_req = JsonRpcRequest {
@@ -489,9 +451,7 @@ async fn handle_connection(
                     method: "turn/start".to_string(),
                     params: Some(body_val),
                 };
-                let resp = server
-                    .handle_request_with_identity(turn_req, Some(&client_identity))
-                    .await;
+                let resp = server.handle_request(turn_req).await;
                 if let Some(err) = resp.error {
                     let bytes = serde_json::to_vec(&err)?;
                     return send_response(
@@ -521,9 +481,7 @@ async fn handle_connection(
                     method: "goal/get".to_string(),
                     params: Some(serde_json::json!({ "thread_id": thread_id })),
                 };
-                let resp = server
-                    .handle_request_with_identity(goal_req, Some(&client_identity))
-                    .await;
+                let resp = server.handle_request(goal_req).await;
                 let bytes = serde_json::to_vec(&resp.result.unwrap_or(Value::Null))?;
                 return send_response(
                     &mut write_half,
@@ -537,23 +495,13 @@ async fn handle_connection(
             }
         } else if method == "GET" {
             let thread_id = thread_sub;
-            if let Err(e) = server
-                .auth_manager
-                .require_thread_access(thread_id, &client_identity)
-            {
-                return send_forbidden(&mut write_half, &e.to_string(), allowed_origin.as_deref())
-                    .await;
-            }
-
             let read_req = JsonRpcRequest {
                 jsonrpc: "2.0".to_string(),
                 id: Some(serde_json::json!(1)),
                 method: "thread/read".to_string(),
                 params: Some(serde_json::json!({ "thread_id": thread_id })),
             };
-            let resp = server
-                .handle_request_with_identity(read_req, Some(&client_identity))
-                .await;
+            let resp = server.handle_request(read_req).await;
             let bytes = serde_json::to_vec(&resp.result.unwrap_or(Value::Null))?;
             return send_response(
                 &mut write_half,
@@ -735,6 +683,7 @@ async fn send_response<W: AsyncWriteExt + Unpin>(
     Ok(())
 }
 
+#[allow(dead_code)]
 async fn send_forbidden<W: AsyncWriteExt + Unpin>(
     writer: &mut W,
     message: &str,
@@ -786,7 +735,6 @@ async fn send_cors_preflight<W: AsyncWriteExt + Unpin>(
 async fn stream_sse_events<W: AsyncWriteExt + Unpin>(
     writer: &mut W,
     server: Arc<AppServer>,
-    client_identity: ClientIdentity,
     filter_thread_id: Option<String>,
     allowed_origin: Option<&str>,
 ) -> Result<()> {
@@ -811,22 +759,12 @@ async fn stream_sse_events<W: AsyncWriteExt + Unpin>(
 
     let mut rx = server.subscribe();
     while let Ok(notif) = rx.recv().await {
-        // Enforce thread-level privacy: clients must only receive events for sessions they own
         if let Some(ref params) = notif.params
             && let Some(tid) = params.get("thread_id").and_then(|v| v.as_str())
+            && let Some(ref target_tid) = filter_thread_id
+            && tid != target_tid
         {
-            if let Some(ref target_tid) = filter_thread_id
-                && tid != target_tid
-            {
-                continue; // Filtered to another thread
-            }
-            if server
-                .auth_manager
-                .require_thread_access(tid, &client_identity)
-                .is_err()
-            {
-                continue; // Unauthorized: client does not own this thread!
-            }
+            continue; // Filtered to another thread
         }
 
         if let Ok(json_str) = serde_json::to_string(&notif) {
@@ -949,7 +887,6 @@ mod tests {
         let c_clone = Arc::new(HttpServerConfig {
             bind_addr: local_addr,
             max_body_size: 1024, // 1KB limit
-            require_auth: false,
             ..Default::default()
         });
 
