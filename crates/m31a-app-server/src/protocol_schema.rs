@@ -351,54 +351,6 @@ pub const PROTOCOL_SCHEMA_RAW: &str = r##"{
               "redacted_secrets": { "type": "array", "items": { "type": "string" } }
             }
           }
-        },
-        "auth/stream_ticket": {
-          "description": "Issue a short-lived single-use ticket for authenticating SSE event streams.",
-          "authScope": "Read",
-          "requiresThreadOwnership": true,
-          "params": {
-            "type": "object",
-            "required": ["thread_id"],
-            "properties": { "thread_id": { "type": "string" } }
-          },
-          "result": {
-            "type": "object",
-            "properties": {
-              "ticket": { "type": "string" },
-              "thread_id": { "type": "string" },
-              "expires_in_sec": { "type": "integer" }
-            }
-          }
-        },
-        "auth/rotate_token": {
-          "description": "Rotate an authentication token and invalidate previous secret.",
-          "authScope": "Admin",
-          "params": {
-            "type": "object",
-            "required": ["token_id"],
-            "properties": { "token_id": { "type": "string" } }
-          },
-          "result": {
-            "type": "object",
-            "properties": {
-              "token_id": { "type": "string" },
-              "new_token": { "type": "string" },
-              "scope": { "type": "string" }
-            }
-          }
-        },
-        "auth/revoke_token": {
-          "description": "Revoke an authentication token.",
-          "authScope": "Admin",
-          "params": {
-            "type": "object",
-            "required": ["token_id"],
-            "properties": { "token_id": { "type": "string" } }
-          },
-          "result": {
-            "type": "object",
-            "properties": { "revoked": { "type": "boolean" } }
-          }
         }
       }
     },
@@ -523,9 +475,6 @@ mod tests {
             "turn/approve",
             "workspace/trust_grant",
             "config/read",
-            "auth/stream_ticket",
-            "auth/rotate_token",
-            "auth/revoke_token",
         ];
         for method_name in expected_methods {
             assert!(
