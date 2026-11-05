@@ -133,6 +133,7 @@ pub use collaboration_templates::{
 };
 pub use config::{
     AgentsConfig, ApprovalPolicy, Config, McpServerConfig, ResourceGovernance, SandboxPolicy,
+    resolve_stored_api_key,
 };
 pub use config_schema::{generate_config_schema, validate_config_structure, write_config_schema};
 pub use connector_merge::{

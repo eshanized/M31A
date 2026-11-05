@@ -1378,10 +1378,12 @@ mod tests {
     use m31a_core::SandboxPolicy;
 
     fn test_nim_client() -> ProviderClient {
+        let api_key = m31a_core::resolve_stored_api_key()
+            .unwrap_or_else(|| "nvapi-runtime-integration-token".to_string());
         let provider = m31a_provider::NimProvider::new(
             "https://integrate.api.nvidia.com/v1".to_string(),
-            "test-key".to_string(),
-            "meta/llama-3.3-70b-instruct".to_string(),
+            api_key,
+            "nvidia/nemotron-3.5-lightning-30b-a3b".to_string(),
         );
         ProviderClient::from_provider(provider)
     }

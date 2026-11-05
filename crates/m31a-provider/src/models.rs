@@ -646,8 +646,18 @@ pub async fn fetch_remote_models(api_base: &str, api_key: &str) -> anyhow::Resul
     if let Some(arr) = data.get("data").and_then(|v| v.as_array()) {
         for item in arr {
             if let Some(id) = item.get("id").and_then(|v| v.as_str()) {
+                let remote_cw = item
+                    .get("max_model_len")
+                    .or_else(|| item.get("context_length"))
+                    .or_else(|| item.get("context_window"))
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v as u32);
+
                 // If it already exists in our rich catalog, take the rich version!
                 if let Some(mut existing) = find_model(id) {
+                    if let Some(cw) = remote_cw {
+                        existing.context_window = cw;
+                    }
                     existing.compute_etag();
                     discovered.push(existing);
                     continue;
@@ -669,22 +679,26 @@ pub async fn fetch_remote_models(api_base: &str, api_key: &str) -> anyhow::Resul
                     .unwrap_or(id)
                     .replace(['-', '_'], " ");
 
+                let context_window = if let Some(cw) = remote_cw {
+                    cw
+                } else if lower.contains("1048576") || lower.contains("1m") {
+                    1_048_576
+                } else if lower.contains("128k")
+                    || lower.contains("70b")
+                    || lower.contains("nemotron")
+                {
+                    131_072
+                } else if lower.contains("32k") {
+                    32_768
+                } else {
+                    65_536
+                };
+
                 let mut model = ModelInfo {
                     slug: id.to_string(),
                     display_name,
                     description: format!("Remote discovered model on NIM ({})", originator),
-                    context_window: if lower.contains("1048576") || lower.contains("1m") {
-                        1_048_576
-                    } else if lower.contains("128k")
-                        || lower.contains("70b")
-                        || lower.contains("nemotron")
-                    {
-                        131_072
-                    } else if lower.contains("32k") {
-                        32_768
-                    } else {
-                        65_536
-                    },
+                    context_window,
                     max_output_tokens: 4096,
                     supports_tools: true,
                     supports_thinking: is_thinking,
@@ -725,6 +739,16 @@ pub async fn fetch_remote_models(api_base: &str, api_key: &str) -> anyhow::Resul
     Ok(discovered)
 }
 
+/// Default TTL for cached models: 24 hours (86,400 seconds).
+pub const DEFAULT_MODELS_CACHE_TTL_SECS: u64 = 86_400;
+
+/// Stored format for local cached model catalog with timestamp.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CachedCatalogEnvelope {
+    pub updated_at_unix: u64,
+    pub models: Vec<ModelInfo>,
+}
+
 /// Refresh strategy for model catalog (upstream `models-manager`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -750,7 +774,13 @@ pub fn default_models_cache_path() -> std::path::PathBuf {
 pub fn load_cached_models() -> Vec<ModelInfo> {
     let path = default_models_cache_path();
     if let Ok(content) = std::fs::read_to_string(&path) {
-        // Try parsing as flat Vec<ModelInfo>
+        // Try parsing envelope with timestamp
+        if let Ok(envelope) = serde_json::from_str::<CachedCatalogEnvelope>(&content)
+            && !envelope.models.is_empty()
+        {
+            return envelope.models;
+        }
+        // Fall back to legacy flat Vec<ModelInfo>
         if let Ok(models) = serde_json::from_str::<Vec<ModelInfo>>(&content)
             && !models.is_empty()
         {
@@ -767,9 +797,73 @@ pub fn save_cached_models(models: &[ModelInfo]) {
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    if let Ok(json) = serde_json::to_string_pretty(models) {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let envelope = CachedCatalogEnvelope {
+        updated_at_unix: now,
+        models: models.to_vec(),
+    };
+    if let Ok(json) = serde_json::to_string_pretty(&envelope) {
         let _ = std::fs::write(path, json);
     }
+}
+
+/// Checks if the cached models on disk are missing or older than `ttl_secs`.
+pub fn is_models_cache_stale(ttl_secs: u64) -> bool {
+    let path = default_models_cache_path();
+    if let Some(envelope) = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|content| serde_json::from_str::<CachedCatalogEnvelope>(&content).ok())
+    {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        return now.saturating_sub(envelope.updated_at_unix) >= ttl_secs;
+    }
+    let metadata = match std::fs::metadata(&path) {
+        Ok(m) => m,
+        Err(_) => return true,
+    };
+    let modified = match metadata.modified() {
+        Ok(t) => t,
+        Err(_) => return true,
+    };
+    match std::time::SystemTime::now().duration_since(modified) {
+        Ok(duration) => duration.as_secs() >= ttl_secs,
+        Err(_) => true,
+    }
+}
+
+/// Refreshes the model catalog if the local disk cache is missing or older than `ttl_secs` (e.g. 24h).
+/// If refreshed, updates disk cache and registers models dynamically.
+pub async fn refresh_models_if_stale(api_base: &str, api_key: &str, ttl_secs: u64) -> bool {
+    if !is_models_cache_stale(ttl_secs) {
+        return false;
+    }
+    if api_key.trim().is_empty() {
+        return false;
+    }
+    match fetch_remote_models(api_base, api_key).await {
+        Ok(models) if !models.is_empty() => {
+            save_cached_models(&models);
+            register_dynamic_models(models);
+            true
+        }
+        _ => false,
+    }
+}
+
+/// Asynchronously spawns a non-blocking background task to refresh models daily if stale.
+pub fn spawn_daily_models_refresh(api_base: String, api_key: String) {
+    if api_key.trim().is_empty() {
+        return;
+    }
+    tokio::spawn(async move {
+        let _ = refresh_models_if_stale(&api_base, &api_key, DEFAULT_MODELS_CACHE_TTL_SECS).await;
+    });
 }
 
 #[cfg(test)]
@@ -879,5 +973,61 @@ mod tests {
         assert_eq!(model_info.max_output_tokens, 16_384);
         assert_eq!(model_info.service_tier, ServiceTier::Premium);
         assert_eq!(model_info.input_modalities, vec![InputModality::Text]);
+    }
+
+    #[test]
+    fn test_models_cache_envelope_and_ttl() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache_file = dir.path().join("test_models_cache.json");
+
+        let models = vec![
+            ModelInfo {
+                slug: "test-model-32k".to_string(),
+                display_name: "Test 32k".to_string(),
+                context_window: 32_768,
+                ..Default::default()
+            },
+            ModelInfo {
+                slug: "test-model-128k".to_string(),
+                display_name: "Test 128k".to_string(),
+                context_window: 131_072,
+                ..Default::default()
+            },
+        ];
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        let envelope = CachedCatalogEnvelope {
+            updated_at_unix: now,
+            models: models.clone(),
+        };
+
+        let json = serde_json::to_string_pretty(&envelope).unwrap();
+        std::fs::write(&cache_file, &json).unwrap();
+
+        let loaded: CachedCatalogEnvelope =
+            serde_json::from_str(&std::fs::read_to_string(&cache_file).unwrap()).unwrap();
+        assert_eq!(loaded.models.len(), 2);
+        assert_eq!(loaded.models[0].context_window, 32_768);
+        assert_eq!(loaded.models[1].context_window, 131_072);
+        assert_eq!(loaded.updated_at_unix, now);
+    }
+
+    #[test]
+    fn test_variable_model_context_windows() {
+        let qwen = find_model("qwen/qwen2.5-coder-32b-instruct")
+            .expect("Qwen coder must exist in catalog");
+        assert_eq!(qwen.context_window, 32_768);
+
+        let ultra =
+            find_model("nvidia/nemotron-3-ultra-550b-a55b").expect("Nemotron ultra must exist");
+        assert_eq!(ultra.context_window, 1_048_576);
+
+        let llama =
+            find_model("meta/llama-3.3-70b-instruct").expect("Llama 3.3 must exist in catalog");
+        assert_eq!(llama.context_window, 131_072);
     }
 }

@@ -1939,10 +1939,12 @@ mod tests {
     }
 
     fn test_nim_client() -> ProviderClient {
+        let api_key = m31a_core::resolve_stored_api_key()
+            .unwrap_or_else(|| "nvapi-runtime-integration-token".to_string());
         let provider = m31a_provider::NimProvider::new(
             "https://integrate.api.nvidia.com/v1".to_string(),
-            "test-key".to_string(),
-            "meta/llama-3.3-70b-instruct".to_string(),
+            api_key,
+            "nvidia/nemotron-3.5-lightning-30b-a3b".to_string(),
         );
         ProviderClient::from_provider(provider)
     }
@@ -2084,10 +2086,12 @@ mod tests {
         server.enqueue_text("OK");
 
         let dir = tempfile::tempdir().expect("tempdir");
+        let api_key = m31a_core::resolve_stored_api_key()
+            .unwrap_or_else(|| "nvapi-runtime-integration-token".to_string());
         let client = m31a_provider::NvidiaNimClient::new(
             server.api_base(),
-            "local-wire-test-key",
-            "meta/llama-3.3-70b-instruct",
+            &api_key,
+            "nvidia/nemotron-3.5-lightning-30b-a3b",
         );
         let storage = Storage::open_in_memory().expect("storage");
         let mut engine = AgentEngine::new(
@@ -2285,10 +2289,12 @@ mod tests {
 
     #[test]
     fn test_turn_loop_with_nvidia_provider() {
+        let api_key = m31a_core::resolve_stored_api_key()
+            .unwrap_or_else(|| "nvapi-runtime-integration-token".to_string());
         let provider = m31a_provider::NimProvider::new(
             "https://integrate.api.nvidia.com/v1".to_string(),
-            "test-key".to_string(),
-            "meta/llama-3.3-70b-instruct".to_string(),
+            api_key,
+            "nvidia/nemotron-3.5-lightning-30b-a3b".to_string(),
         );
         let client = ProviderClient::from_provider(provider);
         let storage = Storage::open_in_memory().unwrap();
@@ -2302,8 +2308,13 @@ mod tests {
             std::env::temp_dir(),
         );
 
-        assert_eq!(engine.client.model(), "meta/llama-3.3-70b-instruct");
-        let derived = engine.client.with_model("nvidia/nemotron-3-ultra-550b-a55b");
+        assert_eq!(
+            engine.client.model(),
+            "nvidia/nemotron-3.5-lightning-30b-a3b"
+        );
+        let derived = engine
+            .client
+            .with_model("nvidia/nemotron-3-ultra-550b-a55b");
         assert_eq!(derived.model(), "nvidia/nemotron-3-ultra-550b-a55b");
     }
 }

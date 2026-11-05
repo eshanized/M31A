@@ -1238,6 +1238,31 @@ pub fn resolve_stored_api_key() -> Option<String> {
         }
     }
 
+    // 4. Workspace root .env file (searching current directory and parent directories)
+    let mut search_dir = std::env::current_dir().ok();
+    for _ in 0..10 {
+        if let Some(ref dir) = search_dir {
+            let env_path = dir.join(".env");
+            if env_path.is_file()
+                && let Ok(content) = fs::read_to_string(&env_path)
+            {
+                for line in content.lines() {
+                    let line = line.trim();
+                    let stripped = line.strip_prefix("export ").unwrap_or(line).trim();
+                    if let Some(val) = stripped.strip_prefix("NVIDIA_API_KEY=") {
+                        let key = val.trim().trim_matches('"').trim_matches('\'').trim();
+                        if !key.is_empty() {
+                            return Some(key.to_string());
+                        }
+                    }
+                }
+            }
+            search_dir = dir.parent().map(|p| p.to_path_buf());
+        } else {
+            break;
+        }
+    }
+
     None
 }
 

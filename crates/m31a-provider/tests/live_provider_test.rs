@@ -12,7 +12,7 @@
 
 use m31a_core::types::{ChatMessage, FunctionDefinition, ToolDefinition};
 use m31a_provider::live_test_support::{
-    LiveTestConfig, NVIDIA_NEMOTRON_3_ULTRA, NVIDIA_NIM_BASE_URL, ensure_live_test_opt_in,
+    LiveTestConfig, NVIDIA_NEMOTRON_LIGHTNING, NVIDIA_NIM_BASE_URL, ensure_live_test_opt_in,
 };
 use m31a_provider::{NvidiaNimClient, ProviderBuilder, ProviderConfig, ProviderType};
 use std::collections::HashMap;
@@ -30,7 +30,7 @@ async fn test_real_live_provider_chat_streaming() {
         .with_temperature(Some(cfg.temperature))
         .with_top_p(Some(cfg.top_p));
 
-    assert_eq!(client.model(), NVIDIA_NEMOTRON_3_ULTRA);
+    assert_eq!(client.model(), cfg.model);
 
     let messages = vec![ChatMessage::user(
         "What is 13 * 13? Answer with just the numeric result.",
@@ -195,10 +195,11 @@ async fn test_real_live_provider_abstraction_pipeline() {
     let client = ProviderBuilder::build_client(provider_config)
         .expect("ProviderBuilder must construct ProviderClient")
         .with_max_tokens(Some(cfg.short_output_budget))
+        .with_reasoning_budget(Some(cfg.medium_reasoning_budget))
         .with_reasoning_effort(Some(cfg.reasoning_effort.to_string()))
         .with_temperature(Some(cfg.temperature));
 
-    assert_eq!(client.model(), NVIDIA_NEMOTRON_3_ULTRA);
+    assert_eq!(client.model(), cfg.model);
 
     // 3. Application-level inference traversal
     let messages = vec![ChatMessage::user(
@@ -230,7 +231,7 @@ async fn test_real_live_provider_invalid_key_error_propagation() {
     let client = NvidiaNimClient::new(
         NVIDIA_NIM_BASE_URL,
         "nvapi-invalid-key-testing-honest-error-propagation",
-        NVIDIA_NEMOTRON_3_ULTRA,
+        NVIDIA_NEMOTRON_LIGHTNING,
     );
 
     let messages = vec![ChatMessage::user("Ping")];
@@ -249,22 +250,25 @@ async fn test_real_live_provider_invalid_key_error_propagation() {
 async fn test_real_live_provider_client_model_cloning_and_inference() {
     let cfg = LiveTestConfig::load();
     // Start with a base client configuration
-    let base_client =
-        NvidiaNimClient::new(cfg.api_base, &cfg.api_key, "meta/llama-3.1-8b-instruct")
-            .with_max_tokens(Some(cfg.short_output_budget))
-            .with_reasoning_budget(Some(cfg.medium_reasoning_budget))
-            .with_reasoning_effort(Some(cfg.reasoning_effort.to_string()))
-            .with_temperature(Some(cfg.temperature))
-            .with_top_p(Some(cfg.top_p));
+    let base_client = NvidiaNimClient::new(
+        cfg.api_base,
+        &cfg.api_key,
+        "nvidia/nemotron-3.5-lightning-30b-a3b",
+    )
+    .with_max_tokens(Some(cfg.short_output_budget))
+    .with_reasoning_budget(Some(cfg.medium_reasoning_budget))
+    .with_reasoning_effort(Some(cfg.reasoning_effort.to_string()))
+    .with_temperature(Some(cfg.temperature))
+    .with_top_p(Some(cfg.top_p));
 
-    assert_eq!(base_client.model(), "meta/llama-3.1-8b-instruct");
+    assert_eq!(base_client.model(), "nvidia/nemotron-3.5-lightning-30b-a3b");
 
-    // Clone client targeting NVIDIA Nemotron 3 Ultra
-    let switched_client = base_client.with_model(NVIDIA_NEMOTRON_3_ULTRA);
-    assert_eq!(switched_client.model(), NVIDIA_NEMOTRON_3_ULTRA);
+    // Clone client targeting NVIDIA Nemotron 3.5 Bolt
+    let switched_client = base_client.with_model("nvidia/nemotron-3.5-bolt-e4b");
+    assert_eq!(switched_client.model(), "nvidia/nemotron-3.5-bolt-e4b");
     assert_ne!(switched_client.model(), base_client.model());
 
-    // Execute real inference on cloned Nemotron 3 Ultra client
+    // Execute real inference on cloned Nemotron 3.5 Bolt client
     let (resp, _) = switched_client
         .stream_chat(
             &[ChatMessage::user("Say the exact word 'STELLAR' only.")],
@@ -273,7 +277,7 @@ async fn test_real_live_provider_client_model_cloning_and_inference() {
             None,
         )
         .await
-        .expect("Inference on cloned Nemotron Ultra client must succeed");
+        .expect("Inference on cloned Nemotron Bolt client must succeed");
 
     let text = resp.content.as_deref().unwrap_or("");
     assert!(
@@ -281,4 +285,42 @@ async fn test_real_live_provider_client_model_cloning_and_inference() {
         "Expected user-facing content containing 'STELLAR', got: {}",
         text
     );
+}
+
+#[tokio::test]
+#[ignore = "Live NVIDIA NIM integration test requiring M31A_RUN_LIVE_NVIDIA_TESTS=1"]
+async fn test_real_live_remote_models_discovery_and_caching() {
+    let cfg = LiveTestConfig::load();
+
+    // 1. Fetch live models from NVIDIA NIM using real API key
+    let models = m31a_provider::fetch_remote_models(cfg.api_base, &cfg.api_key)
+        .await
+        .expect("Live fetch_remote_models against NVIDIA NIM must succeed");
+
+    assert!(
+        models.len() >= 50,
+        "Expected at least 50 models on NVIDIA NIM, discovered: {}",
+        models.len()
+    );
+
+    // 2. Verify key models are present with correct context windows
+    let nemotron = models
+        .iter()
+        .find(|m| m.slug == "nvidia/nemotron-3-ultra-550b-a55b")
+        .expect("nemotron-3-ultra must be present in live discovered models");
+    assert_eq!(nemotron.context_window, 1_048_576);
+
+    let lightning = models
+        .iter()
+        .find(|m| m.slug == "nvidia/nemotron-3.5-lightning-30b-a3b")
+        .expect("nemotron-3.5-lightning must be present");
+    assert!(lightning.context_window > 0);
+
+    // 3. Test caching envelope roundtrip
+    m31a_provider::save_cached_models(&models);
+    let loaded = m31a_provider::load_cached_models();
+    assert!(loaded.len() >= models.len());
+    assert!(!m31a_provider::is_models_cache_stale(
+        m31a_provider::DEFAULT_MODELS_CACHE_TTL_SECS
+    ));
 }

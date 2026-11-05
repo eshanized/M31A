@@ -11,7 +11,10 @@ fn test_modal_precedence_and_escape_dismissal() {
     let config = Config {
         model: "meta/llama-3.3-70b-instruct".to_string(),
         model_provider: Some("nim".to_string()),
-        api_key: Some("test-key".to_string()),
+        api_key: Some(
+            m31a_core::resolve_stored_api_key()
+                .unwrap_or_else(|| "nvapi-runtime-integration-token".to_string()),
+        ),
         ..Default::default()
     };
 
@@ -47,7 +50,10 @@ fn test_model_picker_shortcuts_and_ctrl_enter_separation() {
     let config = Config {
         model: "meta/llama-3.3-70b-instruct".to_string(),
         model_provider: Some("nim".to_string()),
-        api_key: Some("test-key".to_string()),
+        api_key: Some(
+            m31a_core::resolve_stored_api_key()
+                .unwrap_or_else(|| "nvapi-runtime-integration-token".to_string()),
+        ),
         ..Default::default()
     };
 
@@ -104,7 +110,10 @@ fn test_ctrl_enter_prompt_queuing_during_execution() {
     let config = Config {
         model: "meta/llama-3.3-70b-instruct".to_string(),
         model_provider: Some("nim".to_string()),
-        api_key: Some("test-key".to_string()),
+        api_key: Some(
+            m31a_core::resolve_stored_api_key()
+                .unwrap_or_else(|| "nvapi-runtime-integration-token".to_string()),
+        ),
         ..Default::default()
     };
 
@@ -136,7 +145,10 @@ fn test_ctrl_c_interrupt_lifecycle() {
     let config = Config {
         model: "meta/llama-3.3-70b-instruct".to_string(),
         model_provider: Some("nim".to_string()),
-        api_key: Some("test-key".to_string()),
+        api_key: Some(
+            m31a_core::resolve_stored_api_key()
+                .unwrap_or_else(|| "nvapi-runtime-integration-token".to_string()),
+        ),
         ..Default::default()
     };
 

@@ -14,7 +14,10 @@ use tempfile::tempdir;
 fn test_storage_isolation_guarantee() {
     let dir = tempdir().unwrap();
     let config = Config {
-        api_key: Some("test-key".to_string()),
+        api_key: Some(
+            m31a_core::resolve_stored_api_key()
+                .unwrap_or_else(|| "nvapi-runtime-integration-token".to_string()),
+        ),
         ..Default::default()
     };
 
@@ -40,7 +43,10 @@ fn test_switch_workspace_real_workflow() {
     let dir2 = tempdir().unwrap();
 
     let config = Config {
-        api_key: Some("test-key".to_string()),
+        api_key: Some(
+            m31a_core::resolve_stored_api_key()
+                .unwrap_or_else(|| "nvapi-runtime-integration-token".to_string()),
+        ),
         ..Default::default()
     };
     let mut app = App::new_test(config, dir1.path()).unwrap();
@@ -69,7 +75,10 @@ fn test_switch_workspace_real_workflow() {
 fn test_activate_persona_and_skill_context() {
     let dir = tempdir().unwrap();
     let config = Config {
-        api_key: Some("test-key".to_string()),
+        api_key: Some(
+            m31a_core::resolve_stored_api_key()
+                .unwrap_or_else(|| "nvapi-runtime-integration-token".to_string()),
+        ),
         ..Default::default()
     };
     let mut app = App::new_test(config, dir.path()).unwrap();
@@ -116,7 +125,10 @@ fn test_activate_persona_and_skill_context() {
 fn test_subagent_drilldown_and_termination_workflow() {
     let dir = tempdir().unwrap();
     let config = Config {
-        api_key: Some("test-key".to_string()),
+        api_key: Some(
+            m31a_core::resolve_stored_api_key()
+                .unwrap_or_else(|| "nvapi-runtime-integration-token".to_string()),
+        ),
         ..Default::default()
     };
     let mut app = App::new_test(config, dir.path()).unwrap();
@@ -206,7 +218,10 @@ fn test_subagent_drilldown_and_termination_workflow() {
 fn test_cancellation_lifecycle_resets_turn_state() {
     let dir = tempdir().unwrap();
     let config = Config {
-        api_key: Some("test-key".to_string()),
+        api_key: Some(
+            m31a_core::resolve_stored_api_key()
+                .unwrap_or_else(|| "nvapi-runtime-integration-token".to_string()),
+        ),
         ..Default::default()
     };
     let mut app = App::new_test(config, dir.path()).unwrap();
@@ -258,7 +273,10 @@ fn test_cancellation_lifecycle_resets_turn_state() {
 fn test_transactional_persistence_no_duplicate_records() {
     let dir = tempdir().unwrap();
     let config = Config {
-        api_key: Some("test-key".to_string()),
+        api_key: Some(
+            m31a_core::resolve_stored_api_key()
+                .unwrap_or_else(|| "nvapi-runtime-integration-token".to_string()),
+        ),
         ..Default::default()
     };
     let mut app = App::new_test(config, dir.path()).unwrap();

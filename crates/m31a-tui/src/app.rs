@@ -320,8 +320,11 @@ impl App {
         if config.api_key.is_none() {
             config.api_key = Some("test-credential".to_string());
         }
-        if config.model == "mock-model" || config.model == "mock-testing-model" || config.model.is_empty() {
-            config.model = "meta/llama-3.3-70b-instruct".to_string();
+        if config.model == "mock-model"
+            || config.model == "mock-testing-model"
+            || config.model.is_empty()
+        {
+            config.model = "nvidia/nemotron-3.5-lightning-30b-a3b".to_string();
         }
         if config.model_provider.as_deref() == Some("mock") {
             config.model_provider = Some("nim".to_string());
@@ -507,14 +510,17 @@ impl App {
             crate::theme::set_icon_mode(None);
         }
 
-        // Dynamically fetch models from provider endpoint in background
+        // Dynamically fetch models from provider endpoint in background if cache is stale (daily TTL) or empty
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             let api_base_models = config.api_base.clone();
             let api_key_models = config.api_key.clone().unwrap_or_default();
             let event_tx_models = event_tx.clone();
             handle.spawn(async move {
-                if let Ok(discovered) =
+                if m31a_provider::is_models_cache_stale(
+                    m31a_provider::DEFAULT_MODELS_CACHE_TTL_SECS,
+                ) && let Ok(discovered) =
                     m31a_provider::fetch_remote_models(&api_base_models, &api_key_models).await
+                    && !discovered.is_empty()
                 {
                     m31a_provider::save_cached_models(&discovered);
                     let _ = event_tx_models
@@ -4874,6 +4880,13 @@ impl App {
 
         let mut candidate_config = self.config.clone();
         candidate_config.model = target_slug.to_string();
+        if let Some(info) = m31a_provider::find_model(target_slug) {
+            candidate_config.model_context_window = info.context_window as usize;
+        } else if let Some(cw) = m31a_provider::find_canonical_model(target_slug)
+            .and_then(|canon| canon.context_window)
+        {
+            candidate_config.model_context_window = cw as usize;
+        }
         if let Err(e) = candidate_config.save() {
             let err_msg = format!("Failed to persist model configuration for '{target_slug}': {e}");
             self.transcript
@@ -4888,6 +4901,10 @@ impl App {
         self.config = candidate_config;
         self.active_model = target_slug.to_string();
         self.bottom_pane.active_model = target_slug.to_string();
+        self.bottom_pane.token_meter = Some(crate::bottom_pane::TokenContextMeter::new(
+            self.tokens_used as usize,
+            self.config.model_context_window,
+        ));
         self.nim_client = candidate_client;
         self.tools.set_agent_runtime(new_engine_runtime.clone());
         self.engine_runtime = new_engine_runtime.clone();

@@ -202,10 +202,12 @@ async fn test_path_b_model_execution_with_nvidia_provider() -> Result<()> {
     server
         .enqueue_text("I have inspected the engineering requirements and completed the analysis.");
 
+    let api_key = m31a_core::resolve_stored_api_key()
+        .unwrap_or_else(|| "nvapi-runtime-integration-token".to_string());
     let provider = m31a_provider::NimProvider::new(
         server.api_base(),
-        "local-test-key".to_string(),
-        "meta/llama-3.3-70b-instruct".to_string(),
+        api_key,
+        "nvidia/nemotron-3.5-lightning-30b-a3b".to_string(),
     );
 
     let client = ProviderClient::from_provider(provider);

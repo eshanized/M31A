@@ -8,7 +8,10 @@
 
 use std::path::PathBuf;
 
-/// The exact model target for real NVIDIA integration testing.
+/// The fast default model target for real NVIDIA integration testing.
+pub const NVIDIA_NEMOTRON_LIGHTNING: &str = "nvidia/nemotron-3.5-lightning-30b-a3b";
+
+/// The 1M ultra reasoning model target for NVIDIA NIM catalog verification.
 pub const NVIDIA_NEMOTRON_3_ULTRA: &str = "nvidia/nemotron-3-ultra-550b-a55b";
 
 /// Base URL for NVIDIA NIM inference.
@@ -140,7 +143,7 @@ impl LiveTestConfig {
     pub fn load() -> Self {
         let api_key = load_live_test_api_key();
         Self {
-            model: NVIDIA_NEMOTRON_3_ULTRA,
+            model: NVIDIA_NEMOTRON_LIGHTNING,
             api_base: NVIDIA_NIM_BASE_URL,
             api_key,
             short_output_budget: 512,

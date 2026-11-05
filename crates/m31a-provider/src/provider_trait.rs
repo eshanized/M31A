@@ -21,6 +21,8 @@ pub struct ChatRequest {
     pub max_tokens: Option<u32>,
     pub stream: bool,
     pub reasoning_effort: Option<String>,
+    #[serde(default)]
+    pub reasoning_budget: Option<i32>,
     pub extra_params: HashMap<String, serde_json::Value>,
 }
 
@@ -197,7 +199,7 @@ impl ProviderType {
 
     pub fn default_model(&self) -> &'static str {
         match self {
-            Self::Nim => "meta/llama-3.3-70b-instruct",
+            Self::Nim => "nvidia/nemotron-3.5-lightning-30b-a3b",
         }
     }
 
@@ -460,16 +462,53 @@ impl ModelProvider for NimProvider {
     }
 
     fn capabilities(&self) -> ModelCapabilities {
-        // NIM models generally support tools and some support reasoning
+        let model = self.inner.model();
+        let info = crate::models::find_model(model);
+        let canonical = crate::models::find_canonical_model(model);
+
+        let context_window = info
+            .as_ref()
+            .map(|m| m.context_window)
+            .or_else(|| canonical.as_ref().and_then(|c| c.context_window))
+            .unwrap_or(131072);
+
+        let max_output = info
+            .as_ref()
+            .map(|m| m.max_output_tokens)
+            .or_else(|| canonical.as_ref().and_then(|c| c.max_output_tokens))
+            .unwrap_or(8192);
+
+        let supports_tools = info
+            .as_ref()
+            .map(|m| m.supports_tools)
+            .or_else(|| canonical.as_ref().map(|c| c.capabilities.tool_calling))
+            .unwrap_or(true);
+
+        let supports_reasoning = info
+            .as_ref()
+            .map(|m| m.supports_thinking)
+            .or_else(|| canonical.as_ref().map(|c| c.capabilities.reasoning))
+            .unwrap_or_else(|| {
+                model.contains("deepseek")
+                    || model.contains("nemotron")
+                    || model.contains("reasoning")
+                    || model.contains("r1")
+            });
+
+        let supports_vision = info
+            .as_ref()
+            .map(|m| m.supports_vision)
+            .or_else(|| canonical.as_ref().map(|c| c.capabilities.vision))
+            .unwrap_or(false);
+
         ModelCapabilities {
-            supports_tools: true,
-            supports_reasoning: self.inner.model().contains("deepseek")
-                || self.inner.model().contains("nemotron"),
-            supports_vision: false,
-            supports_parallel_tools: true,
+            supports_tools,
+            supports_reasoning,
+            supports_vision,
+            supports_parallel_tools: supports_tools,
             supports_streaming: true,
-            max_context_tokens: 131072,
-            max_output_tokens: Some(8192),
+            max_context_tokens: context_window,
+            max_output_tokens: Some(max_output),
         }
     }
 
@@ -532,7 +571,7 @@ impl ModelProvider for NimProvider {
         let on_content = handler.clone();
         let on_reasoning = handler.clone();
 
-        let mut client = self.inner.clone();
+        let mut client = self.inner.clone().with_model(&request.model);
         if let Some(ref tc) = request.tool_choice {
             client = client.with_tool_choice(Some(tc.clone()));
         }
@@ -544,6 +583,9 @@ impl ModelProvider for NimProvider {
         }
         if let Some(ref r) = request.reasoning_effort {
             client = client.with_reasoning_effort(Some(r.clone()));
+        }
+        if let Some(b) = request.reasoning_budget {
+            client = client.with_reasoning_budget(Some(b));
         }
 
         let (message, usage) = client
@@ -569,7 +611,7 @@ impl ModelProvider for NimProvider {
     }
 
     async fn chat(&self, request: ChatRequest) -> Result<ChatCompletionResponse> {
-        let mut client = self.inner.clone();
+        let mut client = self.inner.clone().with_model(&request.model);
         if let Some(ref tc) = request.tool_choice {
             client = client.with_tool_choice(Some(tc.clone()));
         }
@@ -581,6 +623,9 @@ impl ModelProvider for NimProvider {
         }
         if let Some(ref r) = request.reasoning_effort {
             client = client.with_reasoning_effort(Some(r.clone()));
+        }
+        if let Some(b) = request.reasoning_budget {
+            client = client.with_reasoning_budget(Some(b));
         }
 
         let (message, usage) = client
@@ -610,6 +655,7 @@ pub struct ProviderClient {
     provider: Arc<dyn ModelProvider>,
     model: String,
     reasoning_effort: Option<String>,
+    reasoning_budget: Option<i32>,
     max_tokens: Option<u32>,
     temperature: Option<f32>,
     tool_choice: Option<String>,
@@ -620,6 +666,7 @@ impl std::fmt::Debug for ProviderClient {
         f.debug_struct("ProviderClient")
             .field("model", &self.model)
             .field("reasoning_effort", &self.reasoning_effort)
+            .field("reasoning_budget", &self.reasoning_budget)
             .field("max_tokens", &self.max_tokens)
             .field("temperature", &self.temperature)
             .field("tool_choice", &self.tool_choice)
@@ -634,6 +681,7 @@ impl ProviderClient {
             provider,
             model,
             reasoning_effort: None,
+            reasoning_budget: None,
             max_tokens: None,
             temperature: None,
             tool_choice: None,
@@ -657,6 +705,7 @@ impl ProviderClient {
             provider: self.provider.clone(),
             model: model.into(),
             reasoning_effort: self.reasoning_effort.clone(),
+            reasoning_budget: self.reasoning_budget,
             max_tokens: self.max_tokens,
             temperature: self.temperature,
             tool_choice: self.tool_choice.clone(),
@@ -665,6 +714,11 @@ impl ProviderClient {
 
     pub fn with_reasoning_effort(mut self, effort: Option<String>) -> Self {
         self.reasoning_effort = effort;
+        self
+    }
+
+    pub fn with_reasoning_budget(mut self, budget: Option<i32>) -> Self {
+        self.reasoning_budget = budget;
         self
     }
 
@@ -687,6 +741,10 @@ impl ProviderClient {
         self.reasoning_effort.as_deref()
     }
 
+    pub fn reasoning_budget(&self) -> Option<i32> {
+        self.reasoning_budget
+    }
+
     pub fn max_tokens(&self) -> Option<u32> {
         self.max_tokens
     }
@@ -697,6 +755,31 @@ impl ProviderClient {
 
     pub fn tool_choice(&self) -> Option<&str> {
         self.tool_choice.as_deref()
+    }
+
+    /// Returns dynamic model capabilities for this client's configured model.
+    pub fn capabilities(&self) -> ModelCapabilities {
+        let mut caps = self.provider.capabilities();
+        if self.model != self.provider.current_model() {
+            if let Some(info) = crate::models::find_model(&self.model) {
+                caps.max_context_tokens = info.context_window;
+                caps.max_output_tokens = Some(info.max_output_tokens);
+                caps.supports_tools = info.supports_tools;
+                caps.supports_reasoning = info.supports_thinking;
+                caps.supports_vision = info.supports_vision;
+            } else if let Some(canon) = crate::models::find_canonical_model(&self.model) {
+                if let Some(cw) = canon.context_window {
+                    caps.max_context_tokens = cw;
+                }
+                if let Some(mo) = canon.max_output_tokens {
+                    caps.max_output_tokens = Some(mo);
+                }
+                caps.supports_tools = canon.capabilities.tool_calling;
+                caps.supports_reasoning = canon.capabilities.reasoning;
+                caps.supports_vision = canon.capabilities.vision;
+            }
+        }
+        caps
     }
 
     pub async fn check_connection(&self) -> Result<()> {
@@ -737,6 +820,7 @@ impl ProviderClient {
             max_tokens: self.max_tokens,
             stream: true,
             reasoning_effort: self.reasoning_effort.clone(),
+            reasoning_budget: self.reasoning_budget,
             extra_params: HashMap::new(),
         };
 
@@ -758,6 +842,7 @@ impl ProviderClient {
             max_tokens: self.max_tokens,
             stream: false,
             reasoning_effort: self.reasoning_effort.clone(),
+            reasoning_budget: self.reasoning_budget,
             extra_params: HashMap::new(),
         };
 

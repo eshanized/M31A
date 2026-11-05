@@ -928,6 +928,7 @@ Do not wrap in backticks or markdown.";
         max_tokens: Some(4096),
         stream: false,
         reasoning_effort: None,
+        reasoning_budget: None,
         extra_params: std::collections::HashMap::new(),
     };
 

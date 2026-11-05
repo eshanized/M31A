@@ -160,7 +160,10 @@ async fn test_transactional_model_switching_updates_agent_runtime() {
     let config = Config {
         model: "meta/llama-3.3-70b-instruct".to_string(),
         api_base: wire_server.api_base(),
-        api_key: Some("valid-test-key".to_string()),
+        api_key: Some(
+            m31a_core::resolve_stored_api_key()
+                .unwrap_or_else(|| "nvapi-runtime-integration-token".to_string()),
+        ),
         ..Default::default()
     };
     let mut app = App::new_test(config, temp.path()).unwrap();
@@ -300,7 +303,10 @@ fn test_modal_model_picker_keyboard_interaction_lifecycle() {
     let temp = tempfile::tempdir().unwrap();
     let config = Config {
         model: "meta/llama-3.3-70b-instruct".to_string(),
-        api_key: Some("valid-test-key".to_string()),
+        api_key: Some(
+            m31a_core::resolve_stored_api_key()
+                .unwrap_or_else(|| "nvapi-runtime-integration-token".to_string()),
+        ),
         ..Default::default()
     };
     let mut app = App::new_test(config, temp.path()).expect("app init");

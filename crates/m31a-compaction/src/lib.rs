@@ -256,6 +256,7 @@ impl SessionCompactor {
             max_tokens: Some(1000),
             stream: false,
             reasoning_effort: None,
+            reasoning_budget: None,
             extra_params: HashMap::new(),
         };
 

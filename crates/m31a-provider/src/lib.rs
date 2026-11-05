@@ -39,13 +39,14 @@ pub use gateway_oauth::{
 pub use health_monitor::{HealthStatus, LocalModelHealthMonitor};
 pub use manager::{ContextBudgetStatus, ModelPreset, ModelsManager};
 pub use models::{
-    CanonicalCapabilities, CanonicalCatalog, CanonicalEligibility, CanonicalModel,
-    CanonicalPricing, CanonicalProvenance, InputModality, ModelInfo, ServiceTier, ToolMode,
-    TruncationPolicy, fetch_remote_models, find_canonical_model, find_model, get_canonical_catalog,
-    get_model_catalog, get_nvidia_model_catalog, list_coding_models, list_embedding_models,
+    CachedCatalogEnvelope, CanonicalCapabilities, CanonicalCatalog, CanonicalEligibility,
+    CanonicalModel, CanonicalPricing, CanonicalProvenance, DEFAULT_MODELS_CACHE_TTL_SECS,
+    InputModality, ModelInfo, ServiceTier, ToolMode, TruncationPolicy, fetch_remote_models,
+    find_canonical_model, find_model, get_canonical_catalog, get_model_catalog,
+    get_nvidia_model_catalog, is_models_cache_stale, list_coding_models, list_embedding_models,
     list_guardrail_models, list_models_by_publisher, list_publishers, list_reasoning_models,
-    list_vision_models, load_cached_models, register_dynamic_models, save_cached_models,
-    search_models,
+    list_vision_models, load_cached_models, refresh_models_if_stale, register_dynamic_models,
+    save_cached_models, search_models, spawn_daily_models_refresh,
 };
 pub use models_identity::{
     ModelFamily, ModelIdentityInfo, ModelVendor, calculate_token_cost, get_model_pricing,

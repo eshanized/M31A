@@ -49,8 +49,9 @@ async fn test_provider_receives_authoritative_system_prompt_even_if_history_has_
 
     let client = NvidiaNimClient::new(
         server.api_base(),
-        "local-wire-test-key",
-        "meta/llama-3.3-70b-instruct",
+        m31a_core::resolve_stored_api_key()
+            .unwrap_or_else(|| "nvapi-runtime-integration-token".to_string()),
+        "nvidia/nemotron-3.5-lightning-30b-a3b",
     );
     let storage = Storage::open_in_memory()?;
     let registry = ToolRegistry::new();
@@ -113,8 +114,9 @@ async fn test_rebuilding_history_does_not_duplicate_system_prompt() -> Result<()
 
     let client = NvidiaNimClient::new(
         server.api_base(),
-        "local-wire-test-key",
-        "meta/llama-3.3-70b-instruct",
+        m31a_core::resolve_stored_api_key()
+            .unwrap_or_else(|| "nvapi-runtime-integration-token".to_string()),
+        "nvidia/nemotron-3.5-lightning-30b-a3b",
     );
     let storage = Storage::open_in_memory()?;
     let registry = ToolRegistry::new();
@@ -170,8 +172,9 @@ async fn test_compaction_preserves_unique_system_prompt_end_to_end() -> Result<(
 
     let client = NvidiaNimClient::new(
         server.api_base(),
-        "local-wire-test-key",
-        "meta/llama-3.3-70b-instruct",
+        m31a_core::resolve_stored_api_key()
+            .unwrap_or_else(|| "nvapi-runtime-integration-token".to_string()),
+        "nvidia/nemotron-3.5-lightning-30b-a3b",
     );
     let storage = Storage::open_in_memory()?;
     let registry = ToolRegistry::new();

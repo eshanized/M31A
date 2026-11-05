@@ -1167,6 +1167,11 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    fn test_api_key() -> String {
+        m31a_core::resolve_stored_api_key()
+            .unwrap_or_else(|| "nvapi-runtime-integration-token".to_string())
+    }
+
     #[test]
     fn test_sse_split_utf8_multibyte_code_points() {
         let mut accumulator = SseStreamAccumulator::new();
@@ -1352,7 +1357,7 @@ mod tests {
     fn test_nemotron_ultra_request_serialization() {
         let client = NvidiaNimClient::new(
             "https://integrate.api.nvidia.com/v1",
-            "fake-key",
+            test_api_key(),
             "nvidia/nemotron-3-ultra-550b-a55b",
         )
         .with_max_tokens(Some(1024))
@@ -1401,7 +1406,7 @@ mod tests {
     fn test_reasoning_budget_exceeding_max_tokens_rejected() {
         let client = NvidiaNimClient::new(
             "https://integrate.api.nvidia.com/v1",
-            "fake-key",
+            test_api_key(),
             "nvidia/nemotron-3-ultra-550b-a55b",
         )
         .with_max_tokens(Some(256))
@@ -1417,7 +1422,7 @@ mod tests {
     fn test_nemotron_request_serialization_reasoning_disabled() {
         let client = NvidiaNimClient::new(
             "https://integrate.api.nvidia.com/v1",
-            "fake-key",
+            test_api_key(),
             "nvidia/nemotron-3-ultra-550b-a55b",
         )
         .with_reasoning_effort(Some("none".to_string()));
@@ -1437,7 +1442,7 @@ mod tests {
     fn test_nemotron_request_serialization_medium_reasoning() {
         let client = NvidiaNimClient::new(
             "https://integrate.api.nvidia.com/v1",
-            "fake-key",
+            test_api_key(),
             "nvidia/nemotron-3-ultra-550b-a55b",
         )
         .with_reasoning_effort(Some("medium".to_string()));
@@ -1457,7 +1462,7 @@ mod tests {
     fn test_nemotron_request_serialization_high_reasoning() {
         let client = NvidiaNimClient::new(
             "https://integrate.api.nvidia.com/v1",
-            "fake-key",
+            test_api_key(),
             "nvidia/nemotron-3-ultra-550b-a55b",
         )
         .with_reasoning_effort(Some("high".to_string()));
@@ -1477,7 +1482,7 @@ mod tests {
     fn test_nemotron_request_serialization_explicit_reasoning_budget_256() {
         let client = NvidiaNimClient::new(
             "https://integrate.api.nvidia.com/v1",
-            "fake-key",
+            test_api_key(),
             "nvidia/nemotron-3-ultra-550b-a55b",
         )
         .with_max_tokens(Some(1024))
@@ -1495,7 +1500,7 @@ mod tests {
     fn test_nemotron_request_serialization_explicit_reasoning_budget_512() {
         let client = NvidiaNimClient::new(
             "https://integrate.api.nvidia.com/v1",
-            "fake-key",
+            test_api_key(),
             "nvidia/nemotron-3-ultra-550b-a55b",
         )
         .with_max_tokens(Some(1024))
@@ -1513,7 +1518,7 @@ mod tests {
     fn test_nemotron_request_serialization_explicit_output_budget_512() {
         let client = NvidiaNimClient::new(
             "https://integrate.api.nvidia.com/v1",
-            "fake-key",
+            test_api_key(),
             "nvidia/nemotron-3-ultra-550b-a55b",
         )
         .with_max_tokens(Some(512));
@@ -1529,7 +1534,7 @@ mod tests {
     fn test_nemotron_request_serialization_tool_calling_with_reasoning_enabled() {
         let client = NvidiaNimClient::new(
             "https://integrate.api.nvidia.com/v1",
-            "fake-key",
+            test_api_key(),
             "nvidia/nemotron-3-ultra-550b-a55b",
         )
         .with_reasoning_effort(Some("medium".to_string()));
@@ -1565,7 +1570,7 @@ mod tests {
     fn test_nemotron_request_serialization_tool_choice_required() {
         let client = NvidiaNimClient::new(
             "https://integrate.api.nvidia.com/v1",
-            "fake-key",
+            test_api_key(),
             "nvidia/nemotron-3-ultra-550b-a55b",
         )
         .with_tool_choice(Some("required".to_string()));
@@ -1595,7 +1600,7 @@ mod tests {
         // "low" is unsupported for Nemotron Ultra and must be rejected
         let client_low = NvidiaNimClient::new(
             "https://integrate.api.nvidia.com/v1",
-            "fake-key",
+            test_api_key(),
             "nvidia/nemotron-3-ultra-550b-a55b",
         )
         .with_reasoning_effort(Some("low".to_string()));
@@ -1611,7 +1616,7 @@ mod tests {
         // Arbitrary unknown effort enum must be rejected
         let client_bogus = NvidiaNimClient::new(
             "https://integrate.api.nvidia.com/v1",
-            "fake-key",
+            test_api_key(),
             "nvidia/nemotron-3-ultra-550b-a55b",
         )
         .with_reasoning_effort(Some("extreme".to_string()));
@@ -1628,11 +1633,12 @@ mod tests {
     #[test]
     fn test_nemotron_request_serialization_invalid_numeric_values() {
         let messages = vec![ChatMessage::user("Hi")];
+        let key = test_api_key();
 
         // reasoning_budget < -1
         let c1 = NvidiaNimClient::new(
             "https://integrate.api.nvidia.com/v1",
-            "k",
+            &key,
             "nvidia/nemotron-3-ultra-550b-a55b",
         )
         .with_reasoning_budget(Some(-2));
@@ -1646,7 +1652,7 @@ mod tests {
         // reasoning_budget > 32768
         let c2 = NvidiaNimClient::new(
             "https://integrate.api.nvidia.com/v1",
-            "k",
+            &key,
             "nvidia/nemotron-3-ultra-550b-a55b",
         )
         .with_reasoning_budget(Some(35000));
@@ -1660,7 +1666,7 @@ mod tests {
         // max_tokens < 1
         let c3 = NvidiaNimClient::new(
             "https://integrate.api.nvidia.com/v1",
-            "k",
+            &key,
             "nvidia/nemotron-3-ultra-550b-a55b",
         )
         .with_max_tokens(Some(0));
@@ -1674,7 +1680,7 @@ mod tests {
         // max_tokens > 32768
         let c4 = NvidiaNimClient::new(
             "https://integrate.api.nvidia.com/v1",
-            "k",
+            &key,
             "nvidia/nemotron-3-ultra-550b-a55b",
         )
         .with_max_tokens(Some(40000));
@@ -1688,7 +1694,7 @@ mod tests {
         // temperature < 0.0 or > 2.0
         let c5 = NvidiaNimClient::new(
             "https://integrate.api.nvidia.com/v1",
-            "k",
+            &key,
             "nvidia/nemotron-3-ultra-550b-a55b",
         )
         .with_temperature(Some(-0.1));
@@ -1700,7 +1706,7 @@ mod tests {
         );
         let c6 = NvidiaNimClient::new(
             "https://integrate.api.nvidia.com/v1",
-            "k",
+            &key,
             "nvidia/nemotron-3-ultra-550b-a55b",
         )
         .with_temperature(Some(2.5));
@@ -1714,7 +1720,7 @@ mod tests {
         // top_p < 0.0 or > 1.0
         let c7 = NvidiaNimClient::new(
             "https://integrate.api.nvidia.com/v1",
-            "k",
+            &key,
             "nvidia/nemotron-3-ultra-550b-a55b",
         )
         .with_top_p(Some(-0.1));
@@ -1726,7 +1732,7 @@ mod tests {
         );
         let c8 = NvidiaNimClient::new(
             "https://integrate.api.nvidia.com/v1",
-            "k",
+            &key,
             "nvidia/nemotron-3-ultra-550b-a55b",
         )
         .with_top_p(Some(1.5));
@@ -1742,7 +1748,7 @@ mod tests {
     fn test_nemotron_request_serialization_missing_optional_parameters() {
         let client = NvidiaNimClient::new(
             "https://integrate.api.nvidia.com/v1",
-            "fake-key",
+            test_api_key(),
             "nvidia/nemotron-3-ultra-550b-a55b",
         );
 

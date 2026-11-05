@@ -9,7 +9,7 @@
 //! - Cargo feature: `live-nvidia-tests`
 //! - Environment variable: `M31A_RUN_LIVE_NVIDIA_TESTS=1`
 
-use m31a_provider::live_test_support::{NVIDIA_NEMOTRON_3_ULTRA, load_live_test_api_key};
+use m31a_provider::live_test_support::{NVIDIA_NEMOTRON_LIGHTNING, load_live_test_api_key};
 use std::process::Command;
 use std::time::Duration;
 use tempfile::tempdir;
@@ -74,7 +74,7 @@ fn test_real_live_cli_exec_nemotron_ultra() {
         .env("M31A_HOME", tmp.path().join(".m31a"))
         .args([
             "-m",
-            NVIDIA_NEMOTRON_3_ULTRA,
+            NVIDIA_NEMOTRON_LIGHTNING,
             "exec",
             "What is 100 divided by 4? Answer with just the numeric result.",
         ]);
@@ -145,7 +145,7 @@ fn test_real_live_cli_invalid_key_error_propagation() {
         .current_dir(tmp.path())
         .env("NVIDIA_API_KEY", bad_key)
         .env("M31A_HOME", tmp.path().join(".m31a"))
-        .args(["-m", NVIDIA_NEMOTRON_3_ULTRA, "exec", "Say hello."]);
+        .args(["-m", NVIDIA_NEMOTRON_LIGHTNING, "exec", "Say hello."]);
 
     let output = run_command_with_timeout(exec_cmd, Duration::from_secs(30));
 

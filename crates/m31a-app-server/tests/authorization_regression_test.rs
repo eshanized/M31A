@@ -13,9 +13,10 @@ use tokio_util::sync::CancellationToken;
 
 async fn setup_app_server() -> (Arc<AppServer>, Storage, String, String) {
     let config = Arc::new(Config {
-        model: "meta/llama-3.3-70b-instruct".to_string(),
+        model: "nvidia/nemotron-3.5-lightning-30b-a3b".to_string(),
         model_provider: Some("nim".to_string()),
-        api_key: Some("test-api-key".to_string()),
+        api_key: m31a_core::resolve_stored_api_key()
+            .or_else(|| Some("nvapi-runtime-integration-token".to_string())),
         ..Default::default()
     });
     let storage = Storage::open_in_memory().unwrap();

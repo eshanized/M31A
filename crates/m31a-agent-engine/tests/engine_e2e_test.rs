@@ -27,8 +27,9 @@ async fn test_engine_chat_and_reasoning_turn_over_wire_server() -> Result<()> {
 
     let client = NvidiaNimClient::new(
         server.api_base(),
-        "local-wire-test-key",
-        "meta/llama-3.3-70b-instruct",
+        m31a_core::resolve_stored_api_key()
+            .unwrap_or_else(|| "nvapi-runtime-integration-token".to_string()),
+        "nvidia/nemotron-3.5-lightning-30b-a3b",
     );
     let storage = Storage::open_in_memory()?;
     let registry = ToolRegistry::new();
@@ -98,8 +99,9 @@ async fn test_engine_tool_calling_file_creation_over_wire_server() -> Result<()>
 
     let client = NvidiaNimClient::new(
         server.api_base(),
-        "local-wire-test-key",
-        "meta/llama-3.3-70b-instruct",
+        m31a_core::resolve_stored_api_key()
+            .unwrap_or_else(|| "nvapi-runtime-integration-token".to_string()),
+        "nvidia/nemotron-3.5-lightning-30b-a3b",
     );
     let storage = Storage::open_in_memory()?;
     let registry = ToolRegistry::new();

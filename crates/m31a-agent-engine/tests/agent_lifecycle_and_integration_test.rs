@@ -20,10 +20,12 @@ async fn create_test_nim_client(
     for resp in responses {
         server.enqueue_text(resp);
     }
+    let api_key = m31a_core::resolve_stored_api_key()
+        .unwrap_or_else(|| "nvapi-runtime-integration-token".to_string());
     let provider = m31a_provider::NimProvider::new(
         server.api_base(),
-        "local-test-key".to_string(),
-        "meta/llama-3.3-70b-instruct".to_string(),
+        api_key,
+        "nvidia/nemotron-3.5-lightning-30b-a3b".to_string(),
     );
     (server, ProviderClient::from_provider(provider))
 }
@@ -134,8 +136,7 @@ async fn test_subagent_changes_do_not_auto_commit_without_explicit_integration()
 
     let storage = Storage::open_in_memory().unwrap();
     let tools = ToolRegistry::new();
-    let (_wire_server, client) =
-        create_test_nim_client(vec!["Done with modifications."]).await;
+    let (_wire_server, client) = create_test_nim_client(vec!["Done with modifications."]).await;
     let worktree_mgr = std::sync::Arc::new(WorktreeManager::new(WorktreeSettings::new(dir.path())));
     let mut trust_store = TrustStore::new();
     trust_store

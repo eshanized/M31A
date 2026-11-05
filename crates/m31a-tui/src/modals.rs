@@ -1109,9 +1109,7 @@ impl SetupWizardState {
         current_config: &m31a_core::Config,
         available_models: &[m31a_provider::models::ModelInfo],
     ) -> Self {
-        let providers = vec![
-            m31a_provider::ProviderType::Nim,
-        ];
+        let providers = vec![m31a_provider::ProviderType::Nim];
 
         let config_file = m31a_core::Config::config_dir().join("config.toml");
         let existing_detected = config_file.exists();

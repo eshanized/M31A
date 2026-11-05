@@ -409,14 +409,12 @@ fn render_models_screen(f: &mut Frame, app: &App, area: Rect, t: &Theme) {
 // 4. PROVIDERS SCREEN
 // -------------------------------------------------------------------------------------------------
 fn render_providers_screen(f: &mut Frame, app: &App, area: Rect, t: &Theme) {
-    let providers = [
-        (
-            "NVIDIA NIM",
-            "https://integrate.api.nvidia.com/v1",
-            "NVIDIA_API_KEY",
-            true,
-        ),
-    ];
+    let providers = [(
+        "NVIDIA NIM",
+        "https://integrate.api.nvidia.com/v1",
+        "NVIDIA_API_KEY",
+        true,
+    )];
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
