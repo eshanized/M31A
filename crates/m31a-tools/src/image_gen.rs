@@ -73,8 +73,6 @@ pub struct ImageGenerationRequest {
     pub transparent_background: Option<bool>,
     pub referenced_image_paths: Option<Vec<String>>,
     pub num_last_images_to_include: Option<usize>,
-    #[serde(default)]
-    pub offline_preview: Option<bool>,
 }
 
 /// Result of an image generation operation.
@@ -87,6 +85,48 @@ pub struct ImageGenerationResult {
     pub format: String,
     pub size_bytes: usize,
     pub hint: String,
+}
+
+/// Decodes actual image dimensions and format from PNG or JPEG byte streams.
+pub fn decode_image_dimensions(bytes: &[u8]) -> Option<(u32, u32, &'static str)> {
+    // 1. PNG Header and IHDR chunk
+    if bytes.len() >= 24
+        && bytes[0..8] == [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
+        && &bytes[12..16] == b"IHDR"
+    {
+        let w = u32::from_be_bytes([bytes[16], bytes[17], bytes[18], bytes[19]]);
+        let h = u32::from_be_bytes([bytes[20], bytes[21], bytes[22], bytes[23]]);
+        return Some((w, h, "png"));
+    }
+
+    // 2. JPEG SOI and SOF markers
+    if bytes.len() >= 4 && bytes[0] == 0xFF && bytes[1] == 0xD8 {
+        let mut i = 2;
+        while i + 8 < bytes.len() {
+            if bytes[i] != 0xFF {
+                i += 1;
+                continue;
+            }
+            let marker = bytes[i + 1];
+            // SOF0..SOF3, SOF5..SOF7, SOF9..SOF11, SOF13..SOF15
+            if (0xC0..=0xC3).contains(&marker)
+                || (0xC5..=0xC7).contains(&marker)
+                || (0xC9..=0xCB).contains(&marker)
+                || (0xCD..=0xCF).contains(&marker)
+            {
+                let h = u16::from_be_bytes([bytes[i + 5], bytes[i + 6]]) as u32;
+                let w = u16::from_be_bytes([bytes[i + 7], bytes[i + 8]]) as u32;
+                return Some((w, h, "jpeg"));
+            }
+            let len = u16::from_be_bytes([bytes[i + 2], bytes[i + 3]]) as usize;
+            if len < 2 {
+                break;
+            }
+            i += 2 + len;
+        }
+    }
+
+    None
 }
 
 /// Computes standard CRC-32 (IEEE 802.3) for PNG chunks.
@@ -274,8 +314,35 @@ pub async fn execute_image_generation(
         anyhow::bail!("'num_last_images_to_include' must be between 1 and 5");
     }
 
+    // Validate referenced image paths against directory traversal
+    if let Some(ref paths) = req.referenced_image_paths {
+        for p in paths {
+            if p.contains("..") {
+                anyhow::bail!(
+                    "Path traversal attempt rejected in referenced_image_paths: {}",
+                    p
+                );
+            }
+        }
+    }
+
+    // Reject path traversal in session_id
+    if session_id.contains("..") {
+        anyhow::bail!(
+            "Path traversal attempt rejected in session_id: {}",
+            session_id
+        );
+    }
+
     let call_id = format!("img_{}", Uuid::new_v4().simple());
     let target_path = image_generation_artifact_path(save_root, session_id, &call_id);
+
+    // Validate target_path against directory traversal
+    for comp in target_path.components() {
+        if matches!(comp, std::path::Component::ParentDir) {
+            anyhow::bail!("Path traversal detected in image generation target path");
+        }
+    }
 
     if let Some(parent) = target_path.parent() {
         tokio::fs::create_dir_all(parent).await?;
@@ -283,10 +350,10 @@ pub async fn execute_image_generation(
 
     let (width, height) = parse_requested_dimensions(req.size.as_deref());
 
-    let is_offline_preview = req.offline_preview.unwrap_or(false)
-        || std::env::var("M31A_OFFLINE_PREVIEW")
-            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-            .unwrap_or(false);
+    // Host-controlled offline preview switch (never authorized by model arguments)
+    let is_offline_preview = std::env::var("M31A_OFFLINE_PREVIEW")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
 
     let (bytes, is_synthetic) = if is_offline_preview {
         (synthesize_valid_png(width, height), true)
@@ -338,12 +405,16 @@ pub async fn execute_image_generation(
         hint = format!("[SYNTHETIC TEST IMAGE] {}", hint);
     }
 
+    // Decode actual dimensions from generated file bytes
+    let (decoded_width, decoded_height, decoded_format) =
+        decode_image_dimensions(&bytes).unwrap_or((width, height, "png"));
+
     Ok(ImageGenerationResult {
         call_id,
         image_path: target_path.to_string_lossy().to_string(),
-        width,
-        height,
-        format: "png".to_string(),
+        width: decoded_width,
+        height: decoded_height,
+        format: decoded_format.to_string(),
         size_bytes: bytes.len(),
         hint,
     })
@@ -352,6 +423,9 @@ pub async fn execute_image_generation(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::sync::Mutex;
+
+    static ENV_MUTEX: Mutex<()> = Mutex::const_new(());
 
     #[test]
     fn test_artifact_path_sanitization() {
@@ -391,6 +465,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_image_generation_offline_preview_success() {
+        let _guard = ENV_MUTEX.lock().await;
         let tmp = tempfile::tempdir().unwrap();
         let req = ImageGenerationRequest {
             prompt: "A beautiful nebula with purple stars".to_string(),
@@ -399,12 +474,12 @@ mod tests {
             transparent_background: Some(false),
             referenced_image_paths: None,
             num_last_images_to_include: None,
-            offline_preview: Some(true),
         };
 
-        let result = execute_image_generation(tmp.path(), "test_session", req)
-            .await
-            .expect("must succeed in offline preview");
+        unsafe { std::env::set_var("M31A_OFFLINE_PREVIEW", "1") };
+        let result = execute_image_generation(tmp.path(), "test_session", req).await;
+        unsafe { std::env::remove_var("M31A_OFFLINE_PREVIEW") };
+        let result = result.expect("must succeed in offline preview");
 
         assert_eq!(result.width, 1024);
         assert_eq!(result.height, 1024);
@@ -426,6 +501,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_image_generation_fails_without_provider() {
+        let _guard = ENV_MUTEX.lock().await;
         // Save and remove provider env vars for this test
         let vars = [
             "OPENAI_API_KEY",
@@ -446,7 +522,6 @@ mod tests {
             transparent_background: None,
             referenced_image_paths: None,
             num_last_images_to_include: None,
-            offline_preview: None,
         };
 
         let err = execute_image_generation(tmp.path(), "test_session", req)
@@ -476,12 +551,55 @@ mod tests {
             transparent_background: None,
             referenced_image_paths: Some(vec!["/tmp/nebula.png".to_string()]),
             num_last_images_to_include: Some(2),
-            offline_preview: None,
         };
 
         let err = execute_image_generation(tmp.path(), "test_session", req)
             .await
             .unwrap_err();
         assert!(err.to_string().contains("Never provide both"));
+    }
+
+    #[tokio::test]
+    async fn test_execute_image_generation_path_traversal_rejected() {
+        let tmp = tempfile::tempdir().unwrap();
+        let req = ImageGenerationRequest {
+            prompt: "Test traversal".to_string(),
+            size: None,
+            quality: None,
+            transparent_background: None,
+            referenced_image_paths: None,
+            num_last_images_to_include: None,
+        };
+
+        // 1. Path traversal in session_id
+        let err1 = execute_image_generation(tmp.path(), "../../etc", req.clone())
+            .await
+            .unwrap_err();
+        assert!(err1.to_string().contains("Path traversal"));
+
+        // 2. Path traversal in referenced_image_paths
+        let req_ref = ImageGenerationRequest {
+            prompt: "Test traversal".to_string(),
+            size: None,
+            quality: None,
+            transparent_background: None,
+            referenced_image_paths: Some(vec!["../../secret.png".to_string()]),
+            num_last_images_to_include: None,
+        };
+        let err2 = execute_image_generation(tmp.path(), "safe_session", req_ref)
+            .await
+            .unwrap_err();
+        assert!(err2.to_string().contains("Path traversal"));
+    }
+
+    #[test]
+    fn test_decode_image_dimensions_truthful() {
+        // PNG decoding test
+        let png = synthesize_valid_png(800, 600);
+        let decoded = decode_image_dimensions(&png);
+        assert_eq!(decoded, Some((800, 600, "png")));
+
+        // Invalid bytes
+        assert_eq!(decode_image_dimensions(&[0, 1, 2, 3]), None);
     }
 }
