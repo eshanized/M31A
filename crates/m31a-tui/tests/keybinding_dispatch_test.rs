@@ -9,8 +9,9 @@ fn test_modal_precedence_and_escape_dismissal() {
     init_theme(ThemeVariant::Dark);
     let temp = tempfile::tempdir().unwrap();
     let config = Config {
-        model: "mock-model".to_string(),
-        api_key: None,
+        model: "meta/llama-3.3-70b-instruct".to_string(),
+        model_provider: Some("nim".to_string()),
+        api_key: Some("test-key".to_string()),
         ..Default::default()
     };
 
@@ -44,8 +45,9 @@ fn test_model_picker_shortcuts_and_ctrl_enter_separation() {
     init_theme(ThemeVariant::Dark);
     let temp = tempfile::tempdir().unwrap();
     let config = Config {
-        model: "mock-model".to_string(),
-        api_key: None,
+        model: "meta/llama-3.3-70b-instruct".to_string(),
+        model_provider: Some("nim".to_string()),
+        api_key: Some("test-key".to_string()),
         ..Default::default()
     };
 
@@ -100,8 +102,9 @@ fn test_ctrl_enter_prompt_queuing_during_execution() {
     init_theme(ThemeVariant::Dark);
     let temp = tempfile::tempdir().unwrap();
     let config = Config {
-        model: "mock-model".to_string(),
-        api_key: None,
+        model: "meta/llama-3.3-70b-instruct".to_string(),
+        model_provider: Some("nim".to_string()),
+        api_key: Some("test-key".to_string()),
         ..Default::default()
     };
 
@@ -131,8 +134,9 @@ fn test_ctrl_c_interrupt_lifecycle() {
     init_theme(ThemeVariant::Dark);
     let temp = tempfile::tempdir().unwrap();
     let config = Config {
-        model: "mock-model".to_string(),
-        api_key: None,
+        model: "meta/llama-3.3-70b-instruct".to_string(),
+        model_provider: Some("nim".to_string()),
+        api_key: Some("test-key".to_string()),
         ..Default::default()
     };
 

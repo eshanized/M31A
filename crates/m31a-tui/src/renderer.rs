@@ -2181,7 +2181,7 @@ fn render_setup_wizard(
                     t.style_secondary(),
                 )),
                 Line::from(Span::styled(
-                    "    1. AI Model Provider (NVIDIA NIM, OpenAI, Anthropic, Gemini, Local Ollama, etc.)",
+                    "    1. AI Model Provider (NVIDIA NIM)",
                     t.style_primary(),
                 )),
                 Line::from(Span::styled(

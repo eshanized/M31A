@@ -1111,16 +1111,6 @@ impl SetupWizardState {
     ) -> Self {
         let providers = vec![
             m31a_provider::ProviderType::Nim,
-            m31a_provider::ProviderType::OpenAi,
-            m31a_provider::ProviderType::Anthropic,
-            m31a_provider::ProviderType::Gemini,
-            m31a_provider::ProviderType::DeepSeek,
-            m31a_provider::ProviderType::Groq,
-            m31a_provider::ProviderType::Mistral,
-            m31a_provider::ProviderType::Together,
-            m31a_provider::ProviderType::Ollama,
-            m31a_provider::ProviderType::LmStudio,
-            m31a_provider::ProviderType::Custom,
         ];
 
         let config_file = m31a_core::Config::config_dir().join("config.toml");
@@ -1286,20 +1276,6 @@ impl SetupWizardState {
                 })
                 .cloned()
                 .collect(),
-            _ => {
-                let provider_name = provider.display_name().to_lowercase();
-                catalog
-                    .iter()
-                    .filter(|m| {
-                        m.originator.to_lowercase() == provider_name
-                            || m.originator.to_lowercase().contains(&provider_name)
-                            || m.slug
-                                .to_lowercase()
-                                .starts_with(&format!("{}/", provider_name))
-                    })
-                    .cloned()
-                    .collect()
-            }
         };
 
         // 2. If provider has no canonical models in the catalogue, do NOT fabricate fake

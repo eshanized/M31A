@@ -1,7 +1,6 @@
 //! Integration tests for agent lifecycle states, unverified commit prevention, and verification-gated integration.
 
 use m31a_execpolicy::ExecPolicy;
-use m31a_provider::MockProvider;
 use m31a_provider::ProviderClient;
 use m31a_storage::db::Storage;
 use m31a_storage::worktree::{WorktreeManager, WorktreeSettings};
@@ -11,6 +10,23 @@ use m31a_trust::{TrustLevel, TrustStore};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 use tempfile::tempdir;
+
+async fn create_test_nim_client(
+    responses: Vec<&str>,
+) -> (m31a_provider::LocalWireServer, ProviderClient) {
+    let server = m31a_provider::LocalWireServer::start()
+        .await
+        .expect("start local wire server");
+    for resp in responses {
+        server.enqueue_text(resp);
+    }
+    let provider = m31a_provider::NimProvider::new(
+        server.api_base(),
+        "local-test-key".to_string(),
+        "meta/llama-3.3-70b-instruct".to_string(),
+    );
+    (server, ProviderClient::from_provider(provider))
+}
 
 fn init_git_repo(path: &std::path::Path) {
     Command::new("git")
@@ -118,12 +134,8 @@ async fn test_subagent_changes_do_not_auto_commit_without_explicit_integration()
 
     let storage = Storage::open_in_memory().unwrap();
     let tools = ToolRegistry::new();
-    let mock = MockProvider::with_responses(
-        "test-model".to_string(),
-        vec!["Done with modifications.".to_string()],
-    );
-
-    let client = ProviderClient::from_provider(mock);
+    let (_wire_server, client) =
+        create_test_nim_client(vec!["Done with modifications."]).await;
     let worktree_mgr = std::sync::Arc::new(WorktreeManager::new(WorktreeSettings::new(dir.path())));
     let mut trust_store = TrustStore::new();
     trust_store
@@ -196,8 +208,7 @@ async fn test_cancellation_requested_state_progression() {
 
     let storage = Storage::open_in_memory().unwrap();
     let tools = ToolRegistry::new();
-    let mock = MockProvider::new("test-model");
-    let client = ProviderClient::from_provider(mock);
+    let (_wire_server, client) = create_test_nim_client(vec![]).await;
     let mut trust_store = TrustStore::new();
     trust_store
         .trust(dir.path(), TrustLevel::SessionOnly)
@@ -248,8 +259,7 @@ async fn test_review_engine_gates_integration_on_critical_finding() {
 
     let storage = Storage::open_in_memory().unwrap();
     let tools = ToolRegistry::new();
-    let mock = MockProvider::with_responses("test-model".to_string(), vec!["Done.".to_string()]);
-    let client = ProviderClient::from_provider(mock);
+    let (_wire_server, client) = create_test_nim_client(vec!["Done."]).await;
     let worktree_mgr = std::sync::Arc::new(WorktreeManager::new(WorktreeSettings::new(dir.path())));
     let mut trust_store = TrustStore::new();
     trust_store
@@ -321,15 +331,12 @@ async fn test_recursive_grandchild_spawn_and_depth_limiting() {
 
     let storage = Storage::open_in_memory().unwrap();
     let tools = ToolRegistry::new();
-    let mock = MockProvider::with_responses(
-        "test-model".to_string(),
-        vec![
-            "Child response".to_string(),
-            "Grandchild response".to_string(),
-            "Great-grandchild response".to_string(),
-        ],
-    );
-    let client = ProviderClient::from_provider(mock);
+    let (_wire_server, client) = create_test_nim_client(vec![
+        "Child response",
+        "Grandchild response",
+        "Great-grandchild response",
+    ])
+    .await;
     let mut trust_store = TrustStore::new();
     trust_store
         .trust(dir.path(), TrustLevel::SessionOnly)
@@ -437,8 +444,7 @@ async fn test_terminate_tree_report_truthfulness() {
 
     let storage = Storage::open_in_memory().unwrap();
     let tools = ToolRegistry::new();
-    let mock = MockProvider::new("test-model");
-    let client = ProviderClient::from_provider(mock);
+    let (_wire_server, client) = create_test_nim_client(vec![]).await;
     let mut trust_store = TrustStore::new();
     trust_store
         .trust(dir.path(), TrustLevel::SessionOnly)
@@ -521,8 +527,7 @@ async fn test_integration_verification_fails_closed_on_unsupported_project() {
 
     let storage = Storage::open_in_memory().unwrap();
     let tools = ToolRegistry::new();
-    let mock = MockProvider::with_responses("test-model".to_string(), vec!["Done.".to_string()]);
-    let client = ProviderClient::from_provider(mock);
+    let (_wire_server, client) = create_test_nim_client(vec!["Done."]).await;
     let worktree_mgr = std::sync::Arc::new(WorktreeManager::new(WorktreeSettings::new(dir.path())));
     let mut trust_store = TrustStore::new();
     trust_store

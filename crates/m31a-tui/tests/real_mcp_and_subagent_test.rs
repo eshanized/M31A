@@ -93,7 +93,7 @@ async fn test_real_mcp_server_roundtrip_and_tool_registration() {
     );
 
     let config = Config {
-        model: "mock-model".to_string(),
+        model: "meta/llama-3.3-70b-instruct".to_string(),
         api_key: None,
         mcp_servers,
         ..Default::default()
@@ -170,7 +170,7 @@ async fn test_real_mcp_server_roundtrip_and_tool_registration() {
 async fn test_real_subagent_lifecycle_and_tab_reflection() {
     let dir = tempdir().unwrap();
     let config = Config {
-        model: "mock-model".to_string(),
+        model: "meta/llama-3.3-70b-instruct".to_string(),
         api_key: None,
         ..Default::default()
     };

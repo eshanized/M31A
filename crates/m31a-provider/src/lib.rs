@@ -52,13 +52,10 @@ pub use models_identity::{
     is_code_specialized, is_embedding_model, is_guardrail_model, is_reasoning_model,
     is_vision_model, resolve_model_identity,
 };
-#[cfg(any(test, feature = "test-support"))]
-pub use provider_trait::MockProvider;
 pub use provider_trait::{
-    ChatCompletionResponse, ChatRequest, EmbeddingsProvider, GenericOpenAiProvider,
-    ModelCapabilities, ModelMetadata, ModelPricing, ModelProvider, NimProvider, ProviderBuilder,
-    ProviderClient, ProviderConfig, ProviderError, ProviderType, StreamEvent, StreamHandler,
-    validate_provider_config,
+    ChatCompletionResponse, ChatRequest, EmbeddingsProvider, ModelCapabilities, ModelMetadata,
+    ModelPricing, ModelProvider, NimProvider, ProviderBuilder, ProviderClient, ProviderConfig,
+    ProviderError, ProviderType, StreamEvent, StreamHandler, validate_provider_config,
 };
 pub use retry::RetryPolicy;
 pub use router::{HybridModelRouter, ModelTier, RouteModelConfig, classify_task_tier};

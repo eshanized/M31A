@@ -10,8 +10,8 @@ use ratatui::backend::TestBackend;
 fn test_responsive_layout_across_standard_and_narrow_viewports() {
     init_theme(ThemeVariant::Dark);
     let config = Config {
-        model: "mock-model".to_string(),
-        model_provider: Some("mock".to_string()),
+        model: "meta/llama-3.3-70b-instruct".to_string(),
+        model_provider: Some("nim".to_string()),
         api_key: Some("test_api_key".to_string()),
         ..Default::default()
     };

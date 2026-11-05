@@ -7,8 +7,8 @@ use m31a_tui::{App, ThemeVariant, init_theme};
 fn test_slash_command_dispatch_and_state_updates() {
     init_theme(ThemeVariant::Dark);
     let config = Config {
-        model: "mock-testing-model".to_string(),
-        model_provider: Some("mock".to_string()),
+        model: "meta/llama-3.3-70b-instruct".to_string(),
+        model_provider: Some("nim".to_string()),
         api_key: Some("test_api_key".to_string()),
         ..Default::default()
     };
@@ -47,8 +47,8 @@ fn test_slash_command_dispatch_and_state_updates() {
 fn test_slash_command_alias_dispatch() {
     init_theme(ThemeVariant::Dark);
     let config = Config {
-        model: "mock-model".to_string(),
-        model_provider: Some("mock".to_string()),
+        model: "meta/llama-3.3-70b-instruct".to_string(),
+        model_provider: Some("nim".to_string()),
         api_key: Some("test_api_key".to_string()),
         ..Default::default()
     };
@@ -88,8 +88,8 @@ fn test_slash_command_alias_dispatch() {
 fn test_slash_command_quoted_arguments_with_spaces() {
     init_theme(ThemeVariant::Dark);
     let config = Config {
-        model: "mock-model".to_string(),
-        model_provider: Some("mock".to_string()),
+        model: "meta/llama-3.3-70b-instruct".to_string(),
+        model_provider: Some("nim".to_string()),
         api_key: Some("test_api_key".to_string()),
         ..Default::default()
     };
@@ -110,8 +110,8 @@ fn test_slash_command_quoted_arguments_with_spaces() {
 fn test_unknown_slash_command_handling() {
     init_theme(ThemeVariant::Dark);
     let config = Config {
-        model: "mock-model".to_string(),
-        model_provider: Some("mock".to_string()),
+        model: "meta/llama-3.3-70b-instruct".to_string(),
+        model_provider: Some("nim".to_string()),
         api_key: Some("test_api_key".to_string()),
         ..Default::default()
     };

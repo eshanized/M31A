@@ -1727,8 +1727,9 @@ mod tests {
     #[tokio::test]
     async fn test_app_server_initialize_and_methods() {
         let config = Arc::new(Config {
-            model: "mock-testing-model".to_string(),
-            model_provider: Some("mock".to_string()),
+            model: "meta/llama-3.3-70b-instruct".to_string(),
+            model_provider: Some("nim".to_string()),
+            api_key: Some("test-api-key".to_string()),
             ..Default::default()
         });
         let storage = Storage::open_in_memory().unwrap();

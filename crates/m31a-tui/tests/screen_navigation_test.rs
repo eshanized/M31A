@@ -14,7 +14,7 @@ fn test_screen_navigation_and_state_preservation() {
     init_theme(ThemeVariant::Dark);
     let temp = tempdir().unwrap();
     let config = Config {
-        model: "mock-model".to_string(),
+        model: "meta/llama-3.3-70b-instruct".to_string(),
         api_key: None,
         ..Default::default()
     };
@@ -99,7 +99,7 @@ fn test_contextual_inspector_toggle() {
     init_theme(ThemeVariant::Dark);
     let temp = tempdir().unwrap();
     let config = Config {
-        model: "mock-model".to_string(),
+        model: "meta/llama-3.3-70b-instruct".to_string(),
         api_key: None,
         ..Default::default()
     };
@@ -130,7 +130,7 @@ fn test_command_palette_screen_switching() {
     init_theme(ThemeVariant::Dark);
     let temp = tempdir().unwrap();
     let config = Config {
-        model: "mock-model".to_string(),
+        model: "meta/llama-3.3-70b-instruct".to_string(),
         api_key: None,
         ..Default::default()
     };
@@ -165,7 +165,7 @@ fn test_render_all_10_screens_without_panic() {
     init_theme(ThemeVariant::Dark);
     let temp = tempdir().unwrap();
     let config = Config {
-        model: "mock-model".to_string(),
+        model: "meta/llama-3.3-70b-instruct".to_string(),
         api_key: None,
         ..Default::default()
     };
@@ -197,7 +197,7 @@ fn test_active_turn_preservation_during_screen_navigation() {
     init_theme(ThemeVariant::Dark);
     let temp = tempdir().unwrap();
     let config = Config {
-        model: "mock-model".to_string(),
+        model: "meta/llama-3.3-70b-instruct".to_string(),
         api_key: None,
         ..Default::default()
     };

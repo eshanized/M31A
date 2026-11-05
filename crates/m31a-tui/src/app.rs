@@ -320,8 +320,11 @@ impl App {
         if config.api_key.is_none() {
             config.api_key = Some("test-credential".to_string());
         }
-        if config.model == "mock-model" {
-            config.model_provider = Some("mock".to_string());
+        if config.model == "mock-model" || config.model == "mock-testing-model" || config.model.is_empty() {
+            config.model = "meta/llama-3.3-70b-instruct".to_string();
+        }
+        if config.model_provider.as_deref() == Some("mock") {
+            config.model_provider = Some("nim".to_string());
         }
         Self::new_isolated_with_deps(
             config,

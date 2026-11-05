@@ -2,7 +2,7 @@
 //!
 //! Validates Integration Paths A through F across the M31A autonomous runtime:
 //! - Path A: Engineering execution loop (User Goal -> Engine -> AST -> Tools -> Sandbox -> Verify -> Review -> Complete)
-//! - Path B: Model independence (Agent Engine -> Universal ProviderClient -> MockProvider)
+//! - Path B: Model execution with actual NVIDIA NIM provider (Agent Engine -> ProviderClient -> NimProvider)
 //! - Path C: Security enforcement (Request -> Authorization -> GitArmor -> ExecPolicy -> Sandbox Fail-Closed)
 //! - Path D: Autonomous verification (Requirements -> Criteria -> Execution Evidence -> Independent Verification)
 //! - Path E: Multi-agent coordination (Parent -> Child Agents -> Isolated Worktrees -> Merge -> Verification)
@@ -189,11 +189,11 @@ pub fn multiply(a: i32, b: i32) -> i32 {
 }
 
 // =============================================================================
-// Path B: Model Independence
+// Path B: Model Execution with NVIDIA Provider
 // =============================================================================
 
 #[tokio::test]
-async fn test_path_b_model_independence_with_mock_provider() -> Result<()> {
+async fn test_path_b_model_execution_with_nvidia_provider() -> Result<()> {
     let tmp = tempdir()?;
     let workspace = tmp.path().to_path_buf();
 
@@ -202,8 +202,7 @@ async fn test_path_b_model_independence_with_mock_provider() -> Result<()> {
     server
         .enqueue_text("I have inspected the engineering requirements and completed the analysis.");
 
-    let provider = m31a_provider::GenericOpenAiProvider::new(
-        m31a_provider::ProviderType::OpenAi,
+    let provider = m31a_provider::NimProvider::new(
         server.api_base(),
         "local-test-key".to_string(),
         "meta/llama-3.3-70b-instruct".to_string(),

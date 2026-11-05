@@ -13,8 +13,9 @@ use tokio_util::sync::CancellationToken;
 
 async fn setup_app_server() -> (Arc<AppServer>, Storage, String, String) {
     let config = Arc::new(Config {
-        model: "mock-testing-model".to_string(),
-        model_provider: Some("mock".to_string()),
+        model: "meta/llama-3.3-70b-instruct".to_string(),
+        model_provider: Some("nim".to_string()),
+        api_key: Some("test-api-key".to_string()),
         ..Default::default()
     });
     let storage = Storage::open_in_memory().unwrap();

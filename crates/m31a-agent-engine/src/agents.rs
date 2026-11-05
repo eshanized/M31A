@@ -1377,10 +1377,19 @@ mod tests {
     use super::*;
     use m31a_core::SandboxPolicy;
 
-    /// A runtime wired against a dummy client — no requests are made in these
+    fn test_nim_client() -> ProviderClient {
+        let provider = m31a_provider::NimProvider::new(
+            "https://integrate.api.nvidia.com/v1".to_string(),
+            "test-key".to_string(),
+            "meta/llama-3.3-70b-instruct".to_string(),
+        );
+        ProviderClient::from_provider(provider)
+    }
+
+    /// A runtime wired against an actual NIM client configuration — no requests are made in these
     /// bookkeeping tests (they never reach the model call).
     fn test_runtime() -> EngineAgentRuntime {
-        let client = ProviderClient::from_provider(m31a_provider::MockProvider::new("test-model"));
+        let client = test_nim_client();
         let storage = Storage::open_in_memory().expect("in-memory storage");
         let temp_dir = std::env::temp_dir();
         let store = Arc::new(Mutex::new(m31a_trust::TrustStore::new()));
@@ -1493,7 +1502,7 @@ mod tests {
             .unwrap();
         let runtime = Arc::new(
             EngineAgentRuntime::new(
-                ProviderClient::from_provider(m31a_provider::MockProvider::new("test-model")),
+                test_nim_client(),
                 tools.clone(),
                 storage.clone(),
                 ExecPolicy::standard(),
@@ -1590,7 +1599,7 @@ mod tests {
             .unwrap();
         let runtime = Arc::new(
             EngineAgentRuntime::new(
-                ProviderClient::from_provider(m31a_provider::MockProvider::new("test-model")),
+                test_nim_client(),
                 tools.clone(),
                 storage,
                 ExecPolicy::standard(),
@@ -1643,7 +1652,7 @@ mod tests {
         // Runtime WITHOUT WorktreeManager
         let runtime = Arc::new(
             EngineAgentRuntime::new(
-                ProviderClient::from_provider(m31a_provider::MockProvider::new("test-model")),
+                test_nim_client(),
                 tools.clone(),
                 storage,
                 ExecPolicy::standard(),
@@ -1685,7 +1694,7 @@ mod tests {
         let storage = Storage::open_in_memory().unwrap();
         let tools = ToolRegistry::new();
         let runtime = Arc::new(EngineAgentRuntime::new(
-            ProviderClient::from_provider(m31a_provider::MockProvider::new("test-model")),
+            test_nim_client(),
             tools.clone(),
             storage,
             ExecPolicy::standard(),

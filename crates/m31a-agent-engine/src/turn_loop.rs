@@ -1938,10 +1938,19 @@ mod tests {
         assert!(with_cm.iter().any(|d| d.function.name == "read_file"));
     }
 
+    fn test_nim_client() -> ProviderClient {
+        let provider = m31a_provider::NimProvider::new(
+            "https://integrate.api.nvidia.com/v1".to_string(),
+            "test-key".to_string(),
+            "meta/llama-3.3-70b-instruct".to_string(),
+        );
+        ProviderClient::from_provider(provider)
+    }
+
     /// §5.2 merge coverage rules: nothing lost, nothing duplicated.
     #[test]
     fn test_merge_prepared_compaction_coverage() {
-        let client = ProviderClient::from_provider(m31a_provider::MockProvider::new("test-model"));
+        let client = test_nim_client();
         let storage = Storage::open_in_memory().expect("storage");
         let engine = AgentEngine::new(
             client,
@@ -1996,7 +2005,7 @@ mod tests {
 
     #[test]
     fn test_merge_prepared_compaction_preserves_system_prompt_with_new_messages() {
-        let client = ProviderClient::from_provider(m31a_provider::MockProvider::new("test-model"));
+        let client = test_nim_client();
         let storage = Storage::open_in_memory().expect("storage");
         let engine = AgentEngine::new(
             client,
@@ -2275,9 +2284,13 @@ mod tests {
     }
 
     #[test]
-    fn test_turn_loop_with_generic_model_provider() {
-        let mock_provider = m31a_provider::MockProvider::new("custom-mock-engine");
-        let client = ProviderClient::from_provider(mock_provider);
+    fn test_turn_loop_with_nvidia_provider() {
+        let provider = m31a_provider::NimProvider::new(
+            "https://integrate.api.nvidia.com/v1".to_string(),
+            "test-key".to_string(),
+            "meta/llama-3.3-70b-instruct".to_string(),
+        );
+        let client = ProviderClient::from_provider(provider);
         let storage = Storage::open_in_memory().unwrap();
         let engine = AgentEngine::new(
             client,
@@ -2289,8 +2302,8 @@ mod tests {
             std::env::temp_dir(),
         );
 
-        assert_eq!(engine.client.model(), "custom-mock-engine");
-        let derived = engine.client.with_model("derived-model-70b");
-        assert_eq!(derived.model(), "derived-model-70b");
+        assert_eq!(engine.client.model(), "meta/llama-3.3-70b-instruct");
+        let derived = engine.client.with_model("nvidia/nemotron-3-ultra-550b-a55b");
+        assert_eq!(derived.model(), "nvidia/nemotron-3-ultra-550b-a55b");
     }
 }

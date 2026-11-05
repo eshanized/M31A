@@ -1,7 +1,7 @@
 //! Local TCP HTTP test service implementing the OpenAI/NIM wire protocol.
 //!
 //! Provides deterministic protocol-conformance testing over real TCP sockets using the
-//! actual production HTTP client (`NvidiaNimClient` / `GenericOpenAiProvider`) without external credentials.
+//! actual production HTTP client (`NvidiaNimClient` / `NimProvider`) without external credentials.
 
 use anyhow::Result;
 use serde_json::json;

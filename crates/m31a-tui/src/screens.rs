@@ -416,36 +416,6 @@ fn render_providers_screen(f: &mut Frame, app: &App, area: Rect, t: &Theme) {
             "NVIDIA_API_KEY",
             true,
         ),
-        (
-            "OpenAI",
-            "https://api.openai.com/v1",
-            "OPENAI_API_KEY",
-            false,
-        ),
-        (
-            "Anthropic",
-            "https://api.anthropic.com/v1",
-            "ANTHROPIC_API_KEY",
-            false,
-        ),
-        (
-            "Google Gemini",
-            "https://generativelanguage.googleapis.com/v1beta",
-            "GEMINI_API_KEY",
-            false,
-        ),
-        (
-            "Ollama (Local)",
-            "http://localhost:11434/v1",
-            "None (Local)",
-            false,
-        ),
-        (
-            "Custom / Compatible",
-            &app.config.api_base,
-            "Custom Header",
-            false,
-        ),
     ];
 
     let chunks = Layout::default()
