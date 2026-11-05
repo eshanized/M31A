@@ -54,8 +54,6 @@ async fn spawn_test_server(
         bind_addr: local_addr,
         cors_allow_all: false,
         allowed_origins: vec!["https://trusted.app.m31a".to_string()],
-        require_auth: false,
-        auth_token: None,
         max_body_size: 1024 * 1024,
         max_header_bytes: 16 * 1024,
         header_timeout_ms: 2000,
