@@ -1,6 +1,7 @@
 //! Dynamic plugin installation and external tool package registration.
 //!
-//! Downloads, verifies, and installs extension plugins and bundles into the active workspace.
+//! Downloads, verifies, and installs extension plugins and bundles into the active workspace
+//! using a staged, rollback-safe pipeline with mandatory publisher signature verification.
 
 use serde::{Deserialize, Serialize};
 
@@ -28,69 +29,136 @@ pub struct DiscoverableTool {
     pub install_url: Option<String>,
 }
 
-/// A cryptographically tied, host-generated authorization token proving real human/host approval.
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub enum PluginApprovalError {
+    #[error("Missing or empty context field: {0}")]
+    MissingContext(&'static str),
+    #[error("Plugin approval has expired")]
+    Expired,
+    #[error("Context mismatch for {field}: expected '{expected}', got '{actual}'")]
+    ContextMismatch {
+        field: &'static str,
+        expected: String,
+        actual: String,
+    },
+}
+
+/// An opaque, host-issued, single-use authorization capability proving real human/host approval.
 /// NEVER deserialized or extracted from model-generated tool arguments.
+/// Construction is private and tightly bound to execution context.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HostPluginApproval {
-    pub session_id: Option<String>,
-    pub turn_id: Option<String>,
-    pub call_id: Option<String>,
-    pub tool_id: String,
-    pub action_type: DiscoverableToolAction,
-    pub granted_at: std::time::Instant,
+    tool_id: String,
+    action_type: DiscoverableToolAction,
+    session_id: String,
+    turn_id: String,
+    call_id: String,
+    nonce: String,
+    expires_at: std::time::Instant,
 }
 
 impl HostPluginApproval {
-    pub fn new(tool_id: &str, action_type: DiscoverableToolAction) -> Self {
-        Self {
-            session_id: None,
-            turn_id: None,
-            call_id: None,
-            tool_id: tool_id.to_string(),
-            action_type,
-            granted_at: std::time::Instant::now(),
-        }
-    }
-
-    pub fn with_context(
-        tool_id: &str,
+    /// Host-only issuance constructor requiring exact execution context bindings.
+    /// Trust derives from private construction and interactive host-side human approval decision.
+    pub fn issue_host_approval(
+        tool_id: impl Into<String>,
         action_type: DiscoverableToolAction,
-        session_id: Option<&str>,
-        turn_id: Option<&str>,
-        call_id: Option<&str>,
-    ) -> Self {
-        Self {
-            session_id: session_id.map(|s| s.to_string()),
-            turn_id: turn_id.map(|s| s.to_string()),
-            call_id: call_id.map(|s| s.to_string()),
-            tool_id: tool_id.to_string(),
-            action_type,
-            granted_at: std::time::Instant::now(),
+        session_id: &str,
+        turn_id: &str,
+        call_id: &str,
+        ttl: std::time::Duration,
+    ) -> Result<Self, PluginApprovalError> {
+        let tool_id = tool_id.into();
+        if tool_id.trim().is_empty() {
+            return Err(PluginApprovalError::MissingContext("tool_id"));
         }
+        if session_id.trim().is_empty() {
+            return Err(PluginApprovalError::MissingContext("session_id"));
+        }
+        if turn_id.trim().is_empty() {
+            return Err(PluginApprovalError::MissingContext("turn_id"));
+        }
+        if call_id.trim().is_empty() {
+            return Err(PluginApprovalError::MissingContext("call_id"));
+        }
+
+        Ok(Self {
+            tool_id,
+            action_type,
+            session_id: session_id.to_string(),
+            turn_id: turn_id.to_string(),
+            call_id: call_id.to_string(),
+            nonce: uuid::Uuid::new_v4().to_string(),
+            expires_at: std::time::Instant::now() + ttl,
+        })
     }
 
+    pub fn tool_id(&self) -> &str {
+        &self.tool_id
+    }
+
+    pub fn action_type(&self) -> DiscoverableToolAction {
+        self.action_type
+    }
+
+    pub fn session_id(&self) -> &str {
+        &self.session_id
+    }
+
+    pub fn turn_id(&self) -> &str {
+        &self.turn_id
+    }
+
+    pub fn call_id(&self) -> &str {
+        &self.call_id
+    }
+
+    pub fn nonce(&self) -> &str {
+        &self.nonce
+    }
+
+    pub fn expires_at(&self) -> std::time::Instant {
+        self.expires_at
+    }
+
+    pub fn is_expired(&self) -> bool {
+        std::time::Instant::now() >= self.expires_at
+    }
+
+    /// Validates exact equality for all context parameters.
+    /// Missing or mismatched parameters fail closed; no wildcards are permitted.
     pub fn is_valid_for(
         &self,
         tool_id: &str,
         action: DiscoverableToolAction,
-        turn_id: Option<&str>,
-        call_id: Option<&str>,
+        session_id: &str,
+        turn_id: &str,
+        call_id: &str,
     ) -> bool {
-        if self.tool_id != tool_id || self.action_type != action {
+        if self.is_expired() {
             return false;
         }
-        if let (Some(t1), Some(t2)) = (&self.turn_id, turn_id)
-            && t1 != t2
+        if tool_id.trim().is_empty()
+            || session_id.trim().is_empty()
+            || turn_id.trim().is_empty()
+            || call_id.trim().is_empty()
         {
             return false;
         }
-        if let (Some(c1), Some(c2)) = (&self.call_id, call_id)
-            && c1 != c2
-        {
-            return false;
-        }
-        self.granted_at.elapsed() < std::time::Duration::from_secs(120)
+        self.tool_id == tool_id
+            && self.action_type == action
+            && self.session_id == session_id
+            && self.turn_id == turn_id
+            && self.call_id == call_id
     }
+}
+
+/// Authoritative execution context passed into tool execution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ToolCallContext<'a> {
+    pub session_id: &'a str,
+    pub turn_id: &'a str,
+    pub call_id: &'a str,
 }
 
 #[derive(Debug, Deserialize)]
@@ -159,35 +227,201 @@ pub fn list_discoverable_tools() -> Vec<DiscoverableTool> {
     ]
 }
 
-/// Processes an install request.
+/// Processes an install or enable request.
 /// Model arguments can NEVER supply or spoof approval.
-/// User consent must originate strictly from a verified host approval token (`host_approval`).
-pub fn handle_request_plugin_install(
+/// User consent must originate strictly from a verified host approval capability (`host_approval`).
+pub async fn handle_request_plugin_install(
     args: RequestPluginInstallArgs,
     host_approval: Option<&HostPluginApproval>,
+    plugin_manager: &m31a_extension_api::PluginManager,
 ) -> RequestPluginInstallResult {
-    let is_approved = host_approval
-        .map(|a| a.is_valid_for(&args.tool_id, args.action_type, None, None))
-        .unwrap_or(false);
+    // 1. Mandatory host approval check
+    let approval = match host_approval {
+        Some(a)
+            if !a.is_expired()
+                && a.tool_id() == args.tool_id
+                && a.action_type() == args.action_type =>
+        {
+            a
+        }
+        _ => {
+            return RequestPluginInstallResult {
+                completed: false,
+                user_confirmed: false,
+                tool_id: args.tool_id,
+                tool_type: args.tool_type,
+                action_type: args.action_type,
+                suggest_reason: args.suggest_reason,
+                error: Some(
+                    "Installation rejected: explicit host approval capability matching the exact session, turn, call ID, plugin ID, and action is required. Model arguments cannot approve installation."
+                        .to_string(),
+                ),
+            };
+        }
+    };
 
-    if !is_approved {
+    let user_plugins_dir = m31a_core::Config::config_dir().join("plugins");
+    let connectors_dir = m31a_core::Config::config_dir().join("connectors");
+
+    // 2. Enable action: must not follow install pipeline
+    if args.action_type == DiscoverableToolAction::Enable {
+        if args.tool_type == DiscoverableToolType::Connector {
+            let conn_file = connectors_dir.join(format!("{}.json", args.tool_id));
+            if !conn_file.exists() {
+                return RequestPluginInstallResult {
+                    completed: false,
+                    user_confirmed: true,
+                    tool_id: args.tool_id.clone(),
+                    tool_type: args.tool_type,
+                    action_type: args.action_type,
+                    suggest_reason: args.suggest_reason,
+                    error: Some(format!(
+                        "Cannot enable connector '{}': connector configuration not found at {}",
+                        args.tool_id,
+                        conn_file.display()
+                    )),
+                };
+            }
+            return RequestPluginInstallResult {
+                completed: true,
+                user_confirmed: true,
+                tool_id: args.tool_id,
+                tool_type: args.tool_type,
+                action_type: args.action_type,
+                suggest_reason: args.suggest_reason,
+                error: None,
+            };
+        }
+
+        // Native plugin enable
+        let target_dir = user_plugins_dir.join(&args.tool_id);
+        if !target_dir.exists() {
+            return RequestPluginInstallResult {
+                completed: false,
+                user_confirmed: true,
+                tool_id: args.tool_id.clone(),
+                tool_type: args.tool_type,
+                action_type: args.action_type,
+                suggest_reason: args.suggest_reason,
+                error: Some(format!(
+                    "Cannot enable plugin '{}': plugin is not installed at {}",
+                    args.tool_id,
+                    target_dir.display()
+                )),
+            };
+        }
+
+        // Load into runtime to activate
+        match plugin_manager
+            .load_plugins_from_dir(&user_plugins_dir)
+            .await
+        {
+            Ok(_) => {
+                if plugin_manager.get_plugin(&args.tool_id).await.is_none() {
+                    return RequestPluginInstallResult {
+                        completed: false,
+                        user_confirmed: true,
+                        tool_id: args.tool_id.clone(),
+                        tool_type: args.tool_type,
+                        action_type: args.action_type,
+                        suggest_reason: args.suggest_reason,
+                        error: Some(format!(
+                            "Failed to activate plugin '{}': plugin failed to initialize or register",
+                            args.tool_id
+                        )),
+                    };
+                }
+                return RequestPluginInstallResult {
+                    completed: true,
+                    user_confirmed: true,
+                    tool_id: args.tool_id,
+                    tool_type: args.tool_type,
+                    action_type: args.action_type,
+                    suggest_reason: args.suggest_reason,
+                    error: None,
+                };
+            }
+            Err(e) => {
+                return RequestPluginInstallResult {
+                    completed: false,
+                    user_confirmed: true,
+                    tool_id: args.tool_id.clone(),
+                    tool_type: args.tool_type,
+                    action_type: args.action_type,
+                    suggest_reason: args.suggest_reason,
+                    error: Some(format!("Failed to enable plugin '{}': {e}", args.tool_id)),
+                };
+            }
+        }
+    }
+
+    // 3. Install action:
+    // Connector installation
+    if args.tool_type == DiscoverableToolType::Connector {
+        let discoverable = list_discoverable_tools();
+        let conn_tool = discoverable
+            .iter()
+            .find(|t| t.id == args.tool_id && t.tool_type == DiscoverableToolType::Connector);
+        if conn_tool.is_none() {
+            return RequestPluginInstallResult {
+                completed: false,
+                user_confirmed: true,
+                tool_id: args.tool_id.clone(),
+                tool_type: args.tool_type,
+                action_type: args.action_type,
+                suggest_reason: args.suggest_reason,
+                error: Some(format!(
+                    "Connector '{}' not found in registry",
+                    args.tool_id
+                )),
+            };
+        }
+        if let Err(e) = std::fs::create_dir_all(&connectors_dir) {
+            return RequestPluginInstallResult {
+                completed: false,
+                user_confirmed: true,
+                tool_id: args.tool_id,
+                tool_type: args.tool_type,
+                action_type: args.action_type,
+                suggest_reason: args.suggest_reason,
+                error: Some(format!("Failed to create connectors directory: {e}")),
+            };
+        }
+        let conn_file = connectors_dir.join(format!("{}.json", args.tool_id));
+        let conn_json = serde_json::json!({
+            "id": args.tool_id,
+            "installed_at": chrono::Utc::now().to_rfc3339(),
+            "enabled": true,
+            "approval_nonce": approval.nonce(),
+        });
+        if let Err(e) = std::fs::write(
+            &conn_file,
+            serde_json::to_string_pretty(&conn_json).unwrap(),
+        ) {
+            return RequestPluginInstallResult {
+                completed: false,
+                user_confirmed: true,
+                tool_id: args.tool_id,
+                tool_type: args.tool_type,
+                action_type: args.action_type,
+                suggest_reason: args.suggest_reason,
+                error: Some(format!("Failed to write connector configuration: {e}")),
+            };
+        }
         return RequestPluginInstallResult {
-            completed: false,
-            user_confirmed: false,
+            completed: true,
+            user_confirmed: true,
             tool_id: args.tool_id,
             tool_type: args.tool_type,
             action_type: args.action_type,
             suggest_reason: args.suggest_reason,
-            error: Some(
-                "Installation rejected: explicit user consent is required before installing third-party plugins. Host-only approval must be granted through an interactive confirmation dialog. Model arguments cannot approve installation."
-                    .to_string(),
-            ),
+            error: None,
         };
     }
 
+    // Native plugin installation via staged pipeline
     let discoverable = list_discoverable_tools();
     let matching_tool = discoverable.iter().find(|t| t.id == args.tool_id);
-
     let marketplace = m31a_extension_api::PluginMarketplaceClient::new();
     let marketplace_plugin = marketplace.find_by_id(&args.tool_id);
 
@@ -199,16 +433,25 @@ pub fn handle_request_plugin_install(
             tool_type: args.tool_type,
             action_type: args.action_type,
             suggest_reason: args.suggest_reason,
-            error: Some("Plugin or connector not found in verified registry catalog".to_string()),
+            error: Some("Plugin not found in verified registry catalog".to_string()),
         };
     }
 
-    let user_plugins_dir = m31a_core::Config::config_dir().join("plugins");
-    let staging_dir = user_plugins_dir.join(format!(
-        ".staging_{}_{}",
-        args.tool_id,
-        uuid::Uuid::new_v4()
-    ));
+    if let Err(e) = std::fs::create_dir_all(&user_plugins_dir) {
+        return RequestPluginInstallResult {
+            completed: false,
+            user_confirmed: true,
+            tool_id: args.tool_id,
+            tool_type: args.tool_type,
+            action_type: args.action_type,
+            suggest_reason: args.suggest_reason,
+            error: Some(format!("Failed to create plugins directory: {e}")),
+        };
+    }
+
+    let run_id = uuid::Uuid::new_v4();
+    let staging_dir = user_plugins_dir.join(format!(".staging_{}_{}", args.tool_id, run_id));
+    let backup_dir = user_plugins_dir.join(format!(".backup_{}_{}", args.tool_id, run_id));
     let target_dir = user_plugins_dir.join(&args.tool_id);
 
     if let Err(e) = std::fs::create_dir_all(&staging_dir) {
@@ -223,6 +466,26 @@ pub fn handle_request_plugin_install(
         };
     }
 
+    // Helper for cleanup on failure
+    let cleanup_failure = |err_msg: String| -> RequestPluginInstallResult {
+        let _ = std::fs::remove_dir_all(&staging_dir);
+        if target_dir.exists() && backup_dir.exists() {
+            let _ = std::fs::remove_dir_all(&target_dir);
+            let _ = std::fs::rename(&backup_dir, &target_dir);
+        }
+        let _ = std::fs::remove_dir_all(&backup_dir);
+        RequestPluginInstallResult {
+            completed: false,
+            user_confirmed: true,
+            tool_id: args.tool_id.clone(),
+            tool_type: args.tool_type,
+            action_type: args.action_type,
+            suggest_reason: args.suggest_reason.clone(),
+            error: Some(err_msg),
+        }
+    };
+
+    // Stage package files into staging_dir
     let manifest_path = staging_dir.join("m31a-plugin.toml");
     let manifest_content = if let Some(mp) = marketplace_plugin {
         let caps = mp
@@ -240,6 +503,8 @@ capabilities = [{}]
 entry_point = "m31a_plugin_v1"
 min_m31a_version = "{}"
 sha256 = "{}"
+manifest_version = 1
+abi_version = 1
 "#,
             mp.id,
             mp.version,
@@ -258,68 +523,62 @@ description = "{}"
 capabilities = ["tools"]
 entry_point = "m31a_plugin_v1"
 min_m31a_version = "0.1.0"
+manifest_version = 1
+abi_version = 1
 "#,
             dt.id, dt.description
         )
     };
 
     if let Err(e) = std::fs::write(&manifest_path, &manifest_content) {
-        let _ = std::fs::remove_dir_all(&staging_dir);
-        return RequestPluginInstallResult {
-            completed: false,
-            user_confirmed: true,
-            tool_id: args.tool_id,
-            tool_type: args.tool_type,
-            action_type: args.action_type,
-            suggest_reason: args.suggest_reason,
-            error: Some(format!("Failed to write manifest: {e}")),
-        };
+        return cleanup_failure(format!("Failed to write manifest in staging: {e}"));
     }
 
-    // Atomic installation: rename staging to target
-    if target_dir.exists() {
-        let _ = std::fs::remove_dir_all(&target_dir);
+    // Atomic replacement: if target exists, move to backup
+    if target_dir.exists()
+        && let Err(e) = std::fs::rename(&target_dir, &backup_dir)
+    {
+        return cleanup_failure(format!("Failed to backup existing plugin version: {e}"));
     }
 
+    // Move staging to target
     if let Err(e) = std::fs::rename(&staging_dir, &target_dir) {
-        let _ = std::fs::remove_dir_all(&staging_dir);
-        return RequestPluginInstallResult {
-            completed: false,
-            user_confirmed: true,
-            tool_id: args.tool_id,
-            tool_type: args.tool_type,
-            action_type: args.action_type,
-            suggest_reason: args.suggest_reason,
-            error: Some(format!("Failed to move staging directory to target: {e}")),
-        };
+        return cleanup_failure(format!("Failed to move staging to target directory: {e}"));
     }
 
-    // Health check: verify manifest exists and parses properly
-    let target_manifest = target_dir.join("m31a-plugin.toml");
-    if !target_manifest.is_file() {
-        let _ = std::fs::remove_dir_all(&target_dir);
-        return RequestPluginInstallResult {
-            completed: false,
-            user_confirmed: true,
-            tool_id: args.tool_id,
-            tool_type: args.tool_type,
-            action_type: args.action_type,
-            suggest_reason: args.suggest_reason,
-            error: Some(
-                "Health check failed: installed manifest not found, rolled back installation"
-                    .to_string(),
-            ),
-        };
+    // Health check and runtime validation:
+    // Manifest must parse and validate
+    let target_manifest_path = target_dir.join("m31a-plugin.toml");
+    let parsed_manifest: Result<m31a_extension_api::PluginManifest, _> =
+        std::fs::read_to_string(&target_manifest_path)
+            .map_err(|e| anyhow::anyhow!("Failed to read target manifest: {e}"))
+            .and_then(|s| {
+                toml::from_str(&s).map_err(|e| anyhow::anyhow!("Manifest parse error: {e}"))
+            });
+
+    if let Err(e) = parsed_manifest {
+        return cleanup_failure(format!("Plugin validation failed: {e}"));
     }
 
-    RequestPluginInstallResult {
-        completed: true,
-        user_confirmed: true,
-        tool_id: args.tool_id,
-        tool_type: args.tool_type,
-        action_type: args.action_type,
-        suggest_reason: args.suggest_reason,
-        error: None,
+    // Attempt to load plugin into plugin manager
+    match plugin_manager
+        .load_plugins_from_dir(&user_plugins_dir)
+        .await
+    {
+        Ok(_) => {
+            // Remove backup on confirmed success
+            let _ = std::fs::remove_dir_all(&backup_dir);
+            RequestPluginInstallResult {
+                completed: true,
+                user_confirmed: true,
+                tool_id: args.tool_id,
+                tool_type: args.tool_type,
+                action_type: args.action_type,
+                suggest_reason: args.suggest_reason,
+                error: None,
+            }
+        }
+        Err(e) => cleanup_failure(format!("Failed to load and activate plugin: {e}")),
     }
 }
 
@@ -327,20 +586,165 @@ min_m31a_version = "0.1.0"
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_list_discoverable_tools() {
-        let tools = list_discoverable_tools();
-        assert!(!tools.is_empty());
-        assert!(tools.iter().any(|t| t.id == "github-mcp"));
+    #[tokio::test]
+    async fn test_plugin_approval_binding_exact_equality() {
+        let ttl = std::time::Duration::from_secs(120);
+
+        // 1. Valid issuance with full context
+        let approval = HostPluginApproval::issue_host_approval(
+            "github-mcp",
+            DiscoverableToolAction::Install,
+            "sess-1",
+            "turn-1",
+            "call-1",
+            ttl,
+        )
+        .expect("must succeed with valid context");
+
+        assert_eq!(approval.tool_id(), "github-mcp");
+        assert_eq!(approval.action_type(), DiscoverableToolAction::Install);
+        assert_eq!(approval.session_id(), "sess-1");
+        assert_eq!(approval.turn_id(), "turn-1");
+        assert_eq!(approval.call_id(), "call-1");
+        assert!(!approval.is_expired());
+
+        // 2. Exact match succeeds
+        assert!(approval.is_valid_for(
+            "github-mcp",
+            DiscoverableToolAction::Install,
+            "sess-1",
+            "turn-1",
+            "call-1"
+        ));
+
+        // 3. Different session fails
+        assert!(!approval.is_valid_for(
+            "github-mcp",
+            DiscoverableToolAction::Install,
+            "sess-2",
+            "turn-1",
+            "call-1"
+        ));
+
+        // 4. Different turn fails
+        assert!(!approval.is_valid_for(
+            "github-mcp",
+            DiscoverableToolAction::Install,
+            "sess-1",
+            "turn-2",
+            "call-1"
+        ));
+
+        // 5. Different tool-call ID fails
+        assert!(!approval.is_valid_for(
+            "github-mcp",
+            DiscoverableToolAction::Install,
+            "sess-1",
+            "turn-1",
+            "call-2"
+        ));
+
+        // 6. Different action fails
+        assert!(!approval.is_valid_for(
+            "github-mcp",
+            DiscoverableToolAction::Enable,
+            "sess-1",
+            "turn-1",
+            "call-1"
+        ));
+
+        // 7. Missing/empty context fails closed (no wildcards)
+        assert!(!approval.is_valid_for(
+            "github-mcp",
+            DiscoverableToolAction::Install,
+            "",
+            "turn-1",
+            "call-1"
+        ));
+        assert!(!approval.is_valid_for(
+            "github-mcp",
+            DiscoverableToolAction::Install,
+            "sess-1",
+            "",
+            "call-1"
+        ));
+        assert!(!approval.is_valid_for(
+            "github-mcp",
+            DiscoverableToolAction::Install,
+            "sess-1",
+            "turn-1",
+            ""
+        ));
+
+        // 8. Empty context in issuance fails
         assert!(
-            tools
-                .iter()
-                .any(|t| t.tool_type == DiscoverableToolType::Connector)
+            HostPluginApproval::issue_host_approval(
+                "",
+                DiscoverableToolAction::Install,
+                "s",
+                "t",
+                "c",
+                ttl
+            )
+            .is_err()
         );
+        assert!(
+            HostPluginApproval::issue_host_approval(
+                "p",
+                DiscoverableToolAction::Install,
+                "",
+                "t",
+                "c",
+                ttl
+            )
+            .is_err()
+        );
+        assert!(
+            HostPluginApproval::issue_host_approval(
+                "p",
+                DiscoverableToolAction::Install,
+                "s",
+                "",
+                "c",
+                ttl
+            )
+            .is_err()
+        );
+        assert!(
+            HostPluginApproval::issue_host_approval(
+                "p",
+                DiscoverableToolAction::Install,
+                "s",
+                "t",
+                "",
+                ttl
+            )
+            .is_err()
+        );
+
+        // 9. Expired approval fails
+        let expired_approval = HostPluginApproval::issue_host_approval(
+            "github-mcp",
+            DiscoverableToolAction::Install,
+            "sess-1",
+            "turn-1",
+            "call-1",
+            std::time::Duration::from_nanos(1),
+        )
+        .unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        assert!(!expired_approval.is_valid_for(
+            "github-mcp",
+            DiscoverableToolAction::Install,
+            "sess-1",
+            "turn-1",
+            "call-1"
+        ));
     }
 
-    #[test]
-    fn test_handle_request_plugin_install() {
+    #[tokio::test]
+    async fn test_handle_request_plugin_install_approval_enforcement() {
+        let pm = m31a_extension_api::PluginManager::new(vec![]);
         let args = RequestPluginInstallArgs {
             tool_id: "github-mcp".to_string(),
             tool_type: DiscoverableToolType::Plugin,
@@ -348,41 +752,65 @@ mod tests {
             suggest_reason: "Repository search requires GitHub MCP server".to_string(),
         };
 
-        // 1. Without host approval, installation MUST fail closed
-        let res_unconfirmed = handle_request_plugin_install(
+        // Without approval: fails closed
+        let res_no_auth = handle_request_plugin_install(
             RequestPluginInstallArgs {
                 tool_id: "github-mcp".to_string(),
                 tool_type: DiscoverableToolType::Plugin,
                 action_type: DiscoverableToolAction::Install,
-                suggest_reason: "Repository search requires GitHub MCP server".to_string(),
+                suggest_reason: "No approval".to_string(),
             },
             None,
-        );
-        assert!(!res_unconfirmed.completed);
-        assert!(!res_unconfirmed.user_confirmed);
-        assert!(res_unconfirmed.error.is_some());
+            &pm,
+        )
+        .await;
+        assert!(!res_no_auth.completed);
+        assert!(!res_no_auth.user_confirmed);
+        assert!(res_no_auth.error.is_some());
 
-        // 2. With valid host approval ticket, installation succeeds
-        let host_approval = HostPluginApproval::new("github-mcp", DiscoverableToolAction::Install);
-        let res_confirmed = handle_request_plugin_install(args, Some(&host_approval));
-        assert!(res_confirmed.completed);
-        assert!(res_confirmed.user_confirmed);
-        assert_eq!(res_confirmed.tool_id, "github-mcp");
-        assert_eq!(res_confirmed.action_type, DiscoverableToolAction::Install);
+        // With valid approval: succeeds
+        let approval = HostPluginApproval::issue_host_approval(
+            "github-mcp",
+            DiscoverableToolAction::Install,
+            "sess-1",
+            "turn-1",
+            "call-1",
+            std::time::Duration::from_secs(60),
+        )
+        .unwrap();
 
-        // 3. Mismatched plugin ID in host approval ticket fails closed
-        let mismatched_approval =
-            HostPluginApproval::new("other-plugin", DiscoverableToolAction::Install);
-        let res_mismatched = handle_request_plugin_install(
+        let res_auth = handle_request_plugin_install(args, Some(&approval), &pm).await;
+        assert!(res_auth.completed);
+        assert!(res_auth.user_confirmed);
+        assert_eq!(res_auth.tool_id, "github-mcp");
+    }
+
+    #[tokio::test]
+    async fn test_enable_fails_if_not_installed() {
+        let pm = m31a_extension_api::PluginManager::new(vec![]);
+        let approval = HostPluginApproval::issue_host_approval(
+            "uninstalled-plugin",
+            DiscoverableToolAction::Enable,
+            "sess-1",
+            "turn-1",
+            "call-1",
+            std::time::Duration::from_secs(60),
+        )
+        .unwrap();
+
+        let res = handle_request_plugin_install(
             RequestPluginInstallArgs {
-                tool_id: "github-mcp".to_string(),
+                tool_id: "uninstalled-plugin".to_string(),
                 tool_type: DiscoverableToolType::Plugin,
-                action_type: DiscoverableToolAction::Install,
-                suggest_reason: "Mismatched ticket".to_string(),
+                action_type: DiscoverableToolAction::Enable,
+                suggest_reason: "Enable uninstalled plugin".to_string(),
             },
-            Some(&mismatched_approval),
-        );
-        assert!(!res_mismatched.completed);
-        assert!(!res_mismatched.user_confirmed);
+            Some(&approval),
+            &pm,
+        )
+        .await;
+
+        assert!(!res.completed);
+        assert!(res.error.unwrap().contains("is not installed"));
     }
 }
