@@ -110,54 +110,113 @@ async fn test_local_fallback_client_execute_real_command() {
 }
 
 #[tokio::test]
-async fn test_local_fallback_client_agent_lifecycle() {
+async fn test_task_containing_cargo_in_natural_language_does_not_execute() {
+    let client = LocalFallbackCloudTasksClient::new();
+    let task = TaskSpec {
+        id: "task-cargo-nl".to_string(),
+        prompt: "Review the cargo dependencies in Cargo.toml and cargo check".to_string(),
+        model: "local".to_string(),
+        tools: vec![],
+        working_dir: ".".to_string(),
+        env_vars: HashMap::new(),
+        timeout_seconds: 30,
+        max_tokens: None,
+        temperature: None,
+    };
+
+    let result = client.execute_task(task).await.unwrap();
+    assert_eq!(result.status, TaskStatusEnum::Failed);
+    assert!(result.output.is_empty());
+    assert!(
+        result
+            .error
+            .unwrap()
+            .contains("requires a connected remote Cloud Tasks endpoint")
+    );
+}
+
+#[tokio::test]
+async fn test_tasks_mentioning_ls_or_echo_do_not_execute() {
     let client = LocalFallbackCloudTasksClient::new();
 
-    // 1. Check capabilities
-    let caps = client.get_capabilities().await.unwrap();
-    assert!(caps.supports_file_ops);
-    assert!(caps.supports_process_exec);
-    assert!(caps.max_memory_mb > 0);
-    assert!(!caps.available_models.is_empty());
+    // Natural language mentioning ls
+    let task_ls = TaskSpec {
+        id: "task-ls-nl".to_string(),
+        prompt: "Run ls -la and summarize the directory".to_string(),
+        model: "local".to_string(),
+        tools: vec![],
+        working_dir: ".".to_string(),
+        env_vars: HashMap::new(),
+        timeout_seconds: 30,
+        max_tokens: None,
+        temperature: None,
+    };
+    let res_ls = client.execute_task(task_ls).await.unwrap();
+    assert_eq!(res_ls.status, TaskStatusEnum::Failed);
+    assert!(res_ls.output.is_empty());
 
-    // 2. Spawn agent
+    // Natural language mentioning echo
+    let task_echo = TaskSpec {
+        id: "task-echo-nl".to_string(),
+        prompt: "echo back the results of the analysis".to_string(),
+        model: "local".to_string(),
+        tools: vec![],
+        working_dir: ".".to_string(),
+        env_vars: HashMap::new(),
+        timeout_seconds: 30,
+        max_tokens: None,
+        temperature: None,
+    };
+    let res_echo = client.execute_task(task_echo).await.unwrap();
+    assert_eq!(res_echo.status, TaskStatusEnum::Failed);
+    assert!(res_echo.output.is_empty());
+}
+
+#[tokio::test]
+async fn test_send_agent_input_does_not_execute_shell() {
+    let client = LocalFallbackCloudTasksClient::new();
+    let res = client
+        .send_agent_input("fake-agent-id", "echo malicious command".to_string())
+        .await;
+    assert!(
+        res.is_err(),
+        "send_agent_input must not execute shell commands"
+    );
+    assert!(
+        res.unwrap_err()
+            .to_string()
+            .contains("unsupported without an attached multi-agent engine")
+    );
+
+    let wait_res = client.wait_agent("fake-agent-id").await;
+    assert!(wait_res.is_err());
+    assert!(
+        wait_res
+            .unwrap_err()
+            .to_string()
+            .contains("unsupported without an attached multi-agent engine")
+    );
+}
+
+#[tokio::test]
+async fn test_local_agent_spawning_returns_unsupported() {
+    let client = LocalFallbackCloudTasksClient::new();
     let spawn_req = SpawnAgentRequest {
-        session_id: "sess-fleet-001".to_string(),
+        session_id: "sess-001".to_string(),
         model: "nvidia/nemotron-3.5-lightning-30b-a3b".to_string(),
         config: "{}".to_string(),
-        capabilities: vec!["terminal".to_string(), "code-edit".to_string()],
+        capabilities: vec!["terminal".to_string()],
         working_dir: "/tmp".to_string(),
     };
 
-    let handle = client.spawn_agent(spawn_req).await.unwrap();
-    assert_eq!(handle.session_id, "sess-fleet-001");
-    assert_eq!(handle.status, AgentStatusEnum::Ready);
-    assert!(handle.capabilities.contains(&"terminal".to_string()));
-
-    // 3. List agents
-    let agents = client.list_agents().await.unwrap();
-    assert_eq!(agents.len(), 1);
-    assert_eq!(agents[0].agent_id, handle.agent_id);
-
-    // 4. Send genuine command input & wait
-    client
-        .send_agent_input(&handle.agent_id, "echo status check ok".to_string())
-        .await
-        .unwrap();
-
-    let wait_res = client.wait_agent(&handle.agent_id).await.unwrap();
-    assert_eq!(wait_res.status, TaskStatusEnum::Completed);
-    assert!(wait_res.output.contains("status check ok"));
-
-    // 5. Test failure mode: command exit 42 MUST fail honestly, never fabricated success
-    client
-        .send_agent_input(&handle.agent_id, "exit 42".to_string())
-        .await
-        .unwrap();
-    let fail_res = client.wait_agent(&handle.agent_id).await.unwrap();
-    assert_eq!(fail_res.status, TaskStatusEnum::Failed);
-    assert!(fail_res.error.unwrap().contains("42"));
-
-    // 6. Close agent
-    client.close_agent(&handle.agent_id).await.unwrap();
+    let res = client.spawn_agent(spawn_req).await;
+    assert!(
+        res.is_err(),
+        "Local fallback must reject spawning without engine"
+    );
+    let err_str = res.unwrap_err().to_string();
+    assert!(
+        err_str.contains("unsupported without an attached multi-agent engine"),
+        "Error must truthfully indicate unsupported agent runtime, got: {err_str}"
+    );
 }
