@@ -192,7 +192,7 @@ impl LocalEncryptedVault {
             cache: Arc::new(Mutex::new(HashMap::new())),
         };
         if !is_explicit {
-            let _ = vault.migrate_legacy_auth_vault_if_present();
+            vault.migrate_legacy_auth_vault_if_present()?;
         }
         Ok(vault)
     }
@@ -617,43 +617,65 @@ impl LocalEncryptedVault {
 
     /// Migrates external provider API keys out of any legacy `auth.vault` into `provider.vault`
     /// and safely purges obsolete M31A user account tokens.
+    ///
+    /// Migration is atomic and transactional:
+    /// - Fails closed if legacy auth vault is corrupted or unreadable.
+    /// - Purges obsolete first-party authentication tokens.
+    /// - Preserves external provider credentials into `LocalSecretsNamespace::Provider` (without overwriting).
+    /// - Atomically saves the updated provider vault.
+    /// - Deletes `auth.vault` unconditionally on success.
     pub fn migrate_legacy_auth_vault_if_present(&self) -> Result<()> {
         let auth_path = self.namespace_path(LocalSecretsNamespace::M31aAuth);
         if !auth_path.exists() {
             return Ok(());
         }
 
-        if let Ok(records) = self.load_namespace(LocalSecretsNamespace::M31aAuth)
-            && !records.is_empty()
-        {
-            let mut provider_records = self
-                .load_namespace(LocalSecretsNamespace::Provider)
-                .unwrap_or_default();
-            let mut migrated = false;
+        // Fail closed if loading/decryption fails
+        let records = self.load_namespace(LocalSecretsNamespace::M31aAuth)?;
+        let mut provider_records = self.load_namespace(LocalSecretsNamespace::Provider)?;
+        let mut provider_modified = false;
 
-            for (key, record) in records {
-                let is_obsolete_token = key == "OAUTH_ACCESS_TOKEN"
-                    || key == "OAUTH_REFRESH_TOKEN"
-                    || key == "OAUTH_EXPIRES_AT"
-                    || key == "OAUTH_ACCOUNT_ID"
-                    || key.starts_with("M31A_AUTH_")
-                    || key.starts_with("m31a_tok_");
+        for (key, record) in records {
+            let is_obsolete_token = key == "OAUTH_ACCESS_TOKEN"
+                || key == "OAUTH_REFRESH_TOKEN"
+                || key == "OAUTH_EXPIRES_AT"
+                || key == "OAUTH_ACCOUNT_ID"
+                || key == "AUTH_TOKEN"
+                || key == "USER_TOKEN"
+                || key.starts_with("M31A_AUTH_")
+                || key.starts_with("m31a_tok_")
+                || key.starts_with("DEVICE_PAIRING_")
+                || key.starts_with("M31A_USER_")
+                || key.starts_with("M31A_SESSION_");
 
-                if !is_obsolete_token
-                    && let std::collections::btree_map::Entry::Vacant(e) =
-                        provider_records.entry(key)
-                {
-                    e.insert(record);
-                    migrated = true;
-                }
-            }
-
-            if migrated {
-                let _ = self.save_namespace(LocalSecretsNamespace::Provider, &provider_records);
-                let _ = fs::remove_file(&auth_path);
+            if !is_obsolete_token
+                && let std::collections::btree_map::Entry::Vacant(e) = provider_records.entry(key)
+            {
+                e.insert(record);
+                provider_modified = true;
             }
         }
 
+        if provider_modified {
+            self.save_namespace(LocalSecretsNamespace::Provider, &provider_records)?;
+            if let Ok(mut cache) = self.cache.lock() {
+                cache.insert(LocalSecretsNamespace::Provider, provider_records);
+            }
+        }
+
+        // Unconditionally delete legacy auth.vault once provider changes are committed
+        fs::remove_file(&auth_path).with_context(|| {
+            format!(
+                "Failed to remove migrated legacy auth vault at {}",
+                auth_path.display()
+            )
+        })?;
+
+        if let Ok(mut cache) = self.cache.lock() {
+            cache.remove(&LocalSecretsNamespace::M31aAuth);
+        }
+
+        debug!("Successfully migrated legacy auth vault to provider vault and purged auth.vault");
         Ok(())
     }
 }
@@ -671,27 +693,6 @@ impl SecretsBackend for LocalEncryptedVault {
             cache.insert(namespace, records);
             if val.is_some() {
                 return Ok(val);
-            }
-        }
-
-        // Cross-namespace fallback between Provider and M31aAuth for backward compatibility
-        let fallback_ns = match namespace {
-            LocalSecretsNamespace::Provider => Some(LocalSecretsNamespace::M31aAuth),
-            LocalSecretsNamespace::M31aAuth => Some(LocalSecretsNamespace::Provider),
-            _ => None,
-        };
-
-        if let Some(fb) = fallback_ns {
-            if let Some(records) = cache.get(&fb) {
-                if let Some(val) = records.get(name).map(|r| r.value.clone()) {
-                    return Ok(Some(val));
-                }
-            } else if let Ok(records) = self.load_namespace(fb) {
-                let val = records.get(name).map(|r| r.value.clone());
-                cache.insert(fb, records);
-                if val.is_some() {
-                    return Ok(val);
-                }
             }
         }
 
@@ -829,7 +830,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let vault = LocalEncryptedVault::new(dir.path().to_path_buf()).unwrap();
 
-        let ns = LocalSecretsNamespace::M31aAuth;
+        let ns = LocalSecretsNamespace::ManagedSecrets;
         vault
             .set_secret(ns, "AUTH_TOKEN", "super-secret-token", SecretScope::Global)
             .unwrap();
