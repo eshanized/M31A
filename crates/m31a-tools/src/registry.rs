@@ -260,20 +260,21 @@ impl ToolRegistry {
         store.push(approval);
     }
 
-    /// Consumes a valid host approval token matching the specified tool and action.
-    /// Enforces one-time consumption and rejects expired tickets.
+    /// Consumes a valid host approval capability matching the exact plugin, action, and execution context.
+    /// Enforces strictly atomic one-time consumption and rejects expired or mismatched tickets.
     pub fn consume_host_plugin_approval(
         &self,
         tool_id: &str,
         action: crate::plugin_install::DiscoverableToolAction,
-        turn_id: Option<&str>,
-        call_id: Option<&str>,
+        session_id: &str,
+        turn_id: &str,
+        call_id: &str,
     ) -> Option<crate::plugin_install::HostPluginApproval> {
         let mut store = self.host_plugin_approvals.lock().unwrap();
-        store.retain(|a| a.granted_at.elapsed() < std::time::Duration::from_secs(120));
+        store.retain(|a| !a.is_expired());
         store
             .iter()
-            .position(|a| a.is_valid_for(tool_id, action, turn_id, call_id))
+            .position(|a| a.is_valid_for(tool_id, action, session_id, turn_id, call_id))
             .map(|pos| store.remove(pos))
     }
 
@@ -1542,12 +1543,7 @@ impl ToolRegistry {
                         "type": "object",
                         "properties": {
                             "topic": { "type": "string", "description": "Concise topic title (e.g. 'Clippy Enforce', 'Test DB Pattern')." },
-                            "detail": { "type": "string", "description": "Detailed explanation of the learned pattern or rule." },
-                            "embedding": {
-                                "type": "array",
-                                "items": { "type": "number" },
-                                "description": "Optional dense semantic embedding vector for hybrid search."
-                            }
+                            "detail": { "type": "string", "description": "Detailed explanation of the learned pattern or rule." }
                         },
                         "required": ["topic", "detail"]
                     }),
@@ -1561,12 +1557,7 @@ impl ToolRegistry {
                     parameters: json!({
                         "type": "object",
                         "properties": {
-                            "query": { "type": "string", "description": "Keyword search query." },
-                            "embedding": {
-                                "type": "array",
-                                "items": { "type": "number" },
-                                "description": "Optional dense semantic embedding vector for hybrid search."
-                            }
+                            "query": { "type": "string", "description": "Keyword search query." }
                         },
                         "required": ["query"]
                     }),
@@ -2716,6 +2707,18 @@ impl ToolRegistry {
         args_str: &str,
         cwd: &Path,
         policy: SandboxPolicy,
+    ) -> Result<String> {
+        self.execute_with_call_context(name, args_str, cwd, policy, None)
+            .await
+    }
+
+    pub async fn execute_with_call_context(
+        &self,
+        name: &str,
+        args_str: &str,
+        cwd: &Path,
+        policy: SandboxPolicy,
+        call_context: Option<&crate::plugin_install::ToolCallContext<'_>>,
     ) -> Result<String> {
         if !self.is_allowed(name) {
             return Err(anyhow!(
@@ -4592,11 +4595,8 @@ impl ToolRegistry {
                     .get("detail")
                     .and_then(|v| v.as_str())
                     .context("Missing 'detail'")?;
-                let embedding: Option<Vec<f32>> = args
-                    .get("embedding")
-                    .and_then(|v| serde_json::from_value(v.clone()).ok());
                 let mgr = m31a_core::MemoryManager::new()?;
-                let item = mgr.consolidate_fact_with_embedding(topic, detail, embedding)?;
+                let item = mgr.consolidate_fact(topic, detail)?;
                 Ok(format!(
                     "Consolidated memory `{}` on topic '{}' (citations: {}):\n{}",
                     item.id, item.topic, item.citation_count, item.detail
@@ -4607,27 +4607,27 @@ impl ToolRegistry {
                     .get("query")
                     .and_then(|v| v.as_str())
                     .context("Missing 'query'")?;
-                let embedding: Option<Vec<f32>> = args
-                    .get("embedding")
-                    .and_then(|v| serde_json::from_value(v.clone()).ok());
                 let mgr = m31a_core::MemoryManager::new()?;
-                let hits = mgr.search_memories_hybrid(query, embedding.as_deref());
+                let (mode, hits) = mgr.search_memories_with_mode(query);
                 if hits.is_empty() {
-                    Ok(format!("No memories found matching query `{query}`."))
+                    Ok(format!(
+                        "No memories found matching query `{query}` (retrieval mode: {mode})."
+                    ))
                 } else {
                     let lines = hits
                         .iter()
                         .map(|s| {
                             let i = &s.item;
                             format!(
-                                "- **{}** `[{}]` (citations: {}): {}",
-                                i.topic, i.id, i.citation_count, i.detail
+                                "- **{}** `[{}]` (citations: {}, score: {:.2}): {}",
+                                i.topic, i.id, i.citation_count, s.hybrid_score, i.detail
                             )
                         })
                         .collect::<Vec<_>>();
                     Ok(format!(
-                        "Found {} matching memories:\n{}",
+                        "Found {} matching memories (retrieval mode: {}):\n{}",
                         hits.len(),
+                        mode,
                         lines.join("\n")
                     ))
                 }
@@ -5286,8 +5286,17 @@ impl ToolRegistry {
 
                 // Host approval must come strictly from the host approval store!
                 // Any 'trusted_user_confirmed' or '_trusted_approval' passed in model arguments is ignored.
-                let host_approval =
-                    self.consume_host_plugin_approval(tool_id, action_type, None, None);
+                let host_approval = if let Some(ctx) = call_context {
+                    self.consume_host_plugin_approval(
+                        tool_id,
+                        action_type,
+                        ctx.session_id,
+                        ctx.turn_id,
+                        ctx.call_id,
+                    )
+                } else {
+                    None
+                };
 
                 let res = crate::plugin_install::handle_request_plugin_install(
                     crate::plugin_install::RequestPluginInstallArgs {
@@ -5297,7 +5306,9 @@ impl ToolRegistry {
                         suggest_reason: suggest_reason.to_string(),
                     },
                     host_approval.as_ref(),
-                );
+                    &self.plugin_manager,
+                )
+                .await;
 
                 if res.completed {
                     let _ = self
@@ -5520,8 +5531,6 @@ impl ToolRegistry {
                     .and_then(|v| v.as_u64())
                     .map(|n| n as usize);
 
-                let offline_preview = args.get("offline_preview").and_then(|v| v.as_bool());
-
                 let req = crate::image_gen::ImageGenerationRequest {
                     prompt,
                     size,
@@ -5529,7 +5538,6 @@ impl ToolRegistry {
                     transparent_background,
                     referenced_image_paths,
                     num_last_images_to_include,
-                    offline_preview,
                 };
 
                 let save_root = m31a_core::Config::config_dir();
@@ -6750,27 +6758,58 @@ mod tests {
         assert!(spoofed_res.contains("\"completed\": false"));
         assert!(spoofed_res.contains("\"user_confirmed\": false"));
 
-        // 4. request_plugin_install - with real host approval succeeds
-        registry.grant_host_plugin_approval(crate::plugin_install::HostPluginApproval::new(
-            "github-mcp",
-            crate::plugin_install::DiscoverableToolAction::Install,
-        ));
-        let req_res = registry.execute(
+        // 4. request_plugin_install - with real host approval capability and matching context succeeds
+        let call_ctx = crate::plugin_install::ToolCallContext {
+            session_id: "test-sess",
+            turn_id: "test-turn",
+            call_id: "test-call-1",
+        };
+        registry.grant_host_plugin_approval(
+            crate::plugin_install::HostPluginApproval::issue_host_approval(
+                "github-mcp",
+                crate::plugin_install::DiscoverableToolAction::Install,
+                call_ctx.session_id,
+                call_ctx.turn_id,
+                call_ctx.call_id,
+                std::time::Duration::from_secs(60),
+            )
+            .unwrap(),
+        );
+
+        // Context mismatch (different turn) fails closed:
+        let mismatched_turn_ctx = crate::plugin_install::ToolCallContext {
+            session_id: "test-sess",
+            turn_id: "wrong-turn",
+            call_id: "test-call-1",
+        };
+        let mismatch_res = registry.execute_with_call_context(
             "request_plugin_install",
             r#"{"tool_id": "github-mcp", "tool_type": "plugin", "action_type": "install", "suggest_reason": "Need GitHub tools"}"#,
             &cwd,
             SandboxPolicy::WorkspaceWrite,
+            Some(&mismatched_turn_ctx),
+        ).await.unwrap();
+        assert!(mismatch_res.contains("\"completed\": false"));
+
+        // Exact match succeeds:
+        let req_res = registry.execute_with_call_context(
+            "request_plugin_install",
+            r#"{"tool_id": "github-mcp", "tool_type": "plugin", "action_type": "install", "suggest_reason": "Need GitHub tools"}"#,
+            &cwd,
+            SandboxPolicy::WorkspaceWrite,
+            Some(&call_ctx),
         ).await.unwrap();
         assert!(req_res.contains("\"completed\": true"));
         assert!(req_res.contains("\"user_confirmed\": true"));
         assert!(req_res.contains("github-mcp"));
 
         // 5. One-time consumption: replay attempt fails closed
-        let replay_res = registry.execute(
+        let replay_res = registry.execute_with_call_context(
             "request_plugin_install",
             r#"{"tool_id": "github-mcp", "tool_type": "plugin", "action_type": "install", "suggest_reason": "Need GitHub tools"}"#,
             &cwd,
             SandboxPolicy::WorkspaceWrite,
+            Some(&call_ctx),
         ).await.unwrap();
         assert!(replay_res.contains("\"completed\": false"));
     }
@@ -6882,27 +6921,33 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let cwd = tmp.path().to_path_buf();
 
-        // 1. imagegen fails cleanly without provider or offline_preview
+        // 1. imagegen fails cleanly without provider (even if model supplies "offline_preview": true)
+        unsafe { std::env::remove_var("M31A_OFFLINE_PREVIEW") };
         let img_err = registry
-            .execute(
-                "imagegen",
-                r#"{"prompt": "A sunset over mountains", "size": "1024x1024"}"#,
-                &cwd,
-                SandboxPolicy::WorkspaceWrite,
-            )
-            .await;
-        assert!(img_err.is_err(), "Must fail when no provider is configured");
-
-        // 2. imagegen succeeds in explicit offline preview mode
-        let img_res = registry
             .execute(
                 "imagegen",
                 r#"{"prompt": "A sunset over mountains", "size": "1024x1024", "offline_preview": true}"#,
                 &cwd,
                 SandboxPolicy::WorkspaceWrite,
             )
+            .await;
+        assert!(
+            img_err.is_err(),
+            "Must fail when no provider is configured, ignoring model offline_preview"
+        );
+
+        // 2. imagegen succeeds only when host M31A_OFFLINE_PREVIEW is set
+        unsafe { std::env::set_var("M31A_OFFLINE_PREVIEW", "1") };
+        let img_res = registry
+            .execute(
+                "imagegen",
+                r#"{"prompt": "A sunset over mountains", "size": "1024x1024"}"#,
+                &cwd,
+                SandboxPolicy::WorkspaceWrite,
+            )
             .await
             .unwrap();
+        unsafe { std::env::remove_var("M31A_OFFLINE_PREVIEW") };
         assert!(img_res.contains("call_id"));
         assert!(img_res.contains("image_path"));
         assert!(img_res.contains("format"));
