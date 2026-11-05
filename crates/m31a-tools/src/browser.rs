@@ -93,16 +93,12 @@ pub async fn get_or_launch_browser_for_session(session_id: &str) -> Result<Arc<B
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NavigateArgs {
     pub url: String,
-    #[serde(default)]
-    pub session_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClickArgs {
     #[serde(rename = "ref")]
     pub target_ref: String,
-    #[serde(default)]
-    pub session_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -110,28 +106,28 @@ pub struct TypeArgs {
     #[serde(rename = "ref")]
     pub target_ref: String,
     pub text: String,
-    #[serde(default)]
-    pub session_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScreenshotArgs {
     pub path: Option<String>,
-    #[serde(default)]
-    pub session_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EvaluateArgs {
     pub script: String,
-    #[serde(default)]
-    pub session_id: Option<String>,
+}
+
+pub async fn execute_browser_navigate_for_session(
+    session_id: &str,
+    args: &NavigateArgs,
+) -> Result<String> {
+    let session = get_or_launch_browser_for_session(session_id).await?;
+    session.navigate(&args.url).await
 }
 
 pub async fn execute_browser_navigate(args: &NavigateArgs) -> Result<String> {
-    let session_key = args.session_id.as_deref().unwrap_or("default");
-    let session = get_or_launch_browser_for_session(session_key).await?;
-    session.navigate(&args.url).await
+    execute_browser_navigate_for_session("default", args).await
 }
 
 pub async fn execute_browser_snapshot() -> Result<String> {
@@ -144,23 +140,38 @@ pub async fn execute_browser_snapshot_for_session(session_id: &str) -> Result<St
     Ok(snapshot.tree_text)
 }
 
-pub async fn execute_browser_click(args: &ClickArgs) -> Result<String> {
-    let session_key = args.session_id.as_deref().unwrap_or("default");
-    let session = get_or_launch_browser_for_session(session_key).await?;
+pub async fn execute_browser_click_for_session(
+    session_id: &str,
+    args: &ClickArgs,
+) -> Result<String> {
+    let session = get_or_launch_browser_for_session(session_id).await?;
     session.click(&args.target_ref).await
 }
 
-pub async fn execute_browser_type(args: &TypeArgs) -> Result<String> {
-    let session_key = args.session_id.as_deref().unwrap_or("default");
-    let session = get_or_launch_browser_for_session(session_key).await?;
+pub async fn execute_browser_click(args: &ClickArgs) -> Result<String> {
+    execute_browser_click_for_session("default", args).await
+}
+
+pub async fn execute_browser_type_for_session(session_id: &str, args: &TypeArgs) -> Result<String> {
+    let session = get_or_launch_browser_for_session(session_id).await?;
     session.type_text(&args.target_ref, &args.text).await
 }
 
-pub async fn execute_browser_screenshot(args: &ScreenshotArgs) -> Result<String> {
-    let session_key = args.session_id.as_deref().unwrap_or("default");
-    let session = get_or_launch_browser_for_session(session_key).await?;
+pub async fn execute_browser_type(args: &TypeArgs) -> Result<String> {
+    execute_browser_type_for_session("default", args).await
+}
+
+pub async fn execute_browser_screenshot_for_session(
+    session_id: &str,
+    args: &ScreenshotArgs,
+) -> Result<String> {
+    let session = get_or_launch_browser_for_session(session_id).await?;
     let path = args.path.as_deref().map(std::path::Path::new);
     session.screenshot(path).await
+}
+
+pub async fn execute_browser_screenshot(args: &ScreenshotArgs) -> Result<String> {
+    execute_browser_screenshot_for_session("default", args).await
 }
 
 pub async fn execute_browser_console() -> Result<String> {
@@ -204,10 +215,16 @@ pub async fn execute_browser_network_for_session(session_id: &str) -> Result<Str
     Ok(out)
 }
 
-pub async fn execute_browser_evaluate(args: &EvaluateArgs) -> Result<String> {
-    let session_key = args.session_id.as_deref().unwrap_or("default");
-    let session = get_or_launch_browser_for_session(session_key).await?;
+pub async fn execute_browser_evaluate_for_session(
+    session_id: &str,
+    args: &EvaluateArgs,
+) -> Result<String> {
+    let session = get_or_launch_browser_for_session(session_id).await?;
     session.evaluate(&args.script).await
+}
+
+pub async fn execute_browser_evaluate(args: &EvaluateArgs) -> Result<String> {
+    execute_browser_evaluate_for_session("default", args).await
 }
 
 pub async fn close_browser_session(session_id: &str) -> Result<bool> {
@@ -222,7 +239,6 @@ mod tests {
     async fn test_execute_browser_tool_suite() {
         let nav_res = match execute_browser_navigate(&NavigateArgs {
             url: "https://crates.io".to_string(),
-            session_id: None,
         })
         .await
         {
@@ -240,7 +256,6 @@ mod tests {
 
         let click_res = execute_browser_click(&ClickArgs {
             target_ref: "@e1".to_string(),
-            session_id: None,
         })
         .await
         .unwrap();
@@ -249,7 +264,6 @@ mod tests {
         let type_res = execute_browser_type(&TypeArgs {
             target_ref: "@e1".to_string(),
             text: "tokio".to_string(),
-            session_id: None,
         })
         .await
         .unwrap();
@@ -260,6 +274,32 @@ mod tests {
 
         let net_res = execute_browser_network().await.unwrap();
         assert!(net_res.contains("GET"));
+    }
+
+    #[tokio::test]
+    async fn test_execute_browser_navigate_ssrf_rejection() {
+        let targets = [
+            "http://127.0.0.1:8080",
+            "http://localhost:3000",
+            "http://169.254.169.254/latest/meta-data",
+            "http://metadata.google.internal",
+            "http://10.0.0.1",
+            "http://192.168.1.1",
+            "http://172.16.0.1",
+            "http://[::1]:8080",
+            "http://[::ffff:127.0.0.1]:8080",
+        ];
+
+        for target in targets {
+            let res = execute_browser_navigate(&NavigateArgs {
+                url: target.to_string(),
+            })
+            .await;
+            assert!(
+                res.is_err(),
+                "Target '{target}' should have been blocked by SSRF/DNS-rebinding protection"
+            );
+        }
     }
 
     #[tokio::test]

@@ -8,7 +8,6 @@ pub mod client;
 pub mod connection_multiplexer;
 pub mod daemon_lifecycle;
 pub mod http_server;
-pub mod pairing;
 pub mod protocol;
 pub mod protocol_schema;
 pub mod relay;
@@ -16,7 +15,7 @@ pub mod test_client;
 pub mod turn_admission;
 pub mod web_assets;
 
-pub use auth::{AuthError, AuthManager, AuthScope, ClientIdentity, TokenInfo};
+pub use auth::{AuthError, AuthManager, AuthScope, ClientIdentity};
 pub use client::AppServerClient;
 pub use connection_multiplexer::{ClientKind, ClientMetadata, ConnectionMultiplexer};
 pub use daemon_lifecycle::{
@@ -25,7 +24,6 @@ pub use daemon_lifecycle::{
     setup_control_socket_rendezvous,
 };
 pub use http_server::{HttpServerConfig, run_http_server, run_http_server_with_listener};
-pub use pairing::{EncryptedTunnel, PairingClient, PairingCredentials, PairingHost};
 pub use protocol::{AppServer, JsonRpcError, JsonRpcNotification, JsonRpcRequest, JsonRpcResponse};
 pub use protocol_schema::{generate_protocol_schema, write_protocol_schema};
 pub use relay::stdio_to_uds;

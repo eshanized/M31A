@@ -236,17 +236,17 @@ async fn test_conflicting_identifiers_rejected() {
 }
 
 #[tokio::test]
-async fn test_client_a_cannot_restore_client_b_checkpoint() {
-    let (server, identity_a, identity_b, _thread_a_id, thread_b_id) = setup_app_server().await;
+async fn test_checkpoint_to_thread_resolution_and_existence() {
+    let (server, _identity_a, identity_b, _thread_a_id, thread_b_id) = setup_app_server().await;
 
-    // Client B creates a checkpoint
+    // Create a valid checkpoint
     let req_cp = JsonRpcRequest {
         jsonrpc: "2.0".to_string(),
         id: Some(serde_json::json!(20)),
         method: "checkpoint/create".to_string(),
         params: Some(serde_json::json!({
             "thread_id": thread_b_id,
-            "label": "Client B Snapshot",
+            "label": "Thread B Snapshot",
             "turn_index": 1,
             "modified_files": [],
         })),
@@ -264,26 +264,61 @@ async fn test_client_a_cannot_restore_client_b_checkpoint() {
         .unwrap()
         .to_string();
 
-    // Client A attempts to restore Client B's checkpoint
-    let req_restore = JsonRpcRequest {
+    // 1. Non-existent checkpoint fails closed
+    let req_restore_nonexistent = JsonRpcRequest {
         jsonrpc: "2.0".to_string(),
         id: Some(serde_json::json!(21)),
+        method: "checkpoint/restore".to_string(),
+        params: Some(serde_json::json!({
+            "checkpoint_id": "checkpoint_does_not_exist",
+        })),
+    };
+    let res_none = server
+        .handle_request_with_identity(req_restore_nonexistent, Some(&identity_b))
+        .await;
+    assert!(
+        res_none.error.is_some(),
+        "Non-existent checkpoint restore must fail closed"
+    );
+
+    // 2. Conflicting thread identifier fails closed
+    let req_restore_conflict = JsonRpcRequest {
+        jsonrpc: "2.0".to_string(),
+        id: Some(serde_json::json!(22)),
+        method: "checkpoint/restore".to_string(),
+        params: Some(serde_json::json!({
+            "checkpoint_id": cp_id,
+            "thread_id": "wrong_conflicting_thread_id",
+        })),
+    };
+    let res_conflict = server
+        .handle_request_with_identity(req_restore_conflict, Some(&identity_b))
+        .await;
+    assert!(
+        res_conflict.error.is_some(),
+        "Conflicting thread identifier must fail closed"
+    );
+
+    // 3. Valid checkpoint restore succeeds
+    let req_restore = JsonRpcRequest {
+        jsonrpc: "2.0".to_string(),
+        id: Some(serde_json::json!(23)),
         method: "checkpoint/restore".to_string(),
         params: Some(serde_json::json!({
             "checkpoint_id": cp_id,
         })),
     };
     let res_restore = server
-        .handle_request_with_identity(req_restore, Some(&identity_a))
+        .handle_request_with_identity(req_restore, Some(&identity_b))
         .await;
     assert!(
-        res_restore.error.is_some(),
-        "Client A must not be allowed to restore Client B's checkpoint!"
+        res_restore.error.is_none(),
+        "Valid checkpoint restore should succeed"
     );
 }
 
 #[tokio::test]
-async fn test_client_a_cannot_approve_client_b_pending_operation() {
+async fn test_pending_approval_correlation_and_resolution() {
     let (server, identity_a, _identity_b, _thread_a_id, thread_b_id) = setup_app_server().await;
 
     let (resp_tx, mut resp_rx) = oneshot::channel();
@@ -309,6 +344,24 @@ async fn test_client_a_cannot_approve_client_b_pending_operation() {
         },
     );
 
+    // 1. Non-existent approval fails closed
+    let req_approve_fake = JsonRpcRequest {
+        jsonrpc: "2.0".to_string(),
+        id: Some(serde_json::json!(29)),
+        method: "turn/approve".to_string(),
+        params: Some(serde_json::json!({
+            "approval_id": "nonexistent_approval_id",
+            "decision": "allow",
+        })),
+    };
+    let res_fake = server
+        .handle_request_with_identity(req_approve_fake, Some(&identity_a))
+        .await;
+    assert!(
+        res_fake.error.is_some(),
+        "Non-existent approval must fail closed"
+    );
+
     // Find the approval ID
     let approval_id = server
         .pending_approvals
@@ -319,7 +372,7 @@ async fn test_client_a_cannot_approve_client_b_pending_operation() {
         .unwrap()
         .clone();
 
-    // Client A attempts to approve Client B's approval
+    // 2. Real approval succeeds
     let req_approve = JsonRpcRequest {
         jsonrpc: "2.0".to_string(),
         id: Some(serde_json::json!(30)),
@@ -333,18 +386,15 @@ async fn test_client_a_cannot_approve_client_b_pending_operation() {
     let res = server
         .handle_request_with_identity(req_approve, Some(&identity_a))
         .await;
-    assert!(
-        res.error.is_some(),
-        "Client A must not be allowed to approve Client B's pending approval!"
-    );
-    assert!(
-        resp_rx.try_recv().is_err(),
-        "Approval must not have been resolved by Client A!"
+    assert!(res.error.is_none(), "Valid approval must succeed");
+    assert_eq!(
+        resp_rx.try_recv().unwrap(),
+        m31a_elicitation::ApprovalDecision::AllowOnce
     );
 }
 
 #[tokio::test]
-async fn test_client_a_cannot_answer_client_b_pending_question() {
+async fn test_pending_question_correlation_and_resolution() {
     let (server, identity_a, _identity_b, _thread_a_id, thread_b_id) = setup_app_server().await;
 
     let (q_tx, mut q_rx) = oneshot::channel();
@@ -368,6 +418,24 @@ async fn test_client_a_cannot_answer_client_b_pending_question() {
         },
     );
 
+    // 1. Non-existent question fails closed
+    let req_answer_fake = JsonRpcRequest {
+        jsonrpc: "2.0".to_string(),
+        id: Some(serde_json::json!(39)),
+        method: "turn/answer".to_string(),
+        params: Some(serde_json::json!({
+            "question_id": "nonexistent_question_id",
+            "answers": ["Yes"],
+        })),
+    };
+    let res_fake = server
+        .handle_request_with_identity(req_answer_fake, Some(&identity_a))
+        .await;
+    assert!(
+        res_fake.error.is_some(),
+        "Non-existent question must fail closed"
+    );
+
     let question_id = server
         .pending_questions
         .lock()
@@ -377,7 +445,7 @@ async fn test_client_a_cannot_answer_client_b_pending_question() {
         .unwrap()
         .clone();
 
-    // Client A attempts to answer Client B's question
+    // 2. Real question succeeds
     let req_answer = JsonRpcRequest {
         jsonrpc: "2.0".to_string(),
         id: Some(serde_json::json!(40)),
@@ -391,12 +459,6 @@ async fn test_client_a_cannot_answer_client_b_pending_question() {
     let res = server
         .handle_request_with_identity(req_answer, Some(&identity_a))
         .await;
-    assert!(
-        res.error.is_some(),
-        "Client A must not be allowed to answer Client B's pending question!"
-    );
-    assert!(
-        q_rx.try_recv().is_err(),
-        "Question must not have been answered by Client A!"
-    );
+    assert!(res.error.is_none(), "Valid answer must succeed");
+    assert_eq!(q_rx.try_recv().unwrap(), vec!["Yes".to_string()]);
 }

@@ -1,8 +1,11 @@
 """Bazel build rules for M31A releases and packaging.
 
-Defines production-grade custom rules for compiling the M31A standalone binary,
-generating multi-platform release archives (tar.gz), extracting protocol JSON schema
-bundles, executing genuine E2E benchmarks, and running workspace test suites.
+NOTE: These Bazel rules wrap the host Cargo and Rust toolchains (`cargo build`, `cargo test`).
+They run in non-hermetic local execution mode (`local = 1`, `no-sandbox = 1`) delegating compilation
+and testing directly to the host's installed `cargo` environment rather than hermetic rules_rust toolchains.
+
+Defines rules for compiling the M31A standalone binary via Cargo, generating release archives (tar.gz),
+extracting protocol schema bundles, executing genuine E2E benchmarks, and running workspace test suites.
 """
 
 def _m31a_binary_impl(ctx):

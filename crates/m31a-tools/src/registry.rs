@@ -51,6 +51,9 @@ pub struct ToolRegistry {
     pub message_history: Option<Arc<Vec<ChatMessage>>>,
     /// Active session/thread identifier for session-scoped tool execution.
     pub session_id: Option<String>,
+    /// Verified host approval tokens for sensitive plugin installations.
+    pub host_plugin_approvals:
+        Arc<std::sync::Mutex<Vec<crate::plugin_install::HostPluginApproval>>>,
 }
 
 impl Default for ToolRegistry {
@@ -101,6 +104,7 @@ impl ToolRegistry {
             compactor: None,
             message_history: None,
             session_id: None,
+            host_plugin_approvals: Arc::new(std::sync::Mutex::new(Vec::new())),
         }
     }
 
@@ -177,6 +181,7 @@ impl ToolRegistry {
             compactor: None,
             message_history: None,
             session_id: None,
+            host_plugin_approvals: Arc::new(std::sync::Mutex::new(Vec::new())),
         }
     }
 
@@ -247,6 +252,37 @@ impl ToolRegistry {
     /// Evaluates the granular security and effect classification of a tool invocation.
     pub fn tool_effect(&self, name: &str, args_str: Option<&str>) -> m31a_execpolicy::ToolEffect {
         m31a_execpolicy::classify_tool(name, args_str)
+    }
+
+    /// Grants a verified host approval token for a plugin action.
+    pub fn grant_host_plugin_approval(&self, approval: crate::plugin_install::HostPluginApproval) {
+        let mut store = self.host_plugin_approvals.lock().unwrap();
+        store.push(approval);
+    }
+
+    /// Consumes a valid host approval token matching the specified tool and action.
+    /// Enforces one-time consumption and rejects expired tickets.
+    pub fn consume_host_plugin_approval(
+        &self,
+        tool_id: &str,
+        action: crate::plugin_install::DiscoverableToolAction,
+        turn_id: Option<&str>,
+        call_id: Option<&str>,
+    ) -> Option<crate::plugin_install::HostPluginApproval> {
+        let mut store = self.host_plugin_approvals.lock().unwrap();
+        store.retain(|a| a.granted_at.elapsed() < std::time::Duration::from_secs(120));
+        store
+            .iter()
+            .position(|a| a.is_valid_for(tool_id, action, turn_id, call_id))
+            .map(|pos| store.remove(pos))
+    }
+
+    /// Returns true if the tool name corresponds to a registered builtin, dynamic, MCP, or plugin tool.
+    pub fn is_known_tool(&self, name: &str) -> bool {
+        if name.starts_with("mcp__") || name.starts_with("mcp_") || name.contains(':') {
+            return true;
+        }
+        self.definitions().iter().any(|d| d.function.name == name)
     }
 
     /// Sets the active session/thread identifier on this registry.
@@ -1506,7 +1542,12 @@ impl ToolRegistry {
                         "type": "object",
                         "properties": {
                             "topic": { "type": "string", "description": "Concise topic title (e.g. 'Clippy Enforce', 'Test DB Pattern')." },
-                            "detail": { "type": "string", "description": "Detailed explanation of the learned pattern or rule." }
+                            "detail": { "type": "string", "description": "Detailed explanation of the learned pattern or rule." },
+                            "embedding": {
+                                "type": "array",
+                                "items": { "type": "number" },
+                                "description": "Optional dense semantic embedding vector for hybrid search."
+                            }
                         },
                         "required": ["topic", "detail"]
                     }),
@@ -1516,11 +1557,16 @@ impl ToolRegistry {
                 tool_type: "function".to_string(),
                 function: FunctionDefinition {
                     name: "search_memories".to_string(),
-                    description: "Search cross-session accumulated memories and project rules by keyword.".to_string(),
+                    description: "Search cross-session accumulated memories and project rules using hybrid keyword and semantic retrieval.".to_string(),
                     parameters: json!({
                         "type": "object",
                         "properties": {
-                            "query": { "type": "string", "description": "Keyword search query." }
+                            "query": { "type": "string", "description": "Keyword search query." },
+                            "embedding": {
+                                "type": "array",
+                                "items": { "type": "number" },
+                                "description": "Optional dense semantic embedding vector for hybrid search."
+                            }
                         },
                         "required": ["query"]
                     }),
@@ -3494,31 +3540,45 @@ impl ToolRegistry {
                 let nav_args: crate::browser::NavigateArgs =
                     serde_json::from_value(args.clone())
                         .context("Failed to deserialize 'browser_navigate' tool arguments")?;
-                crate::browser::execute_browser_navigate(&nav_args).await
+                let session_id = self.session_id.as_deref().unwrap_or("default");
+                crate::browser::execute_browser_navigate_for_session(session_id, &nav_args).await
             }
-            "browser_snapshot" => crate::browser::execute_browser_snapshot().await,
+            "browser_snapshot" => {
+                let session_id = self.session_id.as_deref().unwrap_or("default");
+                crate::browser::execute_browser_snapshot_for_session(session_id).await
+            }
             "browser_click" => {
                 let click_args: crate::browser::ClickArgs = serde_json::from_value(args.clone())
                     .context("Failed to deserialize 'browser_click' tool arguments")?;
-                crate::browser::execute_browser_click(&click_args).await
+                let session_id = self.session_id.as_deref().unwrap_or("default");
+                crate::browser::execute_browser_click_for_session(session_id, &click_args).await
             }
             "browser_type" => {
                 let type_args: crate::browser::TypeArgs = serde_json::from_value(args.clone())
                     .context("Failed to deserialize 'browser_type' tool arguments")?;
-                crate::browser::execute_browser_type(&type_args).await
+                let session_id = self.session_id.as_deref().unwrap_or("default");
+                crate::browser::execute_browser_type_for_session(session_id, &type_args).await
             }
             "browser_screenshot" => {
                 let snap_args: crate::browser::ScreenshotArgs =
                     serde_json::from_value(args.clone())
                         .context("Failed to deserialize 'browser_screenshot' tool arguments")?;
-                crate::browser::execute_browser_screenshot(&snap_args).await
+                let session_id = self.session_id.as_deref().unwrap_or("default");
+                crate::browser::execute_browser_screenshot_for_session(session_id, &snap_args).await
             }
-            "browser_console" => crate::browser::execute_browser_console().await,
-            "browser_network" => crate::browser::execute_browser_network().await,
+            "browser_console" => {
+                let session_id = self.session_id.as_deref().unwrap_or("default");
+                crate::browser::execute_browser_console_for_session(session_id).await
+            }
+            "browser_network" => {
+                let session_id = self.session_id.as_deref().unwrap_or("default");
+                crate::browser::execute_browser_network_for_session(session_id).await
+            }
             "browser_evaluate" => {
                 let eval_args: crate::browser::EvaluateArgs = serde_json::from_value(args.clone())
                     .context("Failed to deserialize 'browser_evaluate' tool arguments")?;
-                crate::browser::execute_browser_evaluate(&eval_args).await
+                let session_id = self.session_id.as_deref().unwrap_or("default");
+                crate::browser::execute_browser_evaluate_for_session(session_id, &eval_args).await
             }
             "verify_visual_state" => {
                 let visual_args: crate::vibe_tools::VerifyVisualStateArgs =
@@ -4532,8 +4592,11 @@ impl ToolRegistry {
                     .get("detail")
                     .and_then(|v| v.as_str())
                     .context("Missing 'detail'")?;
+                let embedding: Option<Vec<f32>> = args
+                    .get("embedding")
+                    .and_then(|v| serde_json::from_value(v.clone()).ok());
                 let mgr = m31a_core::MemoryManager::new()?;
-                let item = mgr.consolidate_fact(topic, detail)?;
+                let item = mgr.consolidate_fact_with_embedding(topic, detail, embedding)?;
                 Ok(format!(
                     "Consolidated memory `{}` on topic '{}' (citations: {}):\n{}",
                     item.id, item.topic, item.citation_count, item.detail
@@ -4544,14 +4607,18 @@ impl ToolRegistry {
                     .get("query")
                     .and_then(|v| v.as_str())
                     .context("Missing 'query'")?;
+                let embedding: Option<Vec<f32>> = args
+                    .get("embedding")
+                    .and_then(|v| serde_json::from_value(v.clone()).ok());
                 let mgr = m31a_core::MemoryManager::new()?;
-                let hits = mgr.search_memories(query);
+                let hits = mgr.search_memories_hybrid(query, embedding.as_deref());
                 if hits.is_empty() {
                     Ok(format!("No memories found matching query `{query}`."))
                 } else {
                     let lines = hits
                         .iter()
-                        .map(|i| {
+                        .map(|s| {
+                            let i = &s.item;
                             format!(
                                 "- **{}** `[{}]` (citations: {}): {}",
                                 i.topic, i.id, i.citation_count, i.detail
@@ -5217,11 +5284,10 @@ impl ToolRegistry {
                     _ => crate::plugin_install::DiscoverableToolAction::Install,
                 };
 
-                let trusted_user_confirmed = args
-                    .get("trusted_user_confirmed")
-                    .or_else(|| args.get("_trusted_approval"))
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false);
+                // Host approval must come strictly from the host approval store!
+                // Any 'trusted_user_confirmed' or '_trusted_approval' passed in model arguments is ignored.
+                let host_approval =
+                    self.consume_host_plugin_approval(tool_id, action_type, None, None);
 
                 let res = crate::plugin_install::handle_request_plugin_install(
                     crate::plugin_install::RequestPluginInstallArgs {
@@ -5229,10 +5295,18 @@ impl ToolRegistry {
                         tool_type,
                         action_type,
                         suggest_reason: suggest_reason.to_string(),
-                        user_confirmed: None,
                     },
-                    trusted_user_confirmed,
+                    host_approval.as_ref(),
                 );
+
+                if res.completed {
+                    let _ = self
+                        .plugin_manager
+                        .load_plugins_from_dir(&m31a_core::Config::config_dir().join("plugins"))
+                        .await;
+                    let _ = self.register_plugin_tools().await;
+                }
+
                 Ok(serde_json::to_string_pretty(&res)?)
             }
             "git_status" => {
@@ -5446,6 +5520,8 @@ impl ToolRegistry {
                     .and_then(|v| v.as_u64())
                     .map(|n| n as usize);
 
+                let offline_preview = args.get("offline_preview").and_then(|v| v.as_bool());
+
                 let req = crate::image_gen::ImageGenerationRequest {
                     prompt,
                     size,
@@ -5453,10 +5529,11 @@ impl ToolRegistry {
                     transparent_background,
                     referenced_image_paths,
                     num_last_images_to_include,
+                    offline_preview,
                 };
 
                 let save_root = m31a_core::Config::config_dir();
-                let session_id = "default_session";
+                let session_id = self.session_id.as_deref().unwrap_or("default_session");
                 let res =
                     crate::image_gen::execute_image_generation(&save_root, session_id, req).await?;
                 Ok(serde_json::to_string_pretty(&res)?)
@@ -6663,16 +6740,39 @@ mod tests {
         assert!(unconfirmed_res.contains("\"completed\": false"));
         assert!(unconfirmed_res.contains("\"user_confirmed\": false"));
 
-        // 3. request_plugin_install - with trusted host confirmation succeeds
+        // 3. Model attempting to spoof approval via trusted_user_confirmed in arguments is rejected!
+        let spoofed_res = registry.execute(
+            "request_plugin_install",
+            r#"{"tool_id": "github-mcp", "tool_type": "plugin", "action_type": "install", "suggest_reason": "Need GitHub tools", "trusted_user_confirmed": true, "_trusted_approval": true}"#,
+            &cwd,
+            SandboxPolicy::WorkspaceWrite,
+        ).await.unwrap();
+        assert!(spoofed_res.contains("\"completed\": false"));
+        assert!(spoofed_res.contains("\"user_confirmed\": false"));
+
+        // 4. request_plugin_install - with real host approval succeeds
+        registry.grant_host_plugin_approval(crate::plugin_install::HostPluginApproval::new(
+            "github-mcp",
+            crate::plugin_install::DiscoverableToolAction::Install,
+        ));
         let req_res = registry.execute(
             "request_plugin_install",
-            r#"{"tool_id": "github-mcp", "tool_type": "plugin", "action_type": "install", "suggest_reason": "Need GitHub tools", "trusted_user_confirmed": true}"#,
+            r#"{"tool_id": "github-mcp", "tool_type": "plugin", "action_type": "install", "suggest_reason": "Need GitHub tools"}"#,
             &cwd,
             SandboxPolicy::WorkspaceWrite,
         ).await.unwrap();
         assert!(req_res.contains("\"completed\": true"));
         assert!(req_res.contains("\"user_confirmed\": true"));
         assert!(req_res.contains("github-mcp"));
+
+        // 5. One-time consumption: replay attempt fails closed
+        let replay_res = registry.execute(
+            "request_plugin_install",
+            r#"{"tool_id": "github-mcp", "tool_type": "plugin", "action_type": "install", "suggest_reason": "Need GitHub tools"}"#,
+            &cwd,
+            SandboxPolicy::WorkspaceWrite,
+        ).await.unwrap();
+        assert!(replay_res.contains("\"completed\": false"));
     }
 
     #[tokio::test]
@@ -6782,11 +6882,22 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let cwd = tmp.path().to_path_buf();
 
-        // 1. imagegen
-        let img_res = registry
+        // 1. imagegen fails cleanly without provider or offline_preview
+        let img_err = registry
             .execute(
                 "imagegen",
                 r#"{"prompt": "A sunset over mountains", "size": "1024x1024"}"#,
+                &cwd,
+                SandboxPolicy::WorkspaceWrite,
+            )
+            .await;
+        assert!(img_err.is_err(), "Must fail when no provider is configured");
+
+        // 2. imagegen succeeds in explicit offline preview mode
+        let img_res = registry
+            .execute(
+                "imagegen",
+                r#"{"prompt": "A sunset over mountains", "size": "1024x1024", "offline_preview": true}"#,
                 &cwd,
                 SandboxPolicy::WorkspaceWrite,
             )
@@ -6795,8 +6906,9 @@ mod tests {
         assert!(img_res.contains("call_id"));
         assert!(img_res.contains("image_path"));
         assert!(img_res.contains("format"));
+        assert!(img_res.contains("[SYNTHETIC TEST IMAGE]"));
 
-        // 2. multi_env_copy_file
+        // 3. multi_env_copy_file
         let src_file = cwd.join("env_src.txt");
         let dst_file = cwd.join("env_dst.txt");
         tokio::fs::write(&src_file, b"cross-environment payload")

@@ -343,7 +343,7 @@ impl VoiceSessionCoordinator {
         if AudioDeviceManager::enumerate_devices().is_empty() {
             self.status = VoiceSessionStatus::HardwareUnavailable;
         } else {
-            self.status = VoiceSessionStatus::Connected;
+            self.status = VoiceSessionStatus::Connecting;
         }
     }
 
@@ -355,7 +355,42 @@ impl VoiceSessionCoordinator {
                 "Cannot start voice session: no audio input/output devices detected on host"
             );
         }
+        self.status = VoiceSessionStatus::Connecting;
+        Ok(())
+    }
+
+    /// Explicitly transitions to `Connected` only when an active audio stream or SDP session is established.
+    pub fn establish_stream(&mut self) -> Result<()> {
+        if self.status != VoiceSessionStatus::Connecting {
+            anyhow::bail!(
+                "Cannot establish audio stream: session is in {:?} state, expected Connecting",
+                self.status
+            );
+        }
         self.status = VoiceSessionStatus::Connected;
+        Ok(())
+    }
+
+    /// Handles host voice control messages, transitioning session status accordingly.
+    pub fn handle_control_message(&mut self, msg: VoiceHostControlMessage) -> Result<()> {
+        match msg {
+            VoiceHostControlMessage::StartVoiceSession { .. } => {
+                self.try_start_session()?;
+            }
+            VoiceHostControlMessage::StopVoiceSession => {
+                self.stop_session();
+            }
+            VoiceHostControlMessage::UpdateControls { controls } => {
+                self.controls = controls;
+            }
+            VoiceHostControlMessage::OfferSdp { .. }
+            | VoiceHostControlMessage::AnswerSdp { .. } => {
+                if self.status == VoiceSessionStatus::Connecting {
+                    self.establish_stream()?;
+                }
+            }
+            VoiceHostControlMessage::AudioLevelUpdate { .. } => {}
+        }
         Ok(())
     }
 
@@ -464,6 +499,10 @@ mod tests {
         assert_eq!(coord.status, VoiceSessionStatus::Idle);
 
         coord.start_session();
+        assert_eq!(coord.status, VoiceSessionStatus::Connecting);
+
+        // Stream establishment is required to reach Connected
+        coord.establish_stream().expect("must establish stream");
         assert_eq!(coord.status, VoiceSessionStatus::Connected);
 
         let samples = vec![10000i16; 100];
@@ -478,5 +517,19 @@ mod tests {
 
         coord.stop_session();
         assert_eq!(coord.status, VoiceSessionStatus::Closed);
+    }
+
+    #[test]
+    fn test_voice_session_sdp_handshake_establishes_connection() {
+        let mut coord = VoiceSessionCoordinator::new();
+        coord.start_session();
+        assert_eq!(coord.status, VoiceSessionStatus::Connecting);
+
+        let sdp =
+            SessionDescription::new("v=0\r\no=- 12345 2 IN IP4 127.0.0.1\r\ns=-\r\n").unwrap();
+        coord
+            .handle_control_message(VoiceHostControlMessage::AnswerSdp { sdp })
+            .expect("handshake must succeed");
+        assert_eq!(coord.status, VoiceSessionStatus::Connected);
     }
 }

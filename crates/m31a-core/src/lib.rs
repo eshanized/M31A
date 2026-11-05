@@ -46,7 +46,6 @@ pub mod lru_cache;
 pub mod memories;
 pub mod message_board_client;
 pub mod message_history;
-pub mod oauth_flow;
 pub mod otel_trace;
 pub mod otel_trace_websocket;
 pub mod path_utils;
@@ -86,7 +85,6 @@ pub mod uds;
 pub mod user_verification;
 pub mod watcher;
 pub mod websocket_auth;
-pub mod workload_identity;
 pub mod worktree;
 pub mod world_state;
 
@@ -223,13 +221,6 @@ pub use message_history::{
     DEFAULT_HISTORY_FILENAME, DEFAULT_HISTORY_MAX_BYTES, HISTORY_SOFT_CAP_RATIO, HistoryBatch,
     HistoryBatchEntry, HistoryEntry, append_history, lookup_history_batch, trim_history_if_needed,
 };
-pub use oauth_flow::{
-    AuthCodeFlowConfig, DEFAULT_AUTH_URL, DEFAULT_DEVICE_POLL_INTERVAL_SECS,
-    DeviceAuthRequestConfig, DeviceCodeResponse, DevicePollResult, OAuthToken, PkcePair,
-    compute_s256_challenge, execute_browser_pkce_flow, execute_device_code_flow,
-    generate_pkce_pair, poll_device_token_once, refresh_oauth_token, request_device_code,
-    revoke_oauth_token, validate_code_verifier,
-};
 pub use otel_trace::{SpanTimer, TraceContext, W3C_TRACEPARENT_HEADER};
 pub use otel_trace_websocket::{
     MAX_TRACE_WEBSOCKET_FRAME_BYTES, TRACE_CHANNEL_CAPACITY, TraceWebSocket,
@@ -337,8 +328,4 @@ pub use user_verification::{
 };
 pub use watcher::{FileWatcherEvent, WatchPath, WorkspaceWatcher};
 pub use websocket_auth::{WebsocketAuthCliMode, WebsocketAuthPolicy, constant_time_eq_32};
-pub use workload_identity::{
-    MAX_ASSERTION_SIZE_BYTES, WorkloadIdentityConfig, WorkloadIdentityExchange,
-    WorkloadIdentityToken,
-};
 pub use worktree::{ManagedWorktree, WorktreeManager};

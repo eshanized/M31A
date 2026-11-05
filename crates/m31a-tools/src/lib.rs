@@ -58,10 +58,14 @@ pub use namespace::{
 pub use output_schema::{OutputValidationError, ToolOutputSchema};
 
 pub use browser::{
-    ClickArgs, EvaluateArgs, NavigateArgs, ScreenshotArgs, TypeArgs, execute_browser_click,
-    execute_browser_console, execute_browser_evaluate, execute_browser_navigate,
-    execute_browser_network, execute_browser_screenshot, execute_browser_snapshot,
-    execute_browser_type,
+    ClickArgs, EvaluateArgs, NavigateArgs, ScreenshotArgs, TypeArgs, close_browser_session,
+    execute_browser_click, execute_browser_click_for_session, execute_browser_console,
+    execute_browser_console_for_session, execute_browser_evaluate,
+    execute_browser_evaluate_for_session, execute_browser_navigate,
+    execute_browser_navigate_for_session, execute_browser_network,
+    execute_browser_network_for_session, execute_browser_screenshot,
+    execute_browser_screenshot_for_session, execute_browser_snapshot,
+    execute_browser_snapshot_for_session, execute_browser_type, execute_browser_type_for_session,
 };
 pub use debugger::{
     Breakpoint, DapClient, DebugBreakpointArgs, DebugBreakpointResult, DebugInspectArgs,
@@ -87,8 +91,9 @@ pub use multi_env_copy::{
 };
 pub use patch::{ApplyPatchArgs, PatchResult, apply_patch_to_workspace, parse_patch};
 pub use plugin_install::{
-    DiscoverableTool, DiscoverableToolAction, DiscoverableToolType, RequestPluginInstallArgs,
-    RequestPluginInstallResult, handle_request_plugin_install, list_discoverable_tools,
+    DiscoverableTool, DiscoverableToolAction, DiscoverableToolType, HostPluginApproval,
+    RequestPluginInstallArgs, RequestPluginInstallResult, handle_request_plugin_install,
+    list_discoverable_tools,
 };
 pub use pr::{IssueDetails, PullRequestManager, PullRequestResult};
 pub use question::{

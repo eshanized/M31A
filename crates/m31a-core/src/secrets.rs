@@ -23,20 +23,24 @@ use std::os::unix::fs::OpenOptionsExt;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LocalSecretsNamespace {
-    /// General managed user secrets and API keys (e.g. OpenAI, Anthropic, GitHub).
+    /// General managed user secrets and integration keys (e.g. GitHub, AWS, custom).
     ManagedSecrets,
-    /// M31A core authentication tokens and identity credentials.
-    M31aAuth,
+    /// Model provider API credentials (e.g. NVIDIA_API_KEY, OpenAI, Anthropic).
+    Provider,
     /// MCP server OAuth access and refresh tokens.
     McpOAuth,
     /// Gateway and proxy OAuth credentials.
     GatewayOAuth,
+    /// Deprecated M31A account authentication namespace, preserved for safe, idempotent migration.
+    #[serde(alias = "m31a_auth")]
+    M31aAuth,
 }
 
 impl LocalSecretsNamespace {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::ManagedSecrets => "managed_secrets",
+            Self::Provider => "provider",
             Self::M31aAuth => "m31a_auth",
             Self::McpOAuth => "mcp_oauth",
             Self::GatewayOAuth => "gateway_oauth",
@@ -46,6 +50,7 @@ impl LocalSecretsNamespace {
     pub fn file_name(&self) -> &'static str {
         match self {
             Self::ManagedSecrets => "managed.vault",
+            Self::Provider => "provider.vault",
             Self::M31aAuth => "auth.vault",
             Self::McpOAuth => "mcp_oauth.vault",
             Self::GatewayOAuth => "gateway_oauth.vault",
@@ -168,6 +173,7 @@ impl LocalEncryptedVault {
             }
         }
 
+        let is_explicit = explicit_key.is_some();
         let master_key = match explicit_key {
             Some(key) => key,
             None => Self::resolve_default_master_key(&vault_dir)?,
@@ -180,11 +186,15 @@ impl LocalEncryptedVault {
             ));
         }
 
-        Ok(Self {
+        let vault = Self {
             vault_dir,
             master_key,
             cache: Arc::new(Mutex::new(HashMap::new())),
-        })
+        };
+        if !is_explicit {
+            let _ = vault.migrate_legacy_auth_vault_if_present();
+        }
+        Ok(vault)
     }
 
     /// Default key resolution: reuse persisted random key, or migrate legacy v1
@@ -604,20 +614,88 @@ impl LocalEncryptedVault {
             format!("{}...{}", prefix, suffix)
         }
     }
+
+    /// Migrates external provider API keys out of any legacy `auth.vault` into `provider.vault`
+    /// and safely purges obsolete M31A user account tokens.
+    pub fn migrate_legacy_auth_vault_if_present(&self) -> Result<()> {
+        let auth_path = self.namespace_path(LocalSecretsNamespace::M31aAuth);
+        if !auth_path.exists() {
+            return Ok(());
+        }
+
+        if let Ok(records) = self.load_namespace(LocalSecretsNamespace::M31aAuth)
+            && !records.is_empty()
+        {
+            let mut provider_records = self
+                .load_namespace(LocalSecretsNamespace::Provider)
+                .unwrap_or_default();
+            let mut migrated = false;
+
+            for (key, record) in records {
+                let is_obsolete_token = key == "OAUTH_ACCESS_TOKEN"
+                    || key == "OAUTH_REFRESH_TOKEN"
+                    || key == "OAUTH_EXPIRES_AT"
+                    || key == "OAUTH_ACCOUNT_ID"
+                    || key.starts_with("M31A_AUTH_")
+                    || key.starts_with("m31a_tok_");
+
+                if !is_obsolete_token
+                    && let std::collections::btree_map::Entry::Vacant(e) =
+                        provider_records.entry(key)
+                {
+                    e.insert(record);
+                    migrated = true;
+                }
+            }
+
+            if migrated {
+                let _ = self.save_namespace(LocalSecretsNamespace::Provider, &provider_records);
+                let _ = fs::remove_file(&auth_path);
+            }
+        }
+
+        Ok(())
+    }
 }
 
 impl SecretsBackend for LocalEncryptedVault {
     fn get_secret(&self, namespace: LocalSecretsNamespace, name: &str) -> Result<Option<String>> {
         let mut cache = self.cache.lock().unwrap();
         if let Some(records) = cache.get(&namespace) {
-            return Ok(records.get(name).map(|r| r.value.clone()));
+            if let Some(val) = records.get(name).map(|r| r.value.clone()) {
+                return Ok(Some(val));
+            }
+        } else {
+            let records = self.load_namespace(namespace)?;
+            let val = records.get(name).map(|r| r.value.clone());
+            cache.insert(namespace, records);
+            if val.is_some() {
+                return Ok(val);
+            }
         }
 
-        // Cache miss: load from disk
-        let records = self.load_namespace(namespace)?;
-        let val = records.get(name).map(|r| r.value.clone());
-        cache.insert(namespace, records);
-        Ok(val)
+        // Cross-namespace fallback between Provider and M31aAuth for backward compatibility
+        let fallback_ns = match namespace {
+            LocalSecretsNamespace::Provider => Some(LocalSecretsNamespace::M31aAuth),
+            LocalSecretsNamespace::M31aAuth => Some(LocalSecretsNamespace::Provider),
+            _ => None,
+        };
+
+        if let Some(fb) = fallback_ns {
+            if let Some(records) = cache.get(&fb) {
+                if let Some(val) = records.get(name).map(|r| r.value.clone()) {
+                    return Ok(Some(val));
+                }
+            } else if let Ok(records) = self.load_namespace(fb) {
+                let val = records.get(name).map(|r| r.value.clone());
+                cache.insert(fb, records);
+                if val.is_some() {
+                    return Ok(val);
+                }
+            }
+        }
+
+        Ok(None)
     }
 
     fn set_secret(

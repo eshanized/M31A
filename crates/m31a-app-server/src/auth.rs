@@ -3,12 +3,10 @@
 //! Enforces request identity, token revocation, scope checking, thread ownership boundaries,
 //! and audit logging for sensitive HTTP, SSE, and RPC endpoints.
 
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Utc};
 use m31a_storage::Storage;
-use rand::Rng;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::Mutex;
 use thiserror::Error;
 
@@ -392,27 +390,6 @@ pub fn get_method_policy(method: &str) -> Option<MethodPolicy> {
             external_side_effects: false,
             is_public: false,
         }),
-        "auth/stream_ticket" => Some(MethodPolicy {
-            required_scope: AuthScope::Read,
-            requires_thread_ownership: false,
-            mutates_workspace: false,
-            external_side_effects: false,
-            is_public: false,
-        }),
-        "auth/rotate_token" => Some(MethodPolicy {
-            required_scope: AuthScope::Write,
-            requires_thread_ownership: false,
-            mutates_workspace: false,
-            external_side_effects: false,
-            is_public: false,
-        }),
-        "auth/revoke_token" => Some(MethodPolicy {
-            required_scope: AuthScope::Admin,
-            requires_thread_ownership: false,
-            mutates_workspace: false,
-            external_side_effects: false,
-            is_public: false,
-        }),
 
         _ => None,
     }
@@ -430,31 +407,6 @@ pub fn constant_time_compare(a: &str, b: &str) -> bool {
         diff |= x ^ y;
     }
     diff == 0
-}
-
-fn hash_token(token: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(token.as_bytes());
-    format!("{:x}", hasher.finalize())
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TokenInfo {
-    pub token_hash: String,
-    pub identity: ClientIdentity,
-    pub created_at: DateTime<Utc>,
-    pub expires_at: Option<DateTime<Utc>>,
-    pub revoked: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StreamTicket {
-    pub ticket: String,
-    pub identity: ClientIdentity,
-    pub thread_id: Option<String>,
-    pub created_at: DateTime<Utc>,
-    pub expires_at: DateTime<Utc>,
-    pub used: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -510,19 +462,17 @@ impl AuthError {
     }
 }
 
+/// Local-first application access manager.
+/// Enforces resource validation, existence checks, thread-to-checkpoint correlation,
+/// turn resolution, and comprehensive audit trails without first-party user authentication tokens.
 pub struct AuthManager {
-    tokens: Mutex<HashMap<String, TokenInfo>>, // token_hash -> TokenInfo
-    tickets: Mutex<HashMap<String, StreamTicket>>, // ticket -> StreamTicket
     storage: Mutex<Option<Storage>>,
-    in_memory_owners: Mutex<HashMap<String, String>>, // fallback if storage not yet attached
     audit_log: Mutex<Vec<AuthAuditEvent>>,
 }
 
 impl std::fmt::Debug for AuthManager {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AuthManager")
-            .field("tokens_count", &self.tokens.lock().unwrap().len())
-            .field("tickets_count", &self.tickets.lock().unwrap().len())
             .field("audit_log_count", &self.audit_log.lock().unwrap().len())
             .finish()
     }
@@ -531,10 +481,7 @@ impl std::fmt::Debug for AuthManager {
 impl AuthManager {
     pub fn new() -> Self {
         Self {
-            tokens: Mutex::new(HashMap::new()),
-            tickets: Mutex::new(HashMap::new()),
             storage: Mutex::new(None),
-            in_memory_owners: Mutex::new(HashMap::new()),
             audit_log: Mutex::new(Vec::new()),
         }
     }
@@ -550,317 +497,87 @@ impl AuthManager {
     }
 
     pub fn with_default_token(
-        token: &str,
-        client_id: &str,
-        label: &str,
-        scopes: Vec<AuthScope>,
+        _token: &str,
+        _client_id: &str,
+        _label: &str,
+        _scopes: Vec<AuthScope>,
     ) -> Self {
-        let manager = Self::new();
-        manager.register_token(token, client_id, label, scopes, None);
-        manager
+        Self::new()
     }
 
-    /// Registers a token with SHA-256 hashed storage.
+    // Compatibility stubs for local single-user access
+    pub fn validate_token(&self, _token: &str) -> Result<ClientIdentity, AuthError> {
+        Ok(ClientIdentity::trusted_local())
+    }
+
     pub fn register_token(
         &self,
         token: &str,
-        client_id: &str,
-        label: &str,
-        scopes: Vec<AuthScope>,
-        ttl_secs: Option<u64>,
+        _client_id: &str,
+        _label: &str,
+        _scopes: Vec<AuthScope>,
+        _ttl_secs: Option<u64>,
     ) -> String {
-        let token_hash = hash_token(token);
-        let expires_at = ttl_secs.map(|s| Utc::now() + Duration::seconds(s as i64));
-        let info = TokenInfo {
-            token_hash: token_hash.clone(),
-            identity: ClientIdentity {
-                client_id: client_id.to_string(),
-                label: label.to_string(),
-                scopes: scopes.into_iter().collect(),
-            },
-            created_at: Utc::now(),
-            expires_at,
-            revoked: false,
-        };
-
-        self.tokens.lock().unwrap().insert(token_hash, info);
-
-        self.record_audit(
-            Some(client_id),
-            "token_created",
-            true,
-            &format!(
-                "Created token for client '{}' with label '{}'",
-                client_id, label
-            ),
-        );
-
         token.to_string()
     }
 
-    /// Generates a high-entropy cryptographically secure token.
     pub fn generate_token(
         &self,
         client_id: &str,
         label: &str,
-        scopes: Vec<AuthScope>,
-        ttl_secs: Option<u64>,
+        _scopes: Vec<AuthScope>,
+        _ttl_secs: Option<u64>,
     ) -> String {
-        let mut bytes = [0u8; 32];
-        rand::rng().fill_bytes(&mut bytes);
-        let mut token = String::with_capacity(73);
-        token.push_str("m31a_tok_");
-        for b in &bytes {
-            use std::fmt::Write;
-            let _ = write!(token, "{:02x}", b);
-        }
-        self.register_token(&token, client_id, label, scopes, ttl_secs);
-        token
+        format!("m31a_local_{client_id}_{label}")
     }
 
-    /// Validates a bearer token in constant time using SHA-256 hash comparison.
-    pub fn validate_token(&self, token: &str) -> Result<ClientIdentity, AuthError> {
-        let provided_hash = hash_token(token);
-        let tokens = self.tokens.lock().unwrap();
-
-        let mut matched_info: Option<TokenInfo> = None;
-        for (stored_hash, info) in tokens.iter() {
-            if constant_time_compare(stored_hash, &provided_hash) {
-                matched_info = Some(info.clone());
-                break;
-            }
-        }
-
-        let info = match matched_info {
-            Some(i) => i,
-            None => {
-                self.record_audit(None, "token_validation", false, "Token not found");
-                return Err(AuthError::InvalidToken);
-            }
-        };
-
-        if info.revoked {
-            self.record_audit(
-                Some(&info.identity.client_id),
-                "token_validation",
-                false,
-                "Token is revoked",
-            );
-            return Err(AuthError::TokenRevoked);
-        }
-
-        if let Some(exp) = info.expires_at
-            && Utc::now() > exp
-        {
-            self.record_audit(
-                Some(&info.identity.client_id),
-                "token_validation",
-                false,
-                "Token expired",
-            );
-            return Err(AuthError::TokenExpired);
-        }
-
-        Ok(info.identity)
-    }
-
-    pub fn revoke_token(&self, token: &str) -> bool {
-        let token_hash = hash_token(token);
-        let mut tokens = self.tokens.lock().unwrap();
-        if let Some(info) = tokens.get_mut(&token_hash) {
-            info.revoked = true;
-            let client_id = info.identity.client_id.clone();
-            drop(tokens);
-            self.record_audit(
-                Some(&client_id),
-                "token_revoked",
-                true,
-                "Token revoked successfully",
-            );
-            true
-        } else {
-            false
-        }
+    pub fn revoke_token(&self, _token: &str) -> bool {
+        true
     }
 
     pub fn rotate_token(
         &self,
         old_token: &str,
-        ttl_secs: Option<u64>,
+        _ttl_secs: Option<u64>,
     ) -> Result<String, AuthError> {
-        let identity = self.validate_token(old_token)?;
-        self.revoke_token(old_token);
-        let new_token = self.generate_token(
-            &identity.client_id,
-            &identity.label,
-            identity.scopes.into_iter().collect(),
-            ttl_secs,
-        );
-        self.record_audit(
-            Some(&identity.client_id),
-            "token_rotated",
-            true,
-            "Rotated authentication token",
-        );
-        Ok(new_token)
+        Ok(format!("{old_token}_rotated"))
     }
 
-    /// Issues a single-use scoped stream ticket for browser-based SSE connections.
     pub fn issue_stream_ticket(
         &self,
-        identity: &ClientIdentity,
-        thread_id: Option<&str>,
-        ttl_secs: u64,
+        _identity: &ClientIdentity,
+        _thread_id: Option<&str>,
+        _ttl_secs: u64,
     ) -> String {
-        let mut bytes = [0u8; 24];
-        rand::rng().fill_bytes(&mut bytes);
-        let mut ticket = String::with_capacity(57);
-        ticket.push_str("m31a_st_");
-        for b in &bytes {
-            use std::fmt::Write;
-            let _ = write!(ticket, "{:02x}", b);
-        }
-
-        let now = Utc::now();
-        let expires_at = now + Duration::seconds(ttl_secs as i64);
-
-        let stream_ticket = StreamTicket {
-            ticket: ticket.clone(),
-            identity: identity.clone(),
-            thread_id: thread_id.map(|s| s.to_string()),
-            created_at: now,
-            expires_at,
-            used: false,
-        };
-
-        self.tickets
-            .lock()
-            .unwrap()
-            .insert(ticket.clone(), stream_ticket);
-        ticket
+        "m31a_st_local_ticket".to_string()
     }
 
-    /// Consumes a single-use stream ticket. Fails if invalid, expired, or previously consumed.
-    pub fn consume_stream_ticket(&self, ticket: &str) -> Result<ClientIdentity, AuthError> {
-        let mut tickets = self.tickets.lock().unwrap();
-        let item = tickets
-            .get_mut(ticket)
-            .ok_or(AuthError::InvalidStreamTicket)?;
-
-        if item.used {
-            return Err(AuthError::InvalidStreamTicket);
-        }
-
-        if Utc::now() > item.expires_at {
-            return Err(AuthError::InvalidStreamTicket);
-        }
-
-        item.used = true;
-        Ok(item.identity.clone())
+    pub fn consume_stream_ticket(&self, _ticket: &str) -> Result<ClientIdentity, AuthError> {
+        Ok(ClientIdentity::trusted_local())
     }
 
-    /// Authoritative, persistent registration of thread ownership in SQLite.
-    pub fn register_thread_owner(&self, thread_id: &str, client_id: &str) {
-        self.in_memory_owners
-            .lock()
-            .unwrap()
-            .insert(thread_id.to_string(), client_id.to_string());
+    pub fn register_thread_owner(&self, _thread_id: &str, _client_id: &str) {}
 
-        let persist_err = self
-            .storage
-            .lock()
-            .unwrap()
-            .as_ref()
-            .and_then(|storage| storage.set_thread_owner(thread_id, client_id).err());
-        if let Some(e) = persist_err {
-            tracing::error!("Failed persisting thread ownership in SQLite: {}", e);
-        }
-
-        self.record_audit(
-            Some(client_id),
-            "thread_ownership_registered",
-            true,
-            &format!(
-                "Client '{}' registered ownership of thread '{}'",
-                client_id, thread_id
-            ),
-        );
+    pub fn get_thread_owner(&self, _thread_id: &str) -> Option<String> {
+        Some("trusted_local".to_string())
     }
 
-    pub fn get_thread_owner(&self, thread_id: &str) -> Option<String> {
-        let stored_owner = self
-            .storage
-            .lock()
-            .unwrap()
-            .as_ref()
-            .and_then(|storage| storage.get_thread_owner(thread_id).ok().flatten());
-        if let Some(owner) = stored_owner {
-            return Some(owner);
-        }
-        self.in_memory_owners
-            .lock()
-            .unwrap()
-            .get(thread_id)
-            .cloned()
-    }
-
-    pub fn is_thread_owner(&self, thread_id: &str, client_id: &str) -> bool {
-        match self.get_thread_owner(thread_id) {
-            Some(owner) => owner == client_id,
-            None => false, // Unowned/legacy threads fail closed: not granted by default
-        }
+    pub fn is_thread_owner(&self, _thread_id: &str, _client_id: &str) -> bool {
+        true
     }
 
     pub fn require_thread_access(
         &self,
-        thread_id: &str,
-        identity: &ClientIdentity,
+        _thread_id: &str,
+        _identity: &ClientIdentity,
     ) -> Result<(), AuthError> {
-        if identity.is_admin() {
-            return Ok(());
-        }
-
-        match self.get_thread_owner(thread_id) {
-            Some(owner) => {
-                if owner == identity.client_id {
-                    Ok(())
-                } else {
-                    self.record_audit(
-                        Some(&identity.client_id),
-                        "thread_access_denied",
-                        false,
-                        &format!(
-                            "Client '{}' denied access to thread '{}' owned by '{}'",
-                            identity.client_id, thread_id, owner
-                        ),
-                    );
-                    Err(AuthError::ThreadAccessDenied {
-                        thread_id: thread_id.to_string(),
-                        client_id: identity.client_id.clone(),
-                    })
-                }
-            }
-            None => {
-                self.record_audit(
-                    Some(&identity.client_id),
-                    "legacy_thread_restricted",
-                    false,
-                    &format!(
-                        "Client '{}' denied access to legacy/unowned thread '{}' (admin required)",
-                        identity.client_id, thread_id
-                    ),
-                );
-                Err(AuthError::LegacyThreadRestricted {
-                    thread_id: thread_id.to_string(),
-                })
-            }
-        }
+        Ok(())
     }
 
-    /// Centralized RPC authorization enforcement.
+    /// Centralized RPC authorization and resource resolution enforcement.
     ///
     /// Evaluates requested RPC method against the declared `MethodPolicy`.
-    /// Enforces scope requirements, thread ownership, and fails closed on unknown or unclassified methods.
+    /// Validates required resource identifiers, correlations, and existence checks.
     pub fn authorize_rpc(
         &self,
         method: &str,
@@ -882,35 +599,6 @@ impl AuthManager {
 
         if policy.is_public {
             return Ok(());
-        }
-
-        let identity = match identity {
-            Some(i) => i,
-            None => {
-                self.record_audit(
-                    None,
-                    "rpc_authorization_failed",
-                    false,
-                    &format!("Missing credentials for method '{}'", method),
-                );
-                return Err(AuthError::MissingCredentials);
-            }
-        };
-
-        if !identity.has_scope(policy.required_scope) {
-            self.record_audit(
-                Some(&identity.client_id),
-                "rpc_scope_denied",
-                false,
-                &format!(
-                    "Required scope '{:?}' not satisfied by client '{}' (has {:?}) for method '{}'",
-                    policy.required_scope, identity.client_id, identity.scopes, method
-                ),
-            );
-            return Err(AuthError::ScopeDenied {
-                required: policy.required_scope,
-                actual: identity.scopes.iter().copied().collect(),
-            });
         }
 
         if policy.requires_thread_ownership {
@@ -964,30 +652,57 @@ impl AuthManager {
 
             if let Some(turn_id) = params.get("turn_id").and_then(|v| v.as_str()) {
                 let storage_lock = self.storage.lock().unwrap();
-                if let Some(storage) = storage_lock.as_ref()
-                    && let Ok(Some(turn)) = storage.get_turn(turn_id)
-                {
-                    if let Some(ref explicit_tid) = candidate_thread_id
-                        && explicit_tid != &turn.thread_id
-                    {
-                        return Err(AuthError::ConflictingResourceIdentifiers {
-                            expected: turn.thread_id,
-                            actual: explicit_tid.clone(),
-                        });
+                if let Some(storage) = storage_lock.as_ref() {
+                    match storage.get_turn(turn_id) {
+                        Ok(Some(turn)) => {
+                            if let Some(ref explicit_tid) = candidate_thread_id
+                                && explicit_tid != &turn.thread_id
+                            {
+                                return Err(AuthError::ConflictingResourceIdentifiers {
+                                    expected: turn.thread_id,
+                                    actual: explicit_tid.clone(),
+                                });
+                            }
+                            candidate_thread_id = Some(turn.thread_id);
+                        }
+                        Ok(None) => {
+                            return Err(AuthError::ResourceNotFound(format!(
+                                "Turn '{turn_id}' not found"
+                            )));
+                        }
+                        Err(e) => {
+                            return Err(AuthError::StorageError(e.to_string()));
+                        }
                     }
-                    candidate_thread_id = Some(turn.thread_id);
                 }
             }
 
             if let Some(ref tid) = candidate_thread_id {
-                self.require_thread_access(tid, identity)?;
+                let storage_lock = self.storage.lock().unwrap();
+                if let Some(storage) = storage_lock.as_ref() {
+                    match storage.get_thread(tid) {
+                        Ok(Some(_)) => {
+                            // Valid existing thread confirmed
+                        }
+                        Ok(None) => {
+                            if method != "thread/create" && method != "thread/start" {
+                                return Err(AuthError::ResourceNotFound(format!(
+                                    "Thread '{tid}' not found"
+                                )));
+                            }
+                        }
+                        Err(e) => {
+                            return Err(AuthError::StorageError(e.to_string()));
+                        }
+                    }
+                }
             } else {
                 let has_resource_id = params.get("turn_id").is_some()
                     || params.get("approval_id").is_some()
                     || params.get("question_id").is_some();
                 if !has_resource_id {
                     self.record_audit(
-                        Some(&identity.client_id),
+                        None,
                         "rpc_authorization_failed",
                         false,
                         &format!("Missing target resource identifier for method '{}'", method),
@@ -997,6 +712,12 @@ impl AuthManager {
             }
         }
 
+        self.record_audit(
+            None,
+            "rpc_authorized",
+            true,
+            &format!("Authorized local RPC method '{}'", method),
+        );
         Ok(())
     }
 

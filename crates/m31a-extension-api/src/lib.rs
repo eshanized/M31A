@@ -608,85 +608,62 @@ impl PluginLoader {
         let lib_arc = Arc::new(library);
         let in_flight = Arc::new(AtomicUsize::new(0));
 
-        // Attempt versioned C-ABI entry point: `m31a_plugin_v1`
-        let c_entry_result: Result<Symbol<PluginEntryPointV1>, _> =
-            unsafe { lib_arc.get(b"m31a_plugin_v1\0") };
-
-        if let Ok(entrypoint) = c_entry_result {
-            let mut vtable_uninit = std::mem::MaybeUninit::<PluginVTableV1>::uninit();
-            let mut handle: *mut c_void = std::ptr::null_mut();
-
-            let ret = unsafe { entrypoint(vtable_uninit.as_mut_ptr(), &mut handle) };
-            if ret != M31A_PLUGIN_OK || handle.is_null() {
-                bail!("Plugin entrypoint 'm31a_plugin_v1' returned error code {ret}");
-            }
-
-            let vtable = unsafe { vtable_uninit.assume_init() };
-
-            if vtable.abi_version != M31A_PLUGIN_ABI_VERSION {
+        // Required stable versioned C-ABI entry point: `m31a_plugin_v1`
+        let entrypoint: Symbol<PluginEntryPointV1> = match unsafe {
+            lib_arc.get(b"m31a_plugin_v1\0")
+        } {
+            Ok(ep) => ep,
+            Err(e) => {
                 bail!(
-                    "Incompatible plugin ABI version: expected {}, got {}",
-                    M31A_PLUGIN_ABI_VERSION,
-                    vtable.abi_version
+                    "Plugin dynamic library '{}' does not export required stable C ABI entrypoint 'm31a_plugin_v1' (unsound trait object dylib loading is removed): {e}",
+                    manifest.name
                 );
             }
+        };
 
-            let mut plugin = CAbiPlugin::new(
-                manifest.clone(),
-                vtable,
-                handle,
-                Arc::clone(&lib_arc),
-                Arc::clone(&in_flight),
-            );
+        let mut vtable_uninit = std::mem::MaybeUninit::<PluginVTableV1>::uninit();
+        let mut handle: *mut c_void = std::ptr::null_mut();
 
-            let config = self
-                .plugin_configs
-                .get(&manifest.name)
-                .cloned()
-                .unwrap_or_default();
-            let ctx = ExtensionContext {
-                config,
-                workspace_root: std::env::current_dir()?,
-                m31a_version: env!("CARGO_PKG_VERSION").to_string(),
-                api_version: 1,
-            };
-
-            plugin.initialize(ctx)?;
-
-            self.loaded_libraries.insert(manifest.name.clone(), lib_arc);
-            self.plugins.insert(manifest.name.clone(), Arc::new(plugin));
-            self.in_flight.insert(manifest.name.clone(), in_flight);
-        } else {
-            // Fallback: legacy Rust trait object entry point
-            let create_plugin: Symbol<unsafe extern "C" fn() -> *mut dyn M31APlugin> =
-                unsafe { lib_arc.get(manifest.entry_point.as_bytes()) }
-                    .context(format!("Entry point '{}' not found", manifest.entry_point))?;
-
-            let plugin_ptr = unsafe { create_plugin() };
-            if plugin_ptr.is_null() {
-                bail!("Plugin factory function returned null pointer");
-            }
-            let mut plugin = unsafe { Box::from_raw(plugin_ptr) };
-
-            let config = self
-                .plugin_configs
-                .get(&manifest.name)
-                .cloned()
-                .unwrap_or_default();
-            let ctx = ExtensionContext {
-                config,
-                workspace_root: std::env::current_dir()?,
-                m31a_version: env!("CARGO_PKG_VERSION").to_string(),
-                api_version: 1,
-            };
-
-            plugin.initialize(ctx)?;
-
-            self.loaded_libraries.insert(manifest.name.clone(), lib_arc);
-            self.plugins
-                .insert(manifest.name.clone(), Arc::from(plugin));
-            self.in_flight.insert(manifest.name.clone(), in_flight);
+        let ret = unsafe { entrypoint(vtable_uninit.as_mut_ptr(), &mut handle) };
+        if ret != M31A_PLUGIN_OK || handle.is_null() {
+            bail!("Plugin entrypoint 'm31a_plugin_v1' returned error code {ret}");
         }
+
+        let vtable = unsafe { vtable_uninit.assume_init() };
+
+        if vtable.abi_version != M31A_PLUGIN_ABI_VERSION {
+            bail!(
+                "Incompatible plugin ABI version: expected {}, got {}",
+                M31A_PLUGIN_ABI_VERSION,
+                vtable.abi_version
+            );
+        }
+
+        let mut plugin = CAbiPlugin::new(
+            manifest.clone(),
+            vtable,
+            handle,
+            Arc::clone(&lib_arc),
+            Arc::clone(&in_flight),
+        );
+
+        let config = self
+            .plugin_configs
+            .get(&manifest.name)
+            .cloned()
+            .unwrap_or_default();
+        let ctx = ExtensionContext {
+            config,
+            workspace_root: std::env::current_dir()?,
+            m31a_version: env!("CARGO_PKG_VERSION").to_string(),
+            api_version: 1,
+        };
+
+        plugin.initialize(ctx)?;
+
+        self.loaded_libraries.insert(manifest.name.clone(), lib_arc);
+        self.plugins.insert(manifest.name.clone(), Arc::new(plugin));
+        self.in_flight.insert(manifest.name.clone(), in_flight);
 
         Ok(())
     }
@@ -837,6 +814,12 @@ impl PluginManager {
         Ok(all_loaded)
     }
 
+    /// Load plugins from a specific directory into the runtime
+    pub async fn load_plugins_from_dir(&self, dir: &Path) -> Result<Vec<String>> {
+        let mut loader = self.loader.write().await;
+        loader.load_plugins_from_dir(dir)
+    }
+
     /// Unload a single plugin safely
     pub async fn unload_plugin(&self, name: &str) -> Result<()> {
         let mut loader = self.loader.write().await;
@@ -941,7 +924,7 @@ pub fn verify_plugin_integrity(binary_bytes: &[u8], expected_sha256: &str) -> Re
     }
 }
 
-/// Verifies publisher identity and signature over plugin binary.
+/// Verifies publisher identity and signature over plugin binary using Ed25519.
 pub fn verify_publisher_signature(
     binary_bytes: &[u8],
     expected_sha256: &str,
@@ -950,13 +933,34 @@ pub fn verify_publisher_signature(
 ) -> Result<()> {
     verify_plugin_integrity(binary_bytes, expected_sha256)?;
     if let (Some(sig), Some(key)) = (signature, publisher_key) {
-        use sha2::{Digest, Sha256};
-        let mut mac = Sha256::new();
-        mac.update(key.as_bytes());
-        mac.update(expected_sha256.as_bytes());
-        let computed_sig = format!("{:x}", mac.finalize());
-        if !computed_sig.eq_ignore_ascii_case(sig.trim()) {
-            bail!("Plugin publisher cryptographic signature verification failed");
+        let pubkey_bytes = hex::decode(key.trim())
+            .map_err(|e| anyhow::anyhow!("Invalid hex encoding for Ed25519 public key: {e}"))?;
+        if pubkey_bytes.len() != 32 {
+            bail!(
+                "Invalid Ed25519 publisher public key length (expected 32 bytes, got {})",
+                pubkey_bytes.len()
+            );
+        }
+
+        let sig_bytes = hex::decode(sig.trim())
+            .map_err(|e| anyhow::anyhow!("Invalid hex encoding for Ed25519 signature: {e}"))?;
+        if sig_bytes.len() != 64 {
+            bail!(
+                "Invalid Ed25519 signature length (expected 64 bytes, got {})",
+                sig_bytes.len()
+            );
+        }
+
+        let peer_public_key =
+            ring::signature::UnparsedPublicKey::new(&ring::signature::ED25519, &pubkey_bytes);
+
+        // Verify signature over the digest or the raw binary
+        if peer_public_key
+            .verify(expected_sha256.as_bytes(), &sig_bytes)
+            .is_err()
+            && peer_public_key.verify(binary_bytes, &sig_bytes).is_err()
+        {
+            bail!("Plugin publisher Ed25519 cryptographic signature verification failed");
         }
     }
     Ok(())
@@ -1188,24 +1192,28 @@ sha256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 
     #[test]
     fn test_verify_publisher_signature() {
+        use ring::signature::KeyPair;
         let data = b"m31a-plugin-binary-bytes";
         use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
         hasher.update(data);
         let valid_hash = format!("{:x}", hasher.finalize());
 
-        let author_key = "publisher-secret-key-123";
-        let mut mac = Sha256::new();
-        mac.update(author_key.as_bytes());
-        mac.update(valid_hash.as_bytes());
-        let valid_sig = format!("{:x}", mac.finalize());
+        let rng = ring::rand::SystemRandom::new();
+        let pkcs8_bytes = ring::signature::Ed25519KeyPair::generate_pkcs8(&rng).unwrap();
+        let key_pair = ring::signature::Ed25519KeyPair::from_pkcs8(pkcs8_bytes.as_ref()).unwrap();
+        let pub_key_hex = hex::encode(key_pair.public_key().as_ref());
+
+        let sig = key_pair.sign(valid_hash.as_bytes());
+        let valid_sig = hex::encode(sig.as_ref());
 
         assert!(
-            verify_publisher_signature(data, &valid_hash, Some(&valid_sig), Some(author_key))
+            verify_publisher_signature(data, &valid_hash, Some(&valid_sig), Some(&pub_key_hex))
                 .is_ok()
         );
+        let invalid_sig = hex::encode(vec![0u8; 64]);
         assert!(
-            verify_publisher_signature(data, &valid_hash, Some("invalid-sig"), Some(author_key))
+            verify_publisher_signature(data, &valid_hash, Some(&invalid_sig), Some(&pub_key_hex))
                 .is_err()
         );
     }

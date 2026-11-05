@@ -54,11 +54,12 @@ impl Default for HttpServerConfig {
 impl HttpServerConfig {
     /// Validates security constraints on the configuration.
     ///
-    /// Network-accessible binds (non-loopback) strictly require authentication.
+    /// The HTTP daemon is strictly local-first; it MUST bind only to loopback
+    /// addresses (127.0.0.1 or ::1) to prevent remote unauthenticated network exposure.
     pub fn validate(&self) -> Result<()> {
-        if !self.bind_addr.ip().is_loopback() && !self.require_auth {
+        if !self.bind_addr.ip().is_loopback() {
             anyhow::bail!(
-                "Security policy violation: Network-accessible bind address '{}' MUST enforce authentication (require_auth = true)",
+                "Security policy violation: Network-accessible bind address '{}' is prohibited. Local-first unauthenticated server MUST bind only to loopback addresses.",
                 self.bind_addr
             );
         }
@@ -83,38 +84,9 @@ pub async fn run_http_server_with_listener(
 ) -> Result<()> {
     config.validate()?;
 
-    // Register initial auth token if configured; otherwise generate an admin token if auth is required
-    if let Some(ref token) = config.auth_token {
-        server.auth_manager.register_token(
-            token,
-            "admin",
-            "Configured Admin Token",
-            vec![
-                crate::auth::AuthScope::Read,
-                crate::auth::AuthScope::Write,
-                crate::auth::AuthScope::Admin,
-                crate::auth::AuthScope::Execute,
-            ],
-            None,
-        );
-    } else if config.require_auth {
-        let _generated = server.auth_manager.generate_token(
-            "admin",
-            "Auto-generated Admin Token",
-            vec![
-                crate::auth::AuthScope::Read,
-                crate::auth::AuthScope::Write,
-                crate::auth::AuthScope::Admin,
-                crate::auth::AuthScope::Execute,
-            ],
-            None,
-        );
-        info!("M31A HTTP Server initialized admin token (client_id: admin, sha256-hashed)");
-    }
-
     info!(
-        "M31A HTTP/SSE Daemon listening on http://{} (auth_required: {})",
-        config.bind_addr, config.require_auth
+        "M31A HTTP/SSE Daemon listening on http://{} (local-first access)",
+        config.bind_addr
     );
 
     let server = Arc::new(server);
@@ -209,24 +181,47 @@ async fn handle_connection(
     // Parse path and query parameters
     let (path, query_params) = parse_uri(&raw_uri);
 
-    // Determine allowed CORS origin
-    let origin_header = headers.get("origin").map(|s| s.as_str());
-    let allowed_origin = resolve_cors_origin(origin_header, &config);
-
-    // Handle OPTIONS preflight
-    if method == "OPTIONS" {
-        if origin_header.is_some() && allowed_origin.is_none() {
+    // Validate Host header to protect against DNS rebinding and non-loopback exposure
+    if let Some(host_val) = headers.get("host") {
+        let host_name = host_val.split(':').next().unwrap_or(host_val).trim();
+        let is_loopback_host = host_name == "localhost"
+            || host_name == "127.0.0.1"
+            || host_name == "::1"
+            || host_name == "[::1]";
+        if !is_loopback_host {
             send_response(
                 &mut write_half,
                 403,
                 "Forbidden",
                 "text/plain",
-                b"CORS origin not allowed",
+                b"Forbidden: untrusted Host header",
                 None,
             )
             .await?;
             return Ok(());
         }
+    }
+
+    // Determine allowed CORS origin
+    let origin_header = headers.get("origin").map(|s| s.as_str());
+    let allowed_origin = resolve_cors_origin(origin_header, &config);
+
+    // Reject untrusted cross-origin requests from browsers
+    if origin_header.is_some() && allowed_origin.is_none() {
+        send_response(
+            &mut write_half,
+            403,
+            "Forbidden",
+            "text/plain",
+            b"CORS origin not allowed",
+            None,
+        )
+        .await?;
+        return Ok(());
+    }
+
+    // Handle OPTIONS preflight
+    if method == "OPTIONS" {
         return send_cors_preflight(&mut write_half, allowed_origin.as_deref()).await;
     }
 
@@ -301,55 +296,8 @@ async fn handle_connection(
         .await;
     }
 
-    // Authenticate sensitive routes
-    let client_identity = if config.require_auth {
-        // SSE route allows either Bearer header or short-lived single-use stream ticket
-        let is_sse_route = (path == "/events" || path == "/api/events") && method == "GET";
-        let bearer_opt = extract_bearer_token(&headers);
-
-        if let Some(token) = bearer_opt {
-            match server.auth_manager.validate_token(&token) {
-                Ok(identity) => identity,
-                Err(e) => {
-                    return send_unauthorized(
-                        &mut write_half,
-                        "invalid_token",
-                        &e.to_string(),
-                        allowed_origin.as_deref(),
-                    )
-                    .await;
-                }
-            }
-        } else if is_sse_route && let Some(ticket) = query_params.get("ticket") {
-            match server.auth_manager.consume_stream_ticket(ticket) {
-                Ok(identity) => identity,
-                Err(e) => {
-                    return send_unauthorized(
-                        &mut write_half,
-                        "invalid_stream_ticket",
-                        &e.to_string(),
-                        allowed_origin.as_deref(),
-                    )
-                    .await;
-                }
-            }
-        } else {
-            return send_unauthorized(
-                &mut write_half,
-                "missing_token",
-                if is_sse_route {
-                    "Missing authentication token: HTTP Authorization header or valid single-use stream ticket required"
-                } else {
-                    "Missing authentication credentials: HTTP Authorization header required (URL query tokens not permitted)"
-                },
-                allowed_origin.as_deref(),
-            )
-            .await;
-        }
-    } else {
-        // Compatibility loopback mode with default admin identity
-        ClientIdentity::trusted_local()
-    };
+    // Local application access model: single-user local-first execution context
+    let client_identity = ClientIdentity::trusted_local();
 
     // Route dispatch
     if (path == "/events" || path == "/api/events") && method == "GET" {
@@ -367,38 +315,6 @@ async fn handle_connection(
             server,
             client_identity,
             filter_thread_id,
-            allowed_origin.as_deref(),
-        )
-        .await;
-    }
-
-    if (path == "/api/auth/stream-ticket" || path == "/auth/stream-ticket") && method == "POST" {
-        let target_thread = query_params.get("thread_id").cloned();
-        let access_err = target_thread.as_deref().and_then(|tid| {
-            server
-                .auth_manager
-                .require_thread_access(tid, &client_identity)
-                .err()
-        });
-        if let Some(e) = access_err {
-            return send_forbidden(&mut write_half, &e.to_string(), allowed_origin.as_deref())
-                .await;
-        }
-        let ticket =
-            server
-                .auth_manager
-                .issue_stream_ticket(&client_identity, target_thread.as_deref(), 60);
-        let resp = serde_json::json!({
-            "ticket": ticket,
-            "expires_in_secs": 60
-        });
-        let bytes = serde_json::to_vec(&resp)?;
-        return send_response(
-            &mut write_half,
-            200,
-            "OK",
-            "application/json",
-            &bytes,
             allowed_origin.as_deref(),
         )
         .await;
@@ -664,20 +580,18 @@ async fn handle_connection(
 
 fn resolve_cors_origin(origin_header: Option<&str>, config: &HttpServerConfig) -> Option<String> {
     let origin = origin_header?;
-    if config.cors_allow_all || config.allowed_origins.iter().any(|o| o == origin) {
+    let is_loopback = origin.starts_with("http://localhost:")
+        || origin == "http://localhost"
+        || origin.starts_with("http://127.0.0.1:")
+        || origin == "http://127.0.0.1"
+        || origin.starts_with("http://[::1]:")
+        || origin == "http://[::1]";
+
+    if config.cors_allow_all || is_loopback || config.allowed_origins.iter().any(|o| o == origin) {
         Some(origin.to_string())
     } else {
         None
     }
-}
-
-fn extract_bearer_token(headers: &HashMap<String, String>) -> Option<String> {
-    if let Some(auth_val) = headers.get("authorization")
-        && let Some(token) = auth_val.strip_prefix("Bearer ")
-    {
-        return Some(token.trim().to_string());
-    }
-    None
 }
 
 fn parse_uri(raw: &str) -> (String, HashMap<String, String>) {
@@ -821,44 +735,6 @@ async fn send_response<W: AsyncWriteExt + Unpin>(
     Ok(())
 }
 
-async fn send_unauthorized<W: AsyncWriteExt + Unpin>(
-    writer: &mut W,
-    err_code: &str,
-    message: &str,
-    allowed_origin: Option<&str>,
-) -> Result<()> {
-    let body = serde_json::json!({
-        "error": err_code,
-        "message": message,
-    });
-    let bytes = serde_json::to_vec(&body)?;
-
-    let mut headers = format!(
-        "HTTP/1.1 401 Unauthorized\r\n\
-        WWW-Authenticate: Bearer realm=\"M31A App Server\", error=\"{}\"\r\n\
-        Content-Type: application/json\r\n\
-        Content-Length: {}\r\n\
-        Connection: close\r\n",
-        err_code,
-        bytes.len()
-    );
-
-    if let Some(origin) = allowed_origin {
-        headers.push_str(&format!(
-            "Access-Control-Allow-Origin: {}\r\n\
-            Access-Control-Allow-Credentials: true\r\n\
-            Vary: Origin\r\n",
-            origin
-        ));
-    }
-    headers.push_str("\r\n");
-
-    writer.write_all(headers.as_bytes()).await?;
-    writer.write_all(&bytes).await?;
-    writer.flush().await?;
-    Ok(())
-}
-
 async fn send_forbidden<W: AsyncWriteExt + Unpin>(
     writer: &mut W,
     message: &str,
@@ -991,21 +867,20 @@ mod tests {
         let local_addr = listener.local_addr().unwrap();
 
         let s_clone = Arc::new(server);
-        let test_token = s_clone.auth_manager.generate_token(
-            "test_user",
-            "Test Client",
-            vec![crate::auth::AuthScope::Read, crate::auth::AuthScope::Write],
-            None,
-        );
+        // Validate rejects non-loopback binding
+        let non_loopback = HttpServerConfig {
+            bind_addr: std::net::SocketAddr::from(([0, 0, 0, 0], 8080)),
+            ..Default::default()
+        };
+        assert!(non_loopback.validate().is_err());
 
         let c_clone = Arc::new(HttpServerConfig {
             bind_addr: local_addr,
-            cors_allow_all: true,
-            allowed_origins: vec![],
-            require_auth: true,
-            auth_token: Some(test_token.clone()),
+            cors_allow_all: false,
+            allowed_origins: vec!["http://localhost:3000".to_string()],
             ..Default::default()
         });
+        assert!(c_clone.validate().is_ok());
 
         let s_srv = Arc::clone(&s_clone);
         let c_srv = Arc::clone(&c_clone);
@@ -1028,25 +903,32 @@ mod tests {
         assert!(resp.contains("HTTP/1.1 200 OK"));
         assert!(resp.contains("\"status\":\"healthy\""));
 
-        // 2. GET /api/threads without token fails with 401 Unauthorized
+        // 2. GET /api/threads succeeds in local-first mode with loopback Host
         let mut client = TcpStream::connect(local_addr).await.unwrap();
         let req = format!("GET /api/threads HTTP/1.1\r\nHost: {}\r\n\r\n", local_addr);
         client.write_all(req.as_bytes()).await.unwrap();
         let mut resp = String::new();
         client.read_to_string(&mut resp).await.unwrap();
-        assert!(resp.contains("HTTP/1.1 401 Unauthorized"));
-        assert!(resp.contains("WWW-Authenticate: Bearer"));
+        assert!(resp.contains("HTTP/1.1 200 OK"));
 
-        // 3. GET /api/threads with valid token succeeds with 200 OK
+        // 3. Untrusted Host header is rejected (DNS rebinding protection)
+        let mut client = TcpStream::connect(local_addr).await.unwrap();
+        let req = "GET /api/threads HTTP/1.1\r\nHost: attacker.com\r\n\r\n";
+        client.write_all(req.as_bytes()).await.unwrap();
+        let mut resp = String::new();
+        client.read_to_string(&mut resp).await.unwrap();
+        assert!(resp.contains("HTTP/1.1 403 Forbidden"));
+
+        // 4. Untrusted Origin header is rejected
         let mut client = TcpStream::connect(local_addr).await.unwrap();
         let req = format!(
-            "GET /api/threads HTTP/1.1\r\nHost: {}\r\nAuthorization: Bearer {}\r\n\r\n",
-            local_addr, test_token
+            "GET /api/threads HTTP/1.1\r\nHost: {}\r\nOrigin: https://evil.com\r\n\r\n",
+            local_addr
         );
         client.write_all(req.as_bytes()).await.unwrap();
         let mut resp = String::new();
         client.read_to_string(&mut resp).await.unwrap();
-        assert!(resp.contains("HTTP/1.1 200 OK"));
+        assert!(resp.contains("HTTP/1.1 403 Forbidden"));
     }
 
     #[tokio::test]

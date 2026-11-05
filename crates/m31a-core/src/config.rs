@@ -1189,9 +1189,9 @@ fn find_project_config() -> Option<PathBuf> {
     None
 }
 
-/// Resolves API credentials following hierarchical precedence (environment variables, auth vault, config file fallback):
+/// Resolves API credentials following hierarchical precedence (environment variables, provider vault, config file fallback):
 /// 1. Environment variables (`NVIDIA_API_KEY`, `NVIDIA_NIM_API_KEY`)
-/// 2. Encrypted auth vault (`auth.vault` populated by `m31a login`)
+/// 2. Encrypted provider vault (`provider.vault` or `managed.vault`)
 /// 3. Secure credentials file (`~/.config/m31a/credentials.json`)
 pub fn resolve_stored_api_key() -> Option<String> {
     // 1. Process environment variable
@@ -1204,18 +1204,21 @@ pub fn resolve_stored_api_key() -> Option<String> {
         }
     }
 
-    // 2. Encrypted auth vault populated by `m31a login`
+    // 2. Encrypted provider vault
     let config_dir = Config::config_dir();
     let vault_dir = config_dir.join("vault");
     if let Ok(vault) = crate::secrets::LocalEncryptedVault::new(vault_dir) {
         use crate::secrets::SecretsBackend;
-        if let Ok(Some(secret)) = vault.get_secret(
+        for ns in [
+            crate::secrets::LocalSecretsNamespace::Provider,
+            crate::secrets::LocalSecretsNamespace::ManagedSecrets,
             crate::secrets::LocalSecretsNamespace::M31aAuth,
-            "NVIDIA_API_KEY",
-        ) {
-            let trimmed = secret.trim();
-            if !trimmed.is_empty() {
-                return Some(trimmed.to_string());
+        ] {
+            if let Ok(Some(secret)) = vault.get_secret(ns, "NVIDIA_API_KEY") {
+                let trimmed = secret.trim();
+                if !trimmed.is_empty() {
+                    return Some(trimmed.to_string());
+                }
             }
         }
     }

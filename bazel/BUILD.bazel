@@ -1,3 +1,7 @@
+# M31A Bazel Build Targets
+# NOTE: These targets wrap the local host Cargo environment (`cargo build`, `cargo test`)
+# using non-hermetic local execution (`no-sandbox`, `local: 1`).
+
 load("//bazel/rules:m31a_rules.bzl", "m31a_binary", "m31a_release_archive", "m31a_schema_bundle", "m31a_e2e_benchmark", "m31a_test")
 
 package(default_visibility = ["//visibility:public"])

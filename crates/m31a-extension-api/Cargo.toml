@@ -16,6 +16,8 @@ sha2 = { version = "0.10", features = ["std"] }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 toml = { workspace = true }
+hex = "0.4"
+ring = "0.17"
 semver = { workspace = true }
 reqwest = { workspace = true }
 tracing = { workspace = true }

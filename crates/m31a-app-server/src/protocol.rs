@@ -1805,48 +1805,6 @@ impl AppServer {
                 Ok(serde_json::to_value(recovered)?)
             }
 
-            "auth/stream_ticket" => {
-                let ident = identity.context("Missing authenticated client identity")?;
-                let target_thread = params.get("thread_id").and_then(|v| v.as_str());
-                if let Some(tid) = target_thread {
-                    self.auth_manager.require_thread_access(tid, ident)?;
-                }
-                let ttl_secs = params
-                    .get("ttl_secs")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(60);
-                let ticket = self
-                    .auth_manager
-                    .issue_stream_ticket(ident, target_thread, ttl_secs);
-                Ok(serde_json::json!({
-                    "ticket": ticket,
-                    "expires_in_secs": ttl_secs
-                }))
-            }
-
-            "auth/rotate_token" => {
-                let old_token = params
-                    .get("token")
-                    .and_then(|v| v.as_str())
-                    .context("Missing 'token' in params")?;
-                let ttl_secs = params.get("ttl_secs").and_then(|v| v.as_u64());
-                let new_token = self.auth_manager.rotate_token(old_token, ttl_secs)?;
-                Ok(serde_json::json!({
-                    "new_token": new_token
-                }))
-            }
-
-            "auth/revoke_token" => {
-                let token = params
-                    .get("token")
-                    .and_then(|v| v.as_str())
-                    .context("Missing 'token' in params")?;
-                let revoked = self.auth_manager.revoke_token(token);
-                Ok(serde_json::json!({
-                    "revoked": revoked
-                }))
-            }
-
             _ => Err(anyhow!("Method not found: {}", method)),
         }
     }
@@ -1866,6 +1824,7 @@ mod tests {
         let storage = Storage::open_in_memory().unwrap();
         let tools = Arc::new(ToolRegistry::new());
         let server = AppServer::new(config, storage, tools).unwrap();
+        let local_id = crate::auth::ClientIdentity::trusted_local();
 
         let req = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
@@ -1880,22 +1839,25 @@ mod tests {
         let val = res.result.unwrap();
         assert_eq!(val.get("server_name").unwrap(), "m31a-app-server");
 
-        // Authenticated methods without identity MUST fail closed
+        // Local methods succeed without authentication tokens in local-first mode
         let req_models = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
             id: Some(serde_json::json!(2)),
             method: "models/list".to_string(),
             params: None,
         };
-        let res_models_unauth = server.handle_request(req_models.clone()).await;
-        assert!(res_models_unauth.error.is_some());
-
-        // Authenticated methods with trusted local identity succeed
-        let local_id = crate::auth::ClientIdentity::trusted_local();
-        let res_models = server
-            .handle_request_with_identity(req_models, Some(&local_id))
-            .await;
+        let res_models = server.handle_request(req_models.clone()).await;
         assert!(res_models.error.is_none());
+
+        // Unknown methods fail closed
+        let req_unknown = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Some(serde_json::json!(99)),
+            method: "non_existent/method".to_string(),
+            params: None,
+        };
+        let res_unknown = server.handle_request(req_unknown).await;
+        assert!(res_unknown.error.is_some());
 
         // Test thread lifecycle: untrusted workspace fails closed
         let req_untrusted = JsonRpcRequest {
@@ -2168,6 +2130,10 @@ mod tests {
         assert_eq!(answers, vec!["gRPC".to_string()]);
 
         // Test steer & interrupt on active turn
+        server
+            .storage
+            .save_turn("turn_active_1", &thread_id, 1, "in_progress")
+            .unwrap();
         let (steer_tx, mut steer_rx) = mpsc::unbounded_channel();
         let cancel_token = CancellationToken::new();
         server.active_turns.lock().unwrap().insert(

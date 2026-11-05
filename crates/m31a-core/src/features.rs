@@ -34,8 +34,6 @@ pub enum FeatureKey {
     TerminalDetection,
     Analytics,
     ExternalAgentMigration,
-    OAuthDeviceFlow,
-    WorkloadIdentity,
     AwsAuthSigV4,
     RealtimeVoice,
     ConnectorsPolicy,
@@ -77,8 +75,6 @@ impl FeatureKey {
         FeatureKey::TerminalDetection,
         FeatureKey::Analytics,
         FeatureKey::ExternalAgentMigration,
-        FeatureKey::OAuthDeviceFlow,
-        FeatureKey::WorkloadIdentity,
         FeatureKey::AwsAuthSigV4,
         FeatureKey::RealtimeVoice,
         FeatureKey::ConnectorsPolicy,
@@ -116,8 +112,6 @@ impl FeatureKey {
             FeatureKey::TerminalDetection => "terminal_detection",
             FeatureKey::Analytics => "analytics",
             FeatureKey::ExternalAgentMigration => "external_agent_migration",
-            FeatureKey::OAuthDeviceFlow => "oauth_device_flow",
-            FeatureKey::WorkloadIdentity => "workload_identity",
             FeatureKey::AwsAuthSigV4 => "aws_auth_sigv4",
             FeatureKey::RealtimeVoice => "realtime_voice",
             FeatureKey::ConnectorsPolicy => "connectors_policy",
@@ -160,8 +154,6 @@ impl FeatureKey {
             | FeatureKey::TerminalDetection
             | FeatureKey::Analytics
             | FeatureKey::ExternalAgentMigration
-            | FeatureKey::OAuthDeviceFlow
-            | FeatureKey::WorkloadIdentity
             | FeatureKey::AwsAuthSigV4
             | FeatureKey::ConnectorsPolicy
             | FeatureKey::DescriptorPinning

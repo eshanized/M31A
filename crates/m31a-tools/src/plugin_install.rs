@@ -28,14 +28,77 @@ pub struct DiscoverableTool {
     pub install_url: Option<String>,
 }
 
+/// A cryptographically tied, host-generated authorization token proving real human/host approval.
+/// NEVER deserialized or extracted from model-generated tool arguments.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostPluginApproval {
+    pub session_id: Option<String>,
+    pub turn_id: Option<String>,
+    pub call_id: Option<String>,
+    pub tool_id: String,
+    pub action_type: DiscoverableToolAction,
+    pub granted_at: std::time::Instant,
+}
+
+impl HostPluginApproval {
+    pub fn new(tool_id: &str, action_type: DiscoverableToolAction) -> Self {
+        Self {
+            session_id: None,
+            turn_id: None,
+            call_id: None,
+            tool_id: tool_id.to_string(),
+            action_type,
+            granted_at: std::time::Instant::now(),
+        }
+    }
+
+    pub fn with_context(
+        tool_id: &str,
+        action_type: DiscoverableToolAction,
+        session_id: Option<&str>,
+        turn_id: Option<&str>,
+        call_id: Option<&str>,
+    ) -> Self {
+        Self {
+            session_id: session_id.map(|s| s.to_string()),
+            turn_id: turn_id.map(|s| s.to_string()),
+            call_id: call_id.map(|s| s.to_string()),
+            tool_id: tool_id.to_string(),
+            action_type,
+            granted_at: std::time::Instant::now(),
+        }
+    }
+
+    pub fn is_valid_for(
+        &self,
+        tool_id: &str,
+        action: DiscoverableToolAction,
+        turn_id: Option<&str>,
+        call_id: Option<&str>,
+    ) -> bool {
+        if self.tool_id != tool_id || self.action_type != action {
+            return false;
+        }
+        if let (Some(t1), Some(t2)) = (&self.turn_id, turn_id)
+            && t1 != t2
+        {
+            return false;
+        }
+        if let (Some(c1), Some(c2)) = (&self.call_id, call_id)
+            && c1 != c2
+        {
+            return false;
+        }
+        self.granted_at.elapsed() < std::time::Duration::from_secs(120)
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct RequestPluginInstallArgs {
     pub tool_id: String,
     pub tool_type: DiscoverableToolType,
     pub action_type: DiscoverableToolAction,
     pub suggest_reason: String,
-    #[serde(default)]
-    pub user_confirmed: Option<bool>,
 }
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
@@ -97,13 +160,17 @@ pub fn list_discoverable_tools() -> Vec<DiscoverableTool> {
 }
 
 /// Processes an install request.
-/// A model-generated tool argument for `user_confirmed` is NEVER trusted as proof of user consent.
-/// User consent must originate from a verified host-side approval flow (`trusted_user_confirmed = true`).
+/// Model arguments can NEVER supply or spoof approval.
+/// User consent must originate strictly from a verified host approval token (`host_approval`).
 pub fn handle_request_plugin_install(
     args: RequestPluginInstallArgs,
-    trusted_user_confirmed: bool,
+    host_approval: Option<&HostPluginApproval>,
 ) -> RequestPluginInstallResult {
-    if !trusted_user_confirmed {
+    let is_approved = host_approval
+        .map(|a| a.is_valid_for(&args.tool_id, args.action_type, None, None))
+        .unwrap_or(false);
+
+    if !is_approved {
         return RequestPluginInstallResult {
             completed: false,
             user_confirmed: false,
@@ -112,7 +179,7 @@ pub fn handle_request_plugin_install(
             action_type: args.action_type,
             suggest_reason: args.suggest_reason,
             error: Some(
-                "Installation rejected: user confirmation must be granted via host approval dialog"
+                "Installation rejected: explicit user consent is required before installing third-party plugins. Host-only approval must be granted through an interactive confirmation dialog. Model arguments cannot approve installation."
                     .to_string(),
             ),
         };
@@ -274,31 +341,48 @@ mod tests {
 
     #[test]
     fn test_handle_request_plugin_install() {
-        let args_unconfirmed = RequestPluginInstallArgs {
+        let args = RequestPluginInstallArgs {
             tool_id: "github-mcp".to_string(),
             tool_type: DiscoverableToolType::Plugin,
             action_type: DiscoverableToolAction::Install,
             suggest_reason: "Repository search requires GitHub MCP server".to_string(),
-            user_confirmed: Some(true), // Even if model argument provides user_confirmed, it must be rejected!
         };
 
-        let res_unconfirmed = handle_request_plugin_install(args_unconfirmed, false);
+        // 1. Without host approval, installation MUST fail closed
+        let res_unconfirmed = handle_request_plugin_install(
+            RequestPluginInstallArgs {
+                tool_id: "github-mcp".to_string(),
+                tool_type: DiscoverableToolType::Plugin,
+                action_type: DiscoverableToolAction::Install,
+                suggest_reason: "Repository search requires GitHub MCP server".to_string(),
+            },
+            None,
+        );
         assert!(!res_unconfirmed.completed);
         assert!(!res_unconfirmed.user_confirmed);
         assert!(res_unconfirmed.error.is_some());
 
-        let args_confirmed = RequestPluginInstallArgs {
-            tool_id: "github-mcp".to_string(),
-            tool_type: DiscoverableToolType::Plugin,
-            action_type: DiscoverableToolAction::Install,
-            suggest_reason: "Repository search requires GitHub MCP server".to_string(),
-            user_confirmed: None,
-        };
-
-        let res_confirmed = handle_request_plugin_install(args_confirmed, true);
+        // 2. With valid host approval ticket, installation succeeds
+        let host_approval = HostPluginApproval::new("github-mcp", DiscoverableToolAction::Install);
+        let res_confirmed = handle_request_plugin_install(args, Some(&host_approval));
         assert!(res_confirmed.completed);
         assert!(res_confirmed.user_confirmed);
         assert_eq!(res_confirmed.tool_id, "github-mcp");
         assert_eq!(res_confirmed.action_type, DiscoverableToolAction::Install);
+
+        // 3. Mismatched plugin ID in host approval ticket fails closed
+        let mismatched_approval =
+            HostPluginApproval::new("other-plugin", DiscoverableToolAction::Install);
+        let res_mismatched = handle_request_plugin_install(
+            RequestPluginInstallArgs {
+                tool_id: "github-mcp".to_string(),
+                tool_type: DiscoverableToolType::Plugin,
+                action_type: DiscoverableToolAction::Install,
+                suggest_reason: "Mismatched ticket".to_string(),
+            },
+            Some(&mismatched_approval),
+        );
+        assert!(!res_mismatched.completed);
+        assert!(!res_mismatched.user_confirmed);
     }
 }

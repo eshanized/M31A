@@ -13,8 +13,8 @@ use m31a_core::types::ChatMessage;
 use m31a_core::types::Role;
 use m31a_core::{
     ApprovalPolicy, CollaborationMode, CompactTokenBudget, Config, ContextCompactor, HookEngine,
-    HookEvent, LocalSecretsNamespace, McpServerConfig, MemoryManager, MemoryRecord, SandboxPolicy,
-    SecretScope, SecretsBackend, Session, SystemPromptBuilder, WorktreeManager,
+    HookEvent, McpServerConfig, MemoryManager, MemoryRecord, SandboxPolicy, Session,
+    SystemPromptBuilder, WorktreeManager,
 };
 use m31a_execpolicy::ExecPolicy;
 use m31a_guardian::GuardianReviewer;
@@ -506,23 +506,6 @@ enum Commands {
         )]
         limit: usize,
     },
-    #[command(about = "Log in to M31A provider (NVIDIA NIM or OpenAI backend)")]
-    Login {
-        #[arg(long = "api-key", help = "Provide API key directly")]
-        api_key: Option<String>,
-        #[arg(
-            long = "device-code",
-            help = "Use device code flow for headless/remote login"
-        )]
-        device_code: bool,
-        #[arg(
-            long = "browser",
-            help = "Use browser-based authorization code flow with PKCE"
-        )]
-        browser: bool,
-    },
-    #[command(about = "Log out and purge cached authentication credentials")]
-    Logout,
     #[command(about = "Manage and dispatch tasks to remote cloud execution runtimes")]
     Cloud {
         #[command(subcommand)]
@@ -669,11 +652,6 @@ enum Commands {
         )]
         bind: String,
     },
-    #[command(about = "Manage end-to-end encrypted peer-to-peer session pairing")]
-    Pair {
-        #[command(subcommand)]
-        cmd: PairCommands,
-    },
     #[command(about = "Manage and inspect collaboration session templates")]
     Template {
         #[command(subcommand)]
@@ -782,32 +760,6 @@ enum PromptCommands {
     },
     #[command(about = "List built-in reusable prompt templates")]
     List,
-}
-
-#[derive(Subcommand, Debug)]
-enum PairCommands {
-    #[command(about = "Start an encrypted P2P pairing host server and display pairing URI")]
-    Host {
-        #[arg(
-            short = 'p',
-            long = "port",
-            default_value = "3101",
-            help = "Port to bind for pairing handshake"
-        )]
-        port: u16,
-        #[arg(
-            short = 'b',
-            long = "bind",
-            default_value = "0.0.0.0",
-            help = "Bind address"
-        )]
-        bind: String,
-    },
-    #[command(about = "Connect to a remote M31A session via pairing URI")]
-    Join {
-        #[arg(help = "Pairing URI (e.g. m31a-pair://host:port#hex_key)")]
-        uri: String,
-    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -2264,156 +2216,6 @@ async fn main() -> Result<()> {
             Ok(())
         }
 
-        Some(Commands::Login {
-            api_key,
-            device_code,
-            browser,
-        }) => {
-            let config_dir = Config::config_dir();
-            std::fs::create_dir_all(&config_dir)?;
-
-            let (key_to_store, oauth_token_opt) = if let Some(key) = api_key {
-                (key, None)
-            } else if browser {
-                println!(
-                    "{}",
-                    "Starting browser PKCE login flow (RFC 7636)...".cyan()
-                );
-                let client = reqwest::Client::new();
-                let config = m31a_core::AuthCodeFlowConfig::default();
-                let tok = m31a_core::execute_browser_pkce_flow(
-                    &client,
-                    &config,
-                    |auth_url| {
-                        println!("\n{}", "To authenticate with your browser:".bold());
-                        println!("  Open URL: {}\n", auth_url.green().underline());
-                        println!("Waiting for browser authorization redirect on local port (timeout 180s)...");
-                    },
-                    Duration::from_secs(180),
-                )
-                .await
-                .context("Browser authorization failed")?;
-                (tok.access_token.clone(), Some(tok))
-            } else if device_code {
-                println!("{}", "Starting device code login flow (RFC 8628)...".cyan());
-                let client = reqwest::Client::new();
-                let config = m31a_core::DeviceAuthRequestConfig::default();
-
-                let tok = m31a_core::execute_device_code_flow(&client, &config, |code_resp| {
-                    println!("\n{}", "To authenticate this device:".bold());
-                    if let Some(ref uri_complete) = code_resp.verification_uri_complete {
-                        println!(
-                            "  Direct authorization URL: {}",
-                            uri_complete.green().bold()
-                        );
-                    }
-                    println!(
-                        "  1. Visit: {}",
-                        code_resp.verification_uri.cyan().underline()
-                    );
-                    println!("  2. Enter code: {}\n", code_resp.user_code.bold().yellow());
-                    println!(
-                        "Waiting for authorization (timeout {}s)...",
-                        code_resp.expires_in
-                    );
-                })
-                .await
-                .context("Device code authentication failed")?;
-                (tok.access_token.clone(), Some(tok))
-            } else {
-                print!("Enter NVIDIA NIM API Key or Backend Token: ");
-                io::stdout().flush()?;
-                let mut input = String::new();
-                io::stdin().read_line(&mut input)?;
-                let trimmed = input.trim().to_string();
-                (trimmed, None)
-            };
-
-            if key_to_store.is_empty() {
-                bail!("No API key or token provided.");
-            }
-
-            let vault_dir = config_dir.join("vault");
-            let vault = m31a_core::LocalEncryptedVault::new(vault_dir)?;
-            vault.set_secret(
-                LocalSecretsNamespace::M31aAuth,
-                "NVIDIA_API_KEY",
-                &key_to_store,
-                SecretScope::Global,
-            )?;
-
-            if let Some(tok) = oauth_token_opt {
-                vault.set_secret(
-                    LocalSecretsNamespace::M31aAuth,
-                    "OAUTH_ACCESS_TOKEN",
-                    &tok.access_token,
-                    SecretScope::Global,
-                )?;
-                if let Some(ref refresh) = tok.refresh_token {
-                    vault.set_secret(
-                        LocalSecretsNamespace::M31aAuth,
-                        "OAUTH_REFRESH_TOKEN",
-                        refresh,
-                        SecretScope::Global,
-                    )?;
-                }
-                vault.set_secret(
-                    LocalSecretsNamespace::M31aAuth,
-                    "OAUTH_EXPIRES_AT",
-                    &tok.expires_at.to_string(),
-                    SecretScope::Global,
-                )?;
-                if let Some(ref account_id) = tok.account_id {
-                    vault.set_secret(
-                        LocalSecretsNamespace::M31aAuth,
-                        "OAUTH_ACCOUNT_ID",
-                        account_id,
-                        SecretScope::Global,
-                    )?;
-                }
-            }
-
-            println!(
-                "{}",
-                "Successfully authenticated and saved credentials to vault."
-                    .green()
-                    .bold()
-            );
-            Ok(())
-        }
-
-        Some(Commands::Logout) => {
-            let config_dir = Config::config_dir();
-            let vault_dir = config_dir.join("vault");
-            if vault_dir.exists() {
-                if let Ok(vault) = m31a_core::LocalEncryptedVault::new(vault_dir.clone())
-                    && let Ok(Some(refresh_token)) =
-                        vault.get_secret(LocalSecretsNamespace::M31aAuth, "OAUTH_REFRESH_TOKEN")
-                {
-                    let client = reqwest::Client::new();
-                    let default_config = m31a_core::AuthCodeFlowConfig::default();
-                    if let Some(ref revoke_ep) = default_config.revocation_endpoint {
-                        let _ = m31a_core::revoke_oauth_token(
-                            &client,
-                            revoke_ep,
-                            &default_config.client_id,
-                            &refresh_token,
-                            Some("refresh_token"),
-                        )
-                        .await;
-                    }
-                }
-                let _ = std::fs::remove_dir_all(vault_dir);
-            }
-            println!(
-                "{}",
-                "Logged out successfully. Removed stored credentials."
-                    .green()
-                    .bold()
-            );
-            Ok(())
-        }
-
         Some(Commands::Cloud { cmd }) => match cmd {
             CloudCommands::List => {
                 let mgr = m31a_core::CloudTaskManager::open_default();
@@ -3102,81 +2904,6 @@ async fn main() -> Result<()> {
             m31a_app_server::http_server::run_http_server(server, http_config).await?;
             Ok(())
         }
-
-        Some(Commands::Pair { cmd }) => match cmd {
-            PairCommands::Host { port, bind } => {
-                let addr_str = format!("{}:{}", bind, port);
-                let parsed_addr: std::net::SocketAddr = addr_str
-                    .parse()
-                    .map_err(|e| anyhow::anyhow!("Invalid bind address '{}': {}", addr_str, e))?;
-                let host = m31a_app_server::pairing::PairingHost::bind(parsed_addr).await?;
-                let uri = host.credentials().to_uri();
-                println!("{} Encrypted P2P Pairing Host ready", "✔".green().bold());
-                println!("   Pairing URI: {}", uri.cyan().bold());
-                println!("   Share this URI with peer to securely join this session.");
-                println!("{} Waiting for peer connection...", "->".yellow());
-                let (mut tunnel, remote_addr) = host.accept().await?;
-                println!(
-                    "{} Peer connected from {} (ChaCha20-Poly1305 encrypted)",
-                    "✔".green().bold(),
-                    remote_addr
-                );
-                tunnel
-                    .send_text("Connected to M31A encrypted paired session")
-                    .await?;
-                loop {
-                    tokio::select! {
-                        msg = tunnel.recv_text() => {
-                            match msg {
-                                Ok(text) => {
-                                    println!("[peer] {}", text);
-                                }
-                                Err(_) => {
-                                    println!("{} Peer disconnected", "->".yellow());
-                                    break;
-                                }
-                            }
-                        }
-                        _ = tokio::signal::ctrl_c() => {
-                            println!("\n{} Pairing host stopped by user", "->".yellow());
-                            break;
-                        }
-                    }
-                }
-                Ok(())
-            }
-            PairCommands::Join { uri } => {
-                println!(
-                    "{} Connecting to peer via encrypted tunnel...",
-                    "->".yellow()
-                );
-                let mut tunnel = m31a_app_server::pairing::PairingClient::connect(&uri).await?;
-                println!(
-                    "{} Connected to peer with ChaCha20-Poly1305 AEAD!",
-                    "✔".green().bold()
-                );
-                loop {
-                    tokio::select! {
-                        msg = tunnel.recv_text() => {
-                            match msg {
-                                Ok(text) => {
-                                    println!("[host] {}", text);
-                                }
-                                Err(_) => {
-                                    println!("{} Host disconnected", "->".yellow());
-                                    break;
-                                }
-                            }
-                        }
-                        _ = tokio::signal::ctrl_c() => {
-                            println!("\n{} Disconnected from host", "->".yellow());
-                            break;
-                        }
-                    }
-                }
-                Ok(())
-            }
-        },
 
         Some(Commands::Template { cmd }) => match cmd {
             TemplateCommands::List => {
@@ -4589,40 +4316,6 @@ mod tests {
     }
 
     #[test]
-    fn test_cli_parse_login_logout() {
-        let cli = Cli::try_parse_from(["m31a", "login", "--api-key", "nvapi-test12345"]).unwrap();
-        match cli.command {
-            Some(Commands::Login {
-                api_key,
-                device_code,
-                browser,
-            }) => {
-                assert_eq!(api_key, Some("nvapi-test12345".to_string()));
-                assert!(!device_code);
-                assert!(!browser);
-            }
-            _ => panic!("Expected Commands::Login"),
-        }
-
-        let cli_browser = Cli::try_parse_from(["m31a", "login", "--browser"]).unwrap();
-        match cli_browser.command {
-            Some(Commands::Login {
-                api_key,
-                device_code,
-                browser,
-            }) => {
-                assert_eq!(api_key, None);
-                assert!(!device_code);
-                assert!(browser);
-            }
-            _ => panic!("Expected Commands::Login"),
-        }
-
-        let cli_logout = Cli::try_parse_from(["m31a", "logout"]).unwrap();
-        assert!(matches!(cli_logout.command, Some(Commands::Logout)));
-    }
-
-    #[test]
     fn test_cli_parse_goal_commands() {
         let cli_get = Cli::try_parse_from(["m31a", "goal", "get", "thread-42"]).unwrap();
         match cli_get.command {
@@ -5176,7 +4869,7 @@ mod tests {
     }
 
     #[test]
-    fn test_cli_parse_serve_and_pair_commands() {
+    fn test_cli_parse_serve_command() {
         // serve default
         let cli_serve = Cli::try_parse_from(["m31a", "serve"]).unwrap();
         match cli_serve.command {
@@ -5185,18 +4878,6 @@ mod tests {
                 assert_eq!(bind, "127.0.0.1");
             }
             _ => panic!("Expected Commands::Serve"),
-        }
-
-        // pair host
-        let cli_pair_host = Cli::try_parse_from(["m31a", "pair", "host", "-p", "4000"]).unwrap();
-        match cli_pair_host.command {
-            Some(Commands::Pair {
-                cmd: PairCommands::Host { port, bind },
-            }) => {
-                assert_eq!(port, 4000);
-                assert_eq!(bind, "0.0.0.0");
-            }
-            _ => panic!("Expected PairCommands::Host"),
         }
     }
 }

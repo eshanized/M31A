@@ -32,7 +32,7 @@ use m31a_core::ApprovalPolicy;
 use m31a_core::SandboxPolicy;
 use m31a_core::prompts::CollaborationMode;
 use m31a_core::types::ToolCall;
-use m31a_execpolicy::{Decision, ExecPolicy, classify_tool, evaluate_plan_mode};
+use m31a_execpolicy::{Decision, ExecPolicy, classify_tool};
 use m31a_guardian::GuardianReviewer;
 use m31a_hooks::{HookDisposition, HookEvent, HookRuntime};
 use m31a_provider::ProviderClient;
@@ -80,10 +80,50 @@ impl AuthoritativeToolDispatcher {
 
         let mut current_args = fn_args.to_string();
 
-        // Step 2 & 3: Identification, argument validation & effect classification
-        let _effect = classify_tool(fn_name, Some(&current_args));
+        // Step 1b: Tool identification & validation (unknown tools fail closed)
+        if !self.tools.is_known_tool(fn_name) {
+            let _ = ctx.event_tx.send(EngineEvent::ToolCallStarted {
+                id: ctx.call_id.to_string(),
+                name: fn_name.to_string(),
+                args: current_args.clone(),
+            });
+            let msg = format!(
+                "Execution blocked: Unknown tool '{fn_name}'. Unknown tools fail closed under authoritative policy."
+            );
+            let _ = ctx.event_tx.send(EngineEvent::ToolCallFinished {
+                id: ctx.call_id.to_string(),
+                output: msg.clone(),
+                success: false,
+            });
+            anyhow::bail!("{msg}");
+        }
 
-        // Step 4: ExecPolicy evaluation
+        // Step 2 & 3: Argument validation & effect classification
+        let effect = classify_tool(fn_name, Some(&current_args));
+
+        // Step 4: Collaboration Mode (Plan Mode) restrictions: strictly read-only
+        if self.collaboration_mode == CollaborationMode::Plan
+            && (!effect.is_allowed_in_plan_mode()
+                || effect != m31a_execpolicy::ToolEffect::ReadOnly)
+        {
+            let blocked = format!(
+                "Tool '{fn_name}' is blocked: Agent is in Plan Mode. Effect is {:?} but Plan Mode remains strictly read-only. Call 'update_plan' to document proposed execution steps or switch to Default/Code Mode.",
+                effect
+            );
+            let _ = ctx.event_tx.send(EngineEvent::ToolCallStarted {
+                id: ctx.call_id.to_string(),
+                name: fn_name.to_string(),
+                args: current_args.clone(),
+            });
+            let _ = ctx.event_tx.send(EngineEvent::ToolCallFinished {
+                id: ctx.call_id.to_string(),
+                output: blocked.clone(),
+                success: false,
+            });
+            anyhow::bail!("{blocked}");
+        }
+
+        // Step 5: ExecPolicy and ToolEffect evaluation
         let mut needs_approval = false;
         let mut approval_reason = String::new();
         let mut cmd_str = None;
@@ -104,6 +144,7 @@ impl AuthoritativeToolDispatcher {
 
             match decision {
                 Decision::Deny => {
+                    // Hard-denied operations cannot be overridden!
                     let _ = ctx.event_tx.send(EngineEvent::ToolCallStarted {
                         id: ctx.call_id.to_string(),
                         name: fn_name.to_string(),
@@ -129,59 +170,71 @@ impl AuthoritativeToolDispatcher {
                     }
                 }
             }
-        }
-
-        // Step 5: Collaboration Mode (Plan Mode) restrictions
-        if self.collaboration_mode == CollaborationMode::Plan
-            && let Err(violation) = evaluate_plan_mode(fn_name, Some(&current_args))
-        {
-            let blocked = format!(
-                "Tool '{fn_name}' is blocked: Agent is in Plan Mode. {violation}. Call 'update_plan' to document proposed execution steps or switch to Default/Code Mode."
-            );
-            let _ = ctx.event_tx.send(EngineEvent::ToolCallStarted {
-                id: ctx.call_id.to_string(),
-                name: fn_name.to_string(),
-                args: current_args.clone(),
-            });
-            let _ = ctx.event_tx.send(EngineEvent::ToolCallFinished {
-                id: ctx.call_id.to_string(),
-                output: blocked.clone(),
-                success: false,
-            });
-            anyhow::bail!("{blocked}");
-        }
-
-        // Step 6: ApprovalPolicy enforcement
-        if matches!(fn_name, "write_file" | "edit" | "apply_patch")
-            && self.approval_policy == ApprovalPolicy::OnRequest
-        {
-            let path = serde_json::from_str::<serde_json::Value>(&current_args)
-                .ok()
-                .and_then(|value| {
-                    value
-                        .get("path")
-                        .or_else(|| value.get("file_path"))
-                        .and_then(|p| p.as_str())
-                        .map(PathBuf::from)
-                });
-            if let Some(path) = path {
-                let allowed = self
-                    .session_allowed_files
-                    .read()
-                    .map(|allowed| allowed.contains(&path))
-                    .unwrap_or(false);
-                if !allowed {
+        } else {
+            match effect {
+                m31a_execpolicy::ToolEffect::ReadOnly => {
+                    // Read-only tools do not require approval
+                }
+                m31a_execpolicy::ToolEffect::WorkspaceMutation => {
+                    if self.approval_policy == ApprovalPolicy::OnRequest {
+                        if matches!(fn_name, "write_file" | "edit" | "apply_patch") {
+                            let path = serde_json::from_str::<serde_json::Value>(&current_args)
+                                .ok()
+                                .and_then(|value| {
+                                    value
+                                        .get("path")
+                                        .or_else(|| value.get("file_path"))
+                                        .and_then(|p| p.as_str())
+                                        .map(PathBuf::from)
+                                });
+                            if let Some(path) = path {
+                                let allowed = self
+                                    .session_allowed_files
+                                    .read()
+                                    .map(|allowed| allowed.contains(&path))
+                                    .unwrap_or(false);
+                                if !allowed {
+                                    needs_approval = true;
+                                    approval_reason = format!(
+                                        "File modification requires interactive confirmation: {}",
+                                        path.display()
+                                    );
+                                }
+                            } else {
+                                needs_approval = true;
+                                approval_reason =
+                                    "Workspace mutation requires interactive confirmation"
+                                        .to_string();
+                            }
+                        } else {
+                            needs_approval = true;
+                            approval_reason = format!(
+                                "Workspace mutation '{fn_name}' requires interactive confirmation"
+                            );
+                        }
+                    }
+                }
+                m31a_execpolicy::ToolEffect::ExternalSideEffect => {
+                    if self.approval_policy == ApprovalPolicy::OnRequest
+                        || fn_name == "request_plugin_install"
+                    {
+                        needs_approval = true;
+                        approval_reason = format!(
+                            "External side effect '{fn_name}' requires explicit user confirmation."
+                        );
+                    }
+                }
+                m31a_execpolicy::ToolEffect::PrivilegedOperation => {
                     needs_approval = true;
                     approval_reason = format!(
-                        "File modification requires interactive confirmation: {}",
-                        path.display()
+                        "Privileged operation '{fn_name}' requires explicit host authorization."
                     );
                 }
             }
         }
 
-        // Apply dangerously_bypass override
-        if self.dangerously_bypass {
+        // Apply dangerously_bypass override (cannot bypass PrivilegedOperation)
+        if self.dangerously_bypass && effect != m31a_execpolicy::ToolEffect::PrivilegedOperation {
             needs_approval = false;
         } else if needs_approval && self.approval_policy == ApprovalPolicy::Never {
             // Fail closed: Never auto-denies operations that require approval
@@ -199,7 +252,7 @@ impl AuthoritativeToolDispatcher {
             anyhow::bail!("{denial}");
         }
 
-        // Step 7: Guardian review when applicable
+        // Step 6: Guardian review when applicable (ApproveForMe)
         if guardian_required_for_call(&self.approval_policy, &self.guardian)
             && let Some(guardian) = &self.guardian
         {
@@ -240,6 +293,10 @@ impl AuthoritativeToolDispatcher {
                             ),
                             true,
                         ));
+                        // Guardian error must never silently approve!
+                        if self.approval_policy == ApprovalPolicy::ApproveForMe {
+                            needs_approval = true;
+                        }
                     }
                 }
             } else {
@@ -251,25 +308,34 @@ impl AuthoritativeToolDispatcher {
                     args_value,
                     m31a_guardian::PlannedActionKind::Command,
                 );
-                if let Some(a) = guardian.evaluate_action_locally(&action)
-                    && !a.approved
-                {
-                    let _ = ctx.event_tx.send(EngineEvent::ToolCallStarted {
-                        id: ctx.call_id.to_string(),
-                        name: fn_name.to_string(),
-                        args: current_args.clone(),
-                    });
-                    let denial =
-                        format!("Tool execution blocked by safety reviewer: {}", a.rationale);
-                    let _ = ctx.event_tx.send(EngineEvent::ToolCallFinished {
-                        id: ctx.call_id.to_string(),
-                        output: denial.clone(),
-                        success: false,
-                    });
-                    let _ = ctx.event_tx.send(EngineEvent::GuardianDenied {
-                        rationale: a.rationale.clone(),
-                    });
-                    anyhow::bail!("{denial}");
+                match guardian.evaluate_action_locally(&action) {
+                    Some(a) if !a.approved => {
+                        let _ = ctx.event_tx.send(EngineEvent::ToolCallStarted {
+                            id: ctx.call_id.to_string(),
+                            name: fn_name.to_string(),
+                            args: current_args.clone(),
+                        });
+                        let denial =
+                            format!("Tool execution blocked by safety reviewer: {}", a.rationale);
+                        let _ = ctx.event_tx.send(EngineEvent::ToolCallFinished {
+                            id: ctx.call_id.to_string(),
+                            output: denial.clone(),
+                            success: false,
+                        });
+                        let _ = ctx.event_tx.send(EngineEvent::GuardianDenied {
+                            rationale: a.rationale.clone(),
+                        });
+                        anyhow::bail!("{denial}");
+                    }
+                    Some(a) if a.approved => {
+                        needs_approval = false;
+                    }
+                    _ => {
+                        // Inconclusive or failed: under ApproveForMe, do not silently approve
+                        if self.approval_policy == ApprovalPolicy::ApproveForMe {
+                            needs_approval = true;
+                        }
+                    }
                 }
             }
         }
@@ -304,6 +370,26 @@ impl AuthoritativeToolDispatcher {
                     match decision_res {
                         Ok(m31a_elicitation::ApprovalDecision::AllowOnce) => {
                             // Approved for this invocation
+                            if fn_name == "request_plugin_install"
+                                && let Ok(val) =
+                                    serde_json::from_str::<serde_json::Value>(&current_args)
+                                && let Some(tool_id) = val.get("tool_id").and_then(|v| v.as_str())
+                            {
+                                let action = match val.get("action_type").and_then(|v| v.as_str()) {
+                                    Some("enable") => {
+                                        m31a_tools::DiscoverableToolAction::Enable
+                                    }
+                                    _ => m31a_tools::DiscoverableToolAction::Install,
+                                };
+                                let host_approval = m31a_tools::HostPluginApproval::with_context(
+                                    tool_id,
+                                    action,
+                                    Some(ctx.session_id),
+                                    Some(ctx.turn_id),
+                                    Some(ctx.call_id),
+                                );
+                                self.tools.grant_host_plugin_approval(host_approval);
+                            }
                         }
                         Ok(m31a_elicitation::ApprovalDecision::AllowFile { path }) => {
                             if let Ok(mut allowed) = self.session_allowed_files.write() {
@@ -402,17 +488,25 @@ impl AuthoritativeToolDispatcher {
             self.sandbox_policy
         };
 
-        // Step 11: Tool execution
+        // Step 11: Tool execution with cancellation propagation
         let _ = ctx.event_tx.send(EngineEvent::ToolCallStarted {
             id: ctx.call_id.to_string(),
             name: fn_name.to_string(),
             args: current_args.clone(),
         });
 
-        let exec_result = self
-            .tools
-            .execute(fn_name, &current_args, &self.cwd, effective_sandbox)
-            .await;
+        let exec_result = tokio::select! {
+            biased;
+            _ = ctx.cancel_token.cancelled() => {
+                let _ = ctx.event_tx.send(EngineEvent::ToolCallFinished {
+                    id: ctx.call_id.to_string(),
+                    output: "Tool execution cancelled by user".to_string(),
+                    success: false,
+                });
+                anyhow::bail!("Tool execution cancelled by user");
+            }
+            res = self.tools.execute(fn_name, &current_args, &self.cwd, effective_sandbox) => res,
+        };
 
         // Step 12: Cancellation check
         if ctx.cancel_token.is_cancelled() {

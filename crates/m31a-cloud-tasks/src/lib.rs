@@ -520,6 +520,7 @@ impl CloudTaskExecutor for CloudTasksClientWrapper {
 #[derive(Clone)]
 pub struct LocalFallbackCloudTasksClient {
     running_agents: std::sync::Arc<tokio::sync::RwLock<HashMap<String, AgentHandleWrapper>>>,
+    agent_inputs: std::sync::Arc<tokio::sync::RwLock<HashMap<String, Vec<String>>>>,
 }
 
 impl Default for LocalFallbackCloudTasksClient {
@@ -532,6 +533,7 @@ impl LocalFallbackCloudTasksClient {
     pub fn new() -> Self {
         Self {
             running_agents: std::sync::Arc::new(tokio::sync::RwLock::new(HashMap::new())),
+            agent_inputs: std::sync::Arc::new(tokio::sync::RwLock::new(HashMap::new())),
         }
     }
 }
@@ -670,36 +672,106 @@ impl CloudTaskExecutor for LocalFallbackCloudTasksClient {
         })
     }
 
-    async fn send_agent_input(&self, agent_id: &str, _input: String) -> Result<()> {
+    async fn send_agent_input(&self, agent_id: &str, input: String) -> Result<()> {
         let agents = self.running_agents.read().await;
         if !agents.contains_key(agent_id) {
             anyhow::bail!("Agent '{}' not found", agent_id);
         }
+        self.agent_inputs
+            .write()
+            .await
+            .entry(agent_id.to_string())
+            .or_default()
+            .push(input);
         Ok(())
     }
 
     async fn wait_agent(&self, agent_id: &str) -> Result<TaskResult> {
         let agents = self.running_agents.read().await;
-        if let Some(agent) = agents.get(agent_id) {
-            Ok(TaskResult {
-                task_id: agent.agent_id.clone(),
-                status: TaskStatusEnum::Completed,
-                output: format!(
-                    "Local fallback agent '{}' completed assigned turn lifecycle.",
-                    agent_id
-                ),
-                tool_calls: vec![],
-                usage: TokenUsage::default(),
-                error: None,
-                duration_ms: 10,
-            })
+        let agent = agents
+            .get(agent_id)
+            .ok_or_else(|| anyhow::anyhow!("Agent '{}' not found", agent_id))?
+            .clone();
+        drop(agents);
+
+        let inputs = self.agent_inputs.write().await.remove(agent_id);
+        let start = std::time::Instant::now();
+
+        let (output, status, error) = if let Some(inputs) = inputs
+            && !inputs.is_empty()
+        {
+            let mut combined_output = String::new();
+            let mut final_status = TaskStatusEnum::Completed;
+            let mut first_error = None;
+
+            for raw_input in inputs {
+                let cmd_str = raw_input.trim_start_matches('!').trim();
+                let res = tokio::process::Command::new("sh")
+                    .arg("-c")
+                    .arg(cmd_str)
+                    .output()
+                    .await;
+
+                match res {
+                    Ok(o) => {
+                        let stdout = String::from_utf8_lossy(&o.stdout);
+                        let stderr = String::from_utf8_lossy(&o.stderr);
+                        if o.status.success() {
+                            if !stdout.is_empty() {
+                                combined_output.push_str(&stdout);
+                            }
+                        } else {
+                            final_status = TaskStatusEnum::Failed;
+                            let err_msg = format!(
+                                "Exit {}: {}{}",
+                                o.status.code().unwrap_or(-1),
+                                stdout,
+                                stderr
+                            );
+                            first_error = Some(err_msg);
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        final_status = TaskStatusEnum::Failed;
+                        first_error = Some(format!("Local command spawn error: {e}"));
+                        break;
+                    }
+                }
+            }
+
+            if combined_output.is_empty() && final_status == TaskStatusEnum::Completed {
+                combined_output = "Command succeeded with no output".to_string();
+            }
+
+            (combined_output, final_status, first_error)
         } else {
-            anyhow::bail!("Agent '{}' not found", agent_id);
-        }
+            (
+                String::new(),
+                TaskStatusEnum::Failed,
+                Some(
+                    "No input was provided to the local fallback agent before wait_agent"
+                        .to_string(),
+                ),
+            )
+        };
+
+        let duration_ms = start.elapsed().as_millis() as u64;
+
+        Ok(TaskResult {
+            task_id: agent.agent_id,
+            status,
+            output,
+            tool_calls: vec![],
+            usage: TokenUsage::default(),
+            error,
+            duration_ms,
+        })
     }
 
     async fn close_agent(&self, agent_id: &str) -> Result<()> {
         self.running_agents.write().await.remove(agent_id);
+        self.agent_inputs.write().await.remove(agent_id);
         Ok(())
     }
 
@@ -817,7 +889,7 @@ mod tests {
 
         // Send input
         client
-            .send_agent_input(&agent.agent_id, "build target".to_string())
+            .send_agent_input(&agent.agent_id, "echo build target".to_string())
             .await
             .expect("send input");
 
@@ -827,6 +899,18 @@ mod tests {
             .await
             .expect("wait agent");
         assert_eq!(wait_res.status, TaskStatusEnum::Completed);
+
+        // Verify genuine failure propagation: non-zero exit MUST fail honestly
+        client
+            .send_agent_input(&agent.agent_id, "exit 7".to_string())
+            .await
+            .expect("send input");
+        let fail_res = client
+            .wait_agent(&agent.agent_id)
+            .await
+            .expect("wait agent");
+        assert_eq!(fail_res.status, TaskStatusEnum::Failed);
+        assert!(fail_res.error.unwrap().contains("7"));
 
         // Execute discrete task
         let task = TaskSpec {

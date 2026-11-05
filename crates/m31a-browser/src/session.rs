@@ -182,6 +182,21 @@ pub fn validate_and_sanitize_navigation_url(
                 }
             }
             std::net::IpAddr::V6(ipv6) => {
+                if let Some(mapped_v4) = ipv6.to_ipv4_mapped() {
+                    let octets = mapped_v4.octets();
+                    if mapped_v4.is_loopback() || octets[0] == 127 {
+                        bail!("Navigation to IPv4-mapped loopback IP is prohibited");
+                    }
+                    if octets[0] == 10
+                        || (octets[0] == 172 && (16..=31).contains(&octets[1]))
+                        || (octets[0] == 192 && octets[1] == 168)
+                    {
+                        bail!("Navigation to IPv4-mapped private network IP is prohibited");
+                    }
+                    if octets[0] == 169 && octets[1] == 254 {
+                        bail!("Navigation to IPv4-mapped link-local IP is prohibited");
+                    }
+                }
                 let segments = ipv6.segments();
                 // fe80::/10 link local
                 if (segments[0] & 0xffc0) == 0xfe80 {

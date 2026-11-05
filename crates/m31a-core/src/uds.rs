@@ -115,17 +115,25 @@ pub async fn unlink_stale_socket_if_needed(socket_path: impl AsRef<Path>) -> io:
     }
 }
 
-/// Binds a Unix domain socket listener after preparing the directory and cleaning any stale socket file.
+/// Binds a Unix domain socket listener after preparing the directory, preventing symlink attacks,
+/// cleaning any stale socket file, and enforcing restrictive 0600 file permissions on Unix.
 pub async fn bind_unix_listener(socket_path: impl AsRef<Path>) -> io::Result<UnixListener> {
     let path = socket_path.as_ref();
     if let Some(parent) = path.parent() {
         prepare_private_socket_directory(parent).await?;
     }
 
+    // Guard against symlink attacks: if the target is a symlink, remove it before binding
+    if let Ok(meta) = tokio::fs::symlink_metadata(path).await
+        && meta.file_type().is_symlink()
+    {
+        tokio::fs::remove_file(path).await?;
+    }
+
     let _ = unlink_stale_socket_if_needed(path).await;
 
-    match UnixListener::bind(path) {
-        Ok(listener) => Ok(listener),
+    let listener = match UnixListener::bind(path) {
+        Ok(l) => l,
         Err(err) if err.kind() == ErrorKind::InvalidInput => {
             // If the advertised path exceeds sockaddr_un sun_path (~108 bytes),
             // canonicalize parent and bind relative/canonical path.
@@ -135,13 +143,21 @@ pub async fn bind_unix_listener(socket_path: impl AsRef<Path>) -> io::Result<Uni
                     io::Error::new(ErrorKind::InvalidInput, "missing socket filename")
                 })?;
                 let short_path = canonical_parent.join(file_name);
-                UnixListener::bind(&short_path)
+                UnixListener::bind(&short_path)?
             } else {
-                Err(err)
+                return Err(err);
             }
         }
-        Err(err) => Err(err),
+        Err(err) => return Err(err),
+    };
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = tokio::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).await;
     }
+
+    Ok(listener)
 }
 
 #[cfg(test)]

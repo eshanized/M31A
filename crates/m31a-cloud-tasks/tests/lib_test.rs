@@ -139,15 +139,25 @@ async fn test_local_fallback_client_agent_lifecycle() {
     assert_eq!(agents.len(), 1);
     assert_eq!(agents[0].agent_id, handle.agent_id);
 
-    // 4. Send input & wait
+    // 4. Send genuine command input & wait
     client
-        .send_agent_input(&handle.agent_id, "run status check".to_string())
+        .send_agent_input(&handle.agent_id, "echo status check ok".to_string())
         .await
         .unwrap();
 
     let wait_res = client.wait_agent(&handle.agent_id).await.unwrap();
     assert_eq!(wait_res.status, TaskStatusEnum::Completed);
+    assert!(wait_res.output.contains("status check ok"));
 
-    // 5. Close agent
+    // 5. Test failure mode: command exit 42 MUST fail honestly, never fabricated success
+    client
+        .send_agent_input(&handle.agent_id, "exit 42".to_string())
+        .await
+        .unwrap();
+    let fail_res = client.wait_agent(&handle.agent_id).await.unwrap();
+    assert_eq!(fail_res.status, TaskStatusEnum::Failed);
+    assert!(fail_res.error.unwrap().contains("42"));
+
+    // 6. Close agent
     client.close_agent(&handle.agent_id).await.unwrap();
 }

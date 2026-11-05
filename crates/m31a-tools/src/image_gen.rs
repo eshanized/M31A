@@ -73,6 +73,8 @@ pub struct ImageGenerationRequest {
     pub transparent_background: Option<bool>,
     pub referenced_image_paths: Option<Vec<String>>,
     pub num_last_images_to_include: Option<usize>,
+    #[serde(default)]
+    pub offline_preview: Option<bool>,
 }
 
 /// Result of an image generation operation.
@@ -281,9 +283,20 @@ pub async fn execute_image_generation(
 
     let (width, height) = parse_requested_dimensions(req.size.as_deref());
 
-    // Try generating via active external AI provider if configured
-    let mut png_bytes = None;
-    if let Some((manager, model_name)) = build_configured_image_manager() {
+    let is_offline_preview = req.offline_preview.unwrap_or(false)
+        || std::env::var("M31A_OFFLINE_PREVIEW")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+
+    let (bytes, is_synthetic) = if is_offline_preview {
+        (synthesize_valid_png(width, height), true)
+    } else {
+        let (manager, model_name) = build_configured_image_manager().ok_or_else(|| {
+            anyhow::anyhow!(
+                "No external AI image provider configured (e.g. OPENAI_API_KEY, STABILITY_API_KEY, or LOCAL_SD_URL). Image generation failed."
+            )
+        })?;
+
         let quality = if req.quality.as_deref() == Some("hd") {
             ImageQuality::High
         } else {
@@ -304,27 +317,26 @@ pub async fn execute_image_generation(
             quality,
         };
 
-        match manager.generate(prov_req).await {
-            Ok(images) if !images.is_empty() => {
-                png_bytes = Some(images[0].data.clone());
-            }
-            Ok(_) => {
-                tracing::warn!(
-                    "Image provider returned empty image set; falling back to synthesis"
-                );
-            }
-            Err(e) => {
-                tracing::warn!(error = %e, "Image provider failed; falling back to synthesis");
-            }
-        }
-    }
+        let images = manager.generate(prov_req).await.map_err(|e| {
+            anyhow::anyhow!("External AI image provider failed to generate image: {e}")
+        })?;
 
-    let bytes = png_bytes.unwrap_or_else(|| synthesize_valid_png(width, height));
+        if images.is_empty() {
+            anyhow::bail!("Configured image provider returned an empty image set");
+        }
+
+        (images[0].data.clone(), false)
+    };
+
     tokio::fs::write(&target_path, &bytes).await?;
 
     let output_dir = target_path.parent().unwrap_or(save_root);
-    let hint = image_generation_output_hint(output_dir, &target_path)
+    let mut hint = image_generation_output_hint(output_dir, &target_path)
         .unwrap_or_else(|| format!("Generated image saved to {}", target_path.display()));
+
+    if is_synthetic {
+        hint = format!("[SYNTHETIC TEST IMAGE] {}", hint);
+    }
 
     Ok(ImageGenerationResult {
         call_id,
@@ -378,7 +390,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_execute_image_generation_success() {
+    async fn test_execute_image_generation_offline_preview_success() {
         let tmp = tempfile::tempdir().unwrap();
         let req = ImageGenerationRequest {
             prompt: "A beautiful nebula with purple stars".to_string(),
@@ -387,15 +399,17 @@ mod tests {
             transparent_background: Some(false),
             referenced_image_paths: None,
             num_last_images_to_include: None,
+            offline_preview: Some(true),
         };
 
         let result = execute_image_generation(tmp.path(), "test_session", req)
             .await
-            .expect("must succeed");
+            .expect("must succeed in offline preview");
 
         assert_eq!(result.width, 1024);
         assert_eq!(result.height, 1024);
         assert_eq!(result.format, "png");
+        assert!(result.hint.contains("[SYNTHETIC TEST IMAGE]"));
         assert!(Path::new(&result.image_path).exists());
 
         // Verify valid PNG signature in written file
@@ -411,6 +425,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_execute_image_generation_fails_without_provider() {
+        // Save and remove provider env vars for this test
+        let vars = [
+            "OPENAI_API_KEY",
+            "STABILITY_API_KEY",
+            "LOCAL_SD_URL",
+            "M31A_OFFLINE_PREVIEW",
+        ];
+        let saved: Vec<_> = vars.iter().map(|k| (*k, std::env::var(k).ok())).collect();
+        for k in &vars {
+            unsafe { std::env::remove_var(k) };
+        }
+
+        let tmp = tempfile::tempdir().unwrap();
+        let req = ImageGenerationRequest {
+            prompt: "A futuristic skyline".to_string(),
+            size: Some("512x512".to_string()),
+            quality: None,
+            transparent_background: None,
+            referenced_image_paths: None,
+            num_last_images_to_include: None,
+            offline_preview: None,
+        };
+
+        let err = execute_image_generation(tmp.path(), "test_session", req)
+            .await
+            .unwrap_err();
+
+        // Restore env vars
+        for (k, val) in saved {
+            if let Some(v) = val {
+                unsafe { std::env::set_var(k, v) };
+            }
+        }
+
+        assert!(
+            err.to_string()
+                .contains("No external AI image provider configured")
+        );
+    }
+
+    #[tokio::test]
     async fn test_execute_image_generation_conflict_error() {
         let tmp = tempfile::tempdir().unwrap();
         let req = ImageGenerationRequest {
@@ -420,6 +476,7 @@ mod tests {
             transparent_background: None,
             referenced_image_paths: Some(vec!["/tmp/nebula.png".to_string()]),
             num_last_images_to_include: Some(2),
+            offline_preview: None,
         };
 
         let err = execute_image_generation(tmp.path(), "test_session", req)

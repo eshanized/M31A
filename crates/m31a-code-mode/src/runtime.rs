@@ -495,7 +495,11 @@ global.tools = new Proxy({}, {
                                     termination_reason = ProcessLifecycleState::Yielded;
                                 }
                                 Some("done") => {
-                                    termination_reason = ProcessLifecycleState::Completed;
+                                    if !yielded
+                                        && termination_reason != ProcessLifecycleState::Yielded
+                                    {
+                                        termination_reason = ProcessLifecycleState::Completed;
+                                    }
                                     break;
                                 }
                                 Some("call") => {
