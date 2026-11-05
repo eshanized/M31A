@@ -301,6 +301,28 @@ impl AudioJitterBuffer {
     }
 }
 
+/// Concrete handle representing active host audio input and output streams.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AudioStreamHandle {
+    pub stream_id: String,
+    pub input_active: bool,
+    pub output_active: bool,
+}
+
+impl AudioStreamHandle {
+    pub fn new(stream_id: impl Into<String>, input_active: bool, output_active: bool) -> Self {
+        Self {
+            stream_id: stream_id.into(),
+            input_active,
+            output_active,
+        }
+    }
+
+    pub fn is_active(&self) -> bool {
+        self.input_active && self.output_active && !self.stream_id.trim().is_empty()
+    }
+}
+
 /// Real-time voice session state machine and coordinator.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum VoiceSessionStatus {
@@ -309,6 +331,7 @@ pub enum VoiceSessionStatus {
     Connected,
     Muted,
     Closed,
+    Failed,
     HardwareUnavailable,
     ProviderUnsupported,
 }
@@ -320,6 +343,10 @@ pub struct VoiceSessionCoordinator {
     pub mic_buffer: AudioJitterBuffer,
     pub speaker_buffer: AudioJitterBuffer,
     pub vad: VoiceActivityDetector,
+    pub stream_handle: Option<AudioStreamHandle>,
+    pub local_sdp: Option<SessionDescription>,
+    pub remote_sdp: Option<SessionDescription>,
+    pub audio_device_override: Option<Vec<AudioDevice>>,
 }
 
 impl Default for VoiceSessionCoordinator {
@@ -336,11 +363,31 @@ impl VoiceSessionCoordinator {
             mic_buffer: AudioJitterBuffer::new(48000), // ~2s of 24kHz PCM
             speaker_buffer: AudioJitterBuffer::new(48000),
             vad: VoiceActivityDetector::default(),
+            stream_handle: None,
+            local_sdp: None,
+            remote_sdp: None,
+            audio_device_override: None,
         }
     }
 
+    pub fn available_devices(&self) -> Vec<AudioDevice> {
+        if let Some(ref devs) = self.audio_device_override {
+            devs.clone()
+        } else {
+            AudioDeviceManager::enumerate_devices()
+        }
+    }
+
+    pub fn check_audio_hardware(&self) -> (bool, bool) {
+        let devices = self.available_devices();
+        let has_input = devices.iter().any(|d| d.kind == AudioDeviceKind::Input);
+        let has_output = devices.iter().any(|d| d.kind == AudioDeviceKind::Output);
+        (has_input, has_output)
+    }
+
     pub fn start_session(&mut self) {
-        if AudioDeviceManager::enumerate_devices().is_empty() {
+        let (has_input, has_output) = self.check_audio_hardware();
+        if !has_input || !has_output {
             self.status = VoiceSessionStatus::HardwareUnavailable;
         } else {
             self.status = VoiceSessionStatus::Connecting;
@@ -348,30 +395,62 @@ impl VoiceSessionCoordinator {
     }
 
     pub fn try_start_session(&mut self) -> Result<()> {
-        let devices = AudioDeviceManager::enumerate_devices();
-        if devices.is_empty() {
+        let (has_input, has_output) = self.check_audio_hardware();
+        if !has_input || !has_output {
             self.status = VoiceSessionStatus::HardwareUnavailable;
             anyhow::bail!(
-                "Cannot start voice session: no audio input/output devices detected on host"
+                "Cannot start voice session: required audio hardware unavailable (input: {}, output: {})",
+                has_input,
+                has_output
             );
         }
         self.status = VoiceSessionStatus::Connecting;
         Ok(())
     }
 
-    /// Explicitly transitions to `Connected` only when an active audio stream or SDP session is established.
-    pub fn establish_stream(&mut self) -> Result<()> {
+    /// Explicitly transitions to `Connected` only when real audio hardware, complete SDP negotiation,
+    /// and an active stream handle are confirmed.
+    pub fn establish_stream(&mut self, handle: AudioStreamHandle) -> Result<()> {
         if self.status != VoiceSessionStatus::Connecting {
+            self.status = VoiceSessionStatus::Failed;
             anyhow::bail!(
                 "Cannot establish audio stream: session is in {:?} state, expected Connecting",
                 self.status
             );
         }
+
+        let (has_input, has_output) = self.check_audio_hardware();
+        if !has_input || !has_output {
+            self.status = VoiceSessionStatus::HardwareUnavailable;
+            anyhow::bail!(
+                "Cannot establish stream: missing required audio hardware (input: {}, output: {})",
+                has_input,
+                has_output
+            );
+        }
+
+        // Verify SDP negotiation has occurred
+        if self.local_sdp.is_none() && self.remote_sdp.is_none() {
+            self.status = VoiceSessionStatus::Failed;
+            anyhow::bail!("Cannot establish audio stream: SDP negotiation incomplete");
+        }
+
+        if !handle.is_active() {
+            self.status = VoiceSessionStatus::Failed;
+            anyhow::bail!(
+                "Cannot establish stream: AudioStreamHandle is inactive (stream_id: '{}', input: {}, output: {})",
+                handle.stream_id,
+                handle.input_active,
+                handle.output_active
+            );
+        }
+
+        self.stream_handle = Some(handle);
         self.status = VoiceSessionStatus::Connected;
         Ok(())
     }
 
-    /// Handles host voice control messages, transitioning session status accordingly.
+    /// Handles host voice control messages, recording negotiation state and controls.
     pub fn handle_control_message(&mut self, msg: VoiceHostControlMessage) -> Result<()> {
         match msg {
             VoiceHostControlMessage::StartVoiceSession { .. } => {
@@ -383,11 +462,11 @@ impl VoiceSessionCoordinator {
             VoiceHostControlMessage::UpdateControls { controls } => {
                 self.controls = controls;
             }
-            VoiceHostControlMessage::OfferSdp { .. }
-            | VoiceHostControlMessage::AnswerSdp { .. } => {
-                if self.status == VoiceSessionStatus::Connecting {
-                    self.establish_stream()?;
-                }
+            VoiceHostControlMessage::OfferSdp { sdp } => {
+                self.local_sdp = Some(sdp);
+            }
+            VoiceHostControlMessage::AnswerSdp { sdp } => {
+                self.remote_sdp = Some(sdp);
             }
             VoiceHostControlMessage::AudioLevelUpdate { .. } => {}
         }
@@ -396,15 +475,36 @@ impl VoiceSessionCoordinator {
 
     pub fn stop_session(&mut self) {
         self.status = VoiceSessionStatus::Closed;
+        self.stream_handle = None;
     }
 
-    pub fn toggle_mute(&mut self) -> bool {
+    pub fn toggle_mute(&mut self) -> Result<bool> {
+        if self.status != VoiceSessionStatus::Connected && self.status != VoiceSessionStatus::Muted
+        {
+            anyhow::bail!(
+                "Cannot toggle mute: voice session is in {:?} state, expected Connected or Muted",
+                self.status
+            );
+        }
         self.controls.microphone_muted = !self.controls.microphone_muted;
-        self.controls.microphone_muted
+        self.status = if self.controls.microphone_muted {
+            VoiceSessionStatus::Muted
+        } else {
+            VoiceSessionStatus::Connected
+        };
+        Ok(self.controls.microphone_muted)
     }
 
-    pub fn set_speaker_suppressed(&mut self, suppressed: bool) {
+    pub fn set_speaker_suppressed(&mut self, suppressed: bool) -> Result<()> {
+        if self.status != VoiceSessionStatus::Connected && self.status != VoiceSessionStatus::Muted
+        {
+            anyhow::bail!(
+                "Cannot update speaker suppression: voice session is in {:?} state, expected Connected or Muted",
+                self.status
+            );
+        }
         self.controls.speaker_suppressed = suppressed;
+        Ok(())
     }
 
     /// Ingests incoming microphone samples (unless muted), updates VAD, and computes live audio levels.
@@ -493,35 +593,95 @@ mod tests {
         assert_eq!(buffer.len(), 30);
     }
 
-    #[test]
-    fn test_voice_session_coordinator_lifecycle_and_mute() {
-        let mut coord = VoiceSessionCoordinator::new();
-        assert_eq!(coord.status, VoiceSessionStatus::Idle);
-
-        coord.start_session();
-        assert_eq!(coord.status, VoiceSessionStatus::Connecting);
-
-        // Stream establishment is required to reach Connected
-        coord.establish_stream().expect("must establish stream");
-        assert_eq!(coord.status, VoiceSessionStatus::Connected);
-
-        let samples = vec![10000i16; 100];
-        let state = coord.process_mic_input(&samples);
-        assert!(state.microphone_peak > 0);
-
-        // Mute mic
-        let is_muted = coord.toggle_mute();
-        assert!(is_muted);
-        let state_muted = coord.process_mic_input(&samples);
-        assert_eq!(state_muted.microphone_peak, 0);
-
-        coord.stop_session();
-        assert_eq!(coord.status, VoiceSessionStatus::Closed);
+    fn mock_devices() -> Vec<AudioDevice> {
+        vec![
+            AudioDevice {
+                name: "Mock Microphone".to_string(),
+                channels: 2,
+                is_default: true,
+                kind: AudioDeviceKind::Input,
+            },
+            AudioDevice {
+                name: "Mock Speaker".to_string(),
+                channels: 2,
+                is_default: true,
+                kind: AudioDeviceKind::Output,
+            },
+        ]
     }
 
     #[test]
-    fn test_voice_session_sdp_handshake_establishes_connection() {
+    fn test_voice_session_initiation_without_audio_hardware() {
         let mut coord = VoiceSessionCoordinator::new();
+        coord.audio_device_override = Some(vec![]);
+
+        coord.start_session();
+        assert_eq!(coord.status, VoiceSessionStatus::HardwareUnavailable);
+
+        let err = coord.try_start_session().unwrap_err();
+        assert!(err.to_string().contains("hardware unavailable"));
+    }
+
+    #[test]
+    fn test_unnegotiated_sdp_fails_stream_establishment() {
+        let mut coord = VoiceSessionCoordinator::new();
+        coord.audio_device_override = Some(mock_devices());
+        coord.start_session();
+        assert_eq!(coord.status, VoiceSessionStatus::Connecting);
+
+        // Attempting to establish stream without SDP negotiation fails closed
+        let handle = AudioStreamHandle::new("stream-1", true, true);
+        let res = coord.establish_stream(handle);
+        assert!(res.is_err());
+        assert_eq!(coord.status, VoiceSessionStatus::Failed);
+        assert!(
+            res.unwrap_err()
+                .to_string()
+                .contains("SDP negotiation incomplete")
+        );
+    }
+
+    #[test]
+    fn test_stream_creation_failure_on_inactive_handle() {
+        let mut coord = VoiceSessionCoordinator::new();
+        coord.audio_device_override = Some(mock_devices());
+        coord.start_session();
+
+        let sdp =
+            SessionDescription::new("v=0\r\no=- 12345 2 IN IP4 127.0.0.1\r\ns=-\r\n").unwrap();
+        coord
+            .handle_control_message(VoiceHostControlMessage::AnswerSdp { sdp })
+            .unwrap();
+
+        // Inactive handle (output_active is false)
+        let inactive = AudioStreamHandle::new("stream-1", true, false);
+        let res = coord.establish_stream(inactive);
+        assert!(res.is_err());
+        assert_eq!(coord.status, VoiceSessionStatus::Failed);
+        assert!(res.unwrap_err().to_string().contains("inactive"));
+    }
+
+    #[test]
+    fn test_mute_during_failed_or_disconnected_state() {
+        let mut coord = VoiceSessionCoordinator::new();
+        assert_eq!(coord.status, VoiceSessionStatus::Idle);
+        assert!(coord.toggle_mute().is_err());
+        assert!(coord.set_speaker_suppressed(true).is_err());
+
+        coord.status = VoiceSessionStatus::Failed;
+        assert!(coord.toggle_mute().is_err());
+
+        coord.status = VoiceSessionStatus::Closed;
+        assert!(coord.toggle_mute().is_err());
+
+        coord.status = VoiceSessionStatus::HardwareUnavailable;
+        assert!(coord.toggle_mute().is_err());
+    }
+
+    #[test]
+    fn test_legitimate_connected_operation_with_active_stream_handle() {
+        let mut coord = VoiceSessionCoordinator::new();
+        coord.audio_device_override = Some(mock_devices());
         coord.start_session();
         assert_eq!(coord.status, VoiceSessionStatus::Connecting);
 
@@ -529,7 +689,36 @@ mod tests {
             SessionDescription::new("v=0\r\no=- 12345 2 IN IP4 127.0.0.1\r\ns=-\r\n").unwrap();
         coord
             .handle_control_message(VoiceHostControlMessage::AnswerSdp { sdp })
-            .expect("handshake must succeed");
+            .unwrap();
+
+        // Establish stream with active handle
+        let handle = AudioStreamHandle::new("stream-live-001", true, true);
+        coord
+            .establish_stream(handle)
+            .expect("must establish stream");
         assert_eq!(coord.status, VoiceSessionStatus::Connected);
+
+        let samples = vec![10000i16; 100];
+        let state = coord.process_mic_input(&samples);
+        assert!(state.microphone_peak > 0);
+
+        // Mute mic transitions to Muted status
+        let is_muted = coord.toggle_mute().unwrap();
+        assert!(is_muted);
+        assert_eq!(coord.status, VoiceSessionStatus::Muted);
+        let state_muted = coord.process_mic_input(&samples);
+        assert_eq!(state_muted.microphone_peak, 0);
+
+        // Unmute transitions back to Connected
+        let unmuted = coord.toggle_mute().unwrap();
+        assert!(!unmuted);
+        assert_eq!(coord.status, VoiceSessionStatus::Connected);
+
+        // Speaker suppression
+        assert!(coord.set_speaker_suppressed(true).is_ok());
+
+        coord.stop_session();
+        assert_eq!(coord.status, VoiceSessionStatus::Closed);
+        assert!(coord.stream_handle.is_none());
     }
 }
