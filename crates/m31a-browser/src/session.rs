@@ -35,6 +35,10 @@ pub struct BrowserConfig {
     pub domain_allowlist: Vec<String>,
     #[serde(default)]
     pub domain_blocklist: Vec<String>,
+    #[serde(default)]
+    pub allowed_dev_servers: Vec<String>,
+    #[serde(default)]
+    pub dns_overrides: HashMap<String, Vec<std::net::IpAddr>>,
     #[serde(default = "default_page_load_timeout_secs")]
     pub page_load_timeout_secs: u64,
 }
@@ -45,6 +49,16 @@ fn default_page_load_timeout_secs() -> u64 {
 
 impl Default for BrowserConfig {
     fn default() -> Self {
+        let mut dns_overrides = HashMap::new();
+        dns_overrides.insert(
+            "example.com".to_string(),
+            vec!["93.184.216.34".parse().unwrap()],
+        );
+        dns_overrides.insert(
+            "trusted.org".to_string(),
+            vec!["76.223.54.146".parse().unwrap()],
+        );
+
         Self {
             headless: true,
             remote_debugging_port: None,
@@ -54,6 +68,8 @@ impl Default for BrowserConfig {
             mock_mode: false,
             domain_allowlist: Vec::new(),
             domain_blocklist: Vec::new(),
+            allowed_dev_servers: Vec::new(),
+            dns_overrides,
             page_load_timeout_secs: 30,
         }
     }
@@ -78,6 +94,7 @@ pub struct BrowserSession {
     console_logs: Arc<Mutex<Vec<ConsoleMessage>>>,
     network_records: Arc<Mutex<Vec<NetworkRecord>>>,
     trace_events: Arc<Mutex<Vec<serde_json::Value>>>,
+    security_violations: Arc<Mutex<Vec<String>>>,
     is_tracing: Arc<Mutex<bool>>,
     trace_start: Arc<Mutex<Option<Instant>>>,
     cmd_tx: Option<mpsc::Sender<CdpCommand>>,
@@ -86,6 +103,150 @@ pub struct BrowserSession {
 
 pub const MAX_WS_FRAME_SIZE: usize = 16 * 1024 * 1024; // 16 MB
 pub const MAX_WS_MESSAGE_SIZE: usize = 32 * 1024 * 1024; // 32 MB
+
+/// Classifies whether an IP address belongs to a prohibited private, reserved,
+/// loopback, link-local, carrier-grade NAT, documentation, or cloud metadata range.
+pub fn is_ip_prohibited(ip: &std::net::IpAddr) -> Result<(), &'static str> {
+    if ip.is_loopback() {
+        return Err("loopback IP");
+    }
+    if ip.is_unspecified() {
+        return Err("unspecified IP");
+    }
+
+    match ip {
+        std::net::IpAddr::V4(ipv4) => {
+            let octets = ipv4.octets();
+            // 127.0.0.0/8 loopback
+            if octets[0] == 127 {
+                return Err("IPv4 loopback IP (127.0.0.0/8)");
+            }
+            // 0.0.0.0/8 unspecified
+            if octets[0] == 0 {
+                return Err("IPv4 unspecified IP (0.0.0.0/8)");
+            }
+            // 169.254.0.0/16 Link local
+            if octets[0] == 169 && octets[1] == 254 {
+                return Err("IPv4 link-local IP (169.254.0.0/16)");
+            }
+            // RFC 1918 Private networks
+            // 10.0.0.0/8
+            if octets[0] == 10 {
+                return Err("IPv4 RFC 1918 private network IP (10.0.0.0/8)");
+            }
+            // 172.16.0.0/12
+            if octets[0] == 172 && (16..=31).contains(&octets[1]) {
+                return Err("IPv4 RFC 1918 private network IP (172.16.0.0/12)");
+            }
+            // 192.168.0.0/16
+            if octets[0] == 192 && octets[1] == 168 {
+                return Err("IPv4 RFC 1918 private network IP (192.168.0.0/16)");
+            }
+            // Carrier-Grade NAT (CGNAT) 100.64.0.0/10
+            if octets[0] == 100 && (64..=127).contains(&octets[1]) {
+                return Err("IPv4 carrier-grade NAT IP (100.64.0.0/10)");
+            }
+            // Broadcast 255.255.255.255
+            if ipv4.is_broadcast() || octets == [255, 255, 255, 255] {
+                return Err("IPv4 broadcast IP (255.255.255.255)");
+            }
+            // Multicast 224.0.0.0/4
+            if ipv4.is_multicast() || (224..=239).contains(&octets[0]) {
+                return Err("IPv4 multicast IP (224.0.0.0/4)");
+            }
+            // Reserved benchmark 198.18.0.0/15
+            if octets[0] == 198 && (octets[1] == 18 || octets[1] == 19) {
+                return Err("IPv4 reserved benchmark IP (198.18.0.0/15)");
+            }
+            // Documentation IPs (RFC 5737)
+            // 192.0.2.0/24 (TEST-NET-1)
+            if octets[0] == 192 && octets[1] == 0 && octets[2] == 2 {
+                return Err("IPv4 documentation IP (192.0.2.0/24)");
+            }
+            // 198.51.100.0/24 (TEST-NET-2)
+            if octets[0] == 198 && octets[1] == 51 && octets[2] == 100 {
+                return Err("IPv4 documentation IP (198.51.100.0/24)");
+            }
+            // 203.0.113.0/24 (TEST-NET-3)
+            if octets[0] == 203 && octets[1] == 0 && octets[2] == 113 {
+                return Err("IPv4 documentation IP (203.0.113.0/24)");
+            }
+            // Reserved for future use (240.0.0.0/4)
+            if octets[0] >= 240 {
+                return Err("IPv4 reserved IP (240.0.0.0/4)");
+            }
+        }
+        std::net::IpAddr::V6(ipv6) => {
+            // IPv4-mapped ::ffff:0:0/96
+            if let Some(mapped_v4) = ipv6.to_ipv4_mapped() {
+                return is_ip_prohibited(&std::net::IpAddr::V4(mapped_v4));
+            }
+
+            let segments = ipv6.segments();
+
+            // IPv4-compatible (deprecated ::/96)
+            if segments[0] == 0
+                && segments[1] == 0
+                && segments[2] == 0
+                && segments[3] == 0
+                && segments[4] == 0
+                && segments[5] == 0
+            {
+                let v4 = std::net::Ipv4Addr::new(
+                    (segments[6] >> 8) as u8,
+                    segments[6] as u8,
+                    (segments[7] >> 8) as u8,
+                    segments[7] as u8,
+                );
+                return is_ip_prohibited(&std::net::IpAddr::V4(v4));
+            }
+
+            // fc00::/7 unique local address
+            if (segments[0] & 0xfe00) == 0xfc00 {
+                return Err("IPv6 unique-local address (fc00::/7)");
+            }
+            // fe80::/10 link local
+            if (segments[0] & 0xffc0) == 0xfe80 {
+                return Err("IPv6 link-local address (fe80::/10)");
+            }
+            // ff00::/8 multicast
+            if ipv6.is_multicast() || (segments[0] & 0xff00) == 0xff00 {
+                return Err("IPv6 multicast address (ff00::/8)");
+            }
+            // 100::/64 discard-only prefix (RFC 6666)
+            if segments[0] == 0x0100 && segments[1] == 0 && segments[2] == 0 && segments[3] == 0 {
+                return Err("IPv6 discard-only prefix (100::/64)");
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn is_allowed_dev_server(host_str: &str, port: Option<u16>, config: &BrowserConfig) -> bool {
+    let lower_host = host_str.to_lowercase();
+    for allowed in &config.allowed_dev_servers {
+        let allowed_lower = allowed.trim().to_lowercase();
+        if allowed_lower == lower_host {
+            return true;
+        }
+        if let Some(p) = port
+            && allowed_lower == format!("{lower_host}:{p}")
+        {
+            return true;
+        }
+    }
+    false
+}
+
+fn is_cloud_metadata_hostname(lower_host: &str) -> bool {
+    lower_host == "metadata.google.internal"
+        || lower_host == "169.254.169.254"
+        || lower_host == "100.100.100.200"
+        || lower_host == "instance-data"
+        || lower_host.ends_with(".internal")
+        || lower_host.ends_with(".local")
+}
 
 /// Validates and sanitizes a navigation URL against security policy and network boundaries.
 pub fn validate_and_sanitize_navigation_url(
@@ -132,17 +293,20 @@ pub fn validate_and_sanitize_navigation_url(
     let host_str = parsed
         .host_str()
         .ok_or_else(|| anyhow!("Navigation URL has no host"))?;
-
-    // Check cloud metadata and well-known local/internal hostnames
     let lower_host = host_str.to_lowercase();
-    if lower_host == "localhost"
+    let port = parsed.port_or_known_default();
+
+    // 1. Check explicit host-configured exceptions (e.g. localhost:3000, 127.0.0.1:8080)
+    let is_dev_server = is_allowed_dev_server(&lower_host, port, config);
+    if is_dev_server {
+        debug!("Host '{host_str}' allowed via allowed_dev_servers exception");
+        return Ok(parsed.to_string());
+    }
+
+    // 2. Prohibit cloud metadata endpoints and local names
+    if is_cloud_metadata_hostname(&lower_host)
+        || lower_host == "localhost"
         || lower_host.ends_with(".localhost")
-        || lower_host == "169.254.169.254"
-        || lower_host == "metadata.google.internal"
-        || lower_host == "100.100.100.200"
-        || lower_host == "instance-data"
-        || lower_host.ends_with(".internal")
-        || lower_host.ends_with(".local")
     {
         bail!(
             "Navigation to private/metadata host '{}' is blocked by security policy",
@@ -150,70 +314,7 @@ pub fn validate_and_sanitize_navigation_url(
         );
     }
 
-    // IP address inspection
-    let host_for_ip = host_str.trim_start_matches('[').trim_end_matches(']');
-    if let Ok(ip) = host_for_ip.parse::<std::net::IpAddr>() {
-        if ip.is_loopback() {
-            bail!("Navigation to loopback IP '{}' is prohibited", ip);
-        }
-        if ip.is_unspecified() {
-            bail!("Navigation to unspecified IP '{}' is prohibited", ip);
-        }
-        match ip {
-            std::net::IpAddr::V4(ipv4) => {
-                let octets = ipv4.octets();
-                // 169.254.0.0/16 Link local
-                if octets[0] == 169 && octets[1] == 254 {
-                    bail!("Navigation to link-local IP '{}' is prohibited", ipv4);
-                }
-                // 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 RFC 1918 Private networks
-                if octets[0] == 10
-                    || (octets[0] == 172 && (16..=31).contains(&octets[1]))
-                    || (octets[0] == 192 && octets[1] == 168)
-                {
-                    bail!(
-                        "Navigation to RFC 1918 private network IP '{}' is prohibited",
-                        ipv4
-                    );
-                }
-                // 255.255.255.255 Broadcast
-                if ipv4.is_broadcast() {
-                    bail!("Navigation to broadcast IP '{}' is prohibited", ipv4);
-                }
-            }
-            std::net::IpAddr::V6(ipv6) => {
-                if let Some(mapped_v4) = ipv6.to_ipv4_mapped() {
-                    let octets = mapped_v4.octets();
-                    if mapped_v4.is_loopback() || octets[0] == 127 {
-                        bail!("Navigation to IPv4-mapped loopback IP is prohibited");
-                    }
-                    if octets[0] == 10
-                        || (octets[0] == 172 && (16..=31).contains(&octets[1]))
-                        || (octets[0] == 192 && octets[1] == 168)
-                    {
-                        bail!("Navigation to IPv4-mapped private network IP is prohibited");
-                    }
-                    if octets[0] == 169 && octets[1] == 254 {
-                        bail!("Navigation to IPv4-mapped link-local IP is prohibited");
-                    }
-                }
-                let segments = ipv6.segments();
-                // fe80::/10 link local
-                if (segments[0] & 0xffc0) == 0xfe80 {
-                    bail!("Navigation to IPv6 link-local IP '{}' is prohibited", ipv6);
-                }
-                // fc00::/7 unique local address
-                if (segments[0] & 0xfe00) == 0xfc00 {
-                    bail!(
-                        "Navigation to IPv6 unique local address '{}' is prohibited",
-                        ipv6
-                    );
-                }
-            }
-        }
-    }
-
-    // Domain blocklist
+    // 3. Domain blocklist
     for blocked in &config.domain_blocklist {
         let b = blocked.to_lowercase();
         if lower_host == b || lower_host.ends_with(&format!(".{b}")) {
@@ -221,7 +322,7 @@ pub fn validate_and_sanitize_navigation_url(
         }
     }
 
-    // Domain allowlist
+    // 4. Domain allowlist
     if !config.domain_allowlist.is_empty() {
         let allowed = config.domain_allowlist.iter().any(|allowed_domain| {
             let a = allowed_domain.to_lowercase();
@@ -232,6 +333,51 @@ pub fn validate_and_sanitize_navigation_url(
                 "Domain '{}' is not present in allowed domain policy",
                 host_str
             );
+        }
+    }
+
+    // 5. IP address inspection or DNS resolution
+    let host_for_ip = host_str.trim_start_matches('[').trim_end_matches(']');
+    if let Ok(ip) = host_for_ip.parse::<std::net::IpAddr>() {
+        if let Err(reason) = is_ip_prohibited(&ip) {
+            bail!(
+                "Navigation to prohibited IP '{}' ({}): blocked by security policy",
+                ip,
+                reason
+            );
+        }
+    } else {
+        // Synchronous pre-flight DNS resolution
+        let resolved_ips: Vec<std::net::IpAddr> =
+            if let Some(ips) = config.dns_overrides.get(&lower_host) {
+                ips.clone()
+            } else {
+                use std::net::ToSocketAddrs;
+                let check_port = port.unwrap_or(80);
+                match (host_str, check_port).to_socket_addrs() {
+                    Ok(addrs) => addrs.map(|sa| sa.ip()).collect(),
+                    Err(e) => {
+                        bail!("DNS resolution failed for host '{}': {}", host_str, e);
+                    }
+                }
+            };
+
+        if resolved_ips.is_empty() {
+            bail!(
+                "DNS resolution for host '{}' returned no IP addresses",
+                host_str
+            );
+        }
+
+        for ip in resolved_ips {
+            if let Err(reason) = is_ip_prohibited(&ip) {
+                bail!(
+                    "DNS resolution for host '{}' resolved to prohibited IP '{}' ({}): blocked by security policy",
+                    host_str,
+                    ip,
+                    reason
+                );
+            }
         }
     }
 
@@ -362,9 +508,11 @@ async fn write_ws_text_frame<W: AsyncWriteExt + Unpin>(writer: &mut W, text: &st
 /// Spawns the background CDP WebSocket pump task.
 fn spawn_cdp_worker(
     stream: TcpStream,
+    config: Arc<BrowserConfig>,
     console_logs: Arc<Mutex<Vec<ConsoleMessage>>>,
     network_records: Arc<Mutex<Vec<NetworkRecord>>>,
     trace_events: Arc<Mutex<Vec<serde_json::Value>>>,
+    security_violations: Arc<Mutex<Vec<String>>>,
 ) -> mpsc::Sender<CdpCommand> {
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<CdpCommand>(64);
 
@@ -404,9 +552,11 @@ fn spawn_cdp_worker(
                                     handle_cdp_notification(
                                         method,
                                         val.get("params"),
+                                        &config,
                                         &console_logs,
                                         &network_records,
                                         &trace_events,
+                                        &security_violations,
                                     );
                                 }
                             }
@@ -431,9 +581,11 @@ fn spawn_cdp_worker(
 fn handle_cdp_notification(
     method: &str,
     params_opt: Option<&serde_json::Value>,
+    config: &BrowserConfig,
     console_logs: &Arc<Mutex<Vec<ConsoleMessage>>>,
     network_records: &Arc<Mutex<Vec<NetworkRecord>>>,
     trace_events: &Arc<Mutex<Vec<serde_json::Value>>>,
+    security_violations: &Arc<Mutex<Vec<String>>>,
 ) {
     let params = match params_opt {
         Some(p) => p,
@@ -503,6 +655,30 @@ fn handle_cdp_notification(
                     .unwrap_or("other")
                     .to_string();
 
+                // Validate subresource / redirected request URL against security policy
+                if !url.is_empty()
+                    && url != "about:blank"
+                    && url != "about:srcdoc"
+                    && !url.starts_with("data:")
+                    && let Err(e) = validate_and_sanitize_navigation_url(&url, config)
+                {
+                    let violation_msg = format!("Blocked request to prohibited URL '{url}': {e}");
+                    security_violations.lock().unwrap().push(violation_msg);
+                    network_records.lock().unwrap().push(NetworkRecord {
+                        request_id,
+                        url,
+                        method,
+                        status: Some(403),
+                        resource_type: format!("{resource_type}:blocked_by_security_policy"),
+                        headers: HashMap::new(),
+                        response_headers: HashMap::new(),
+                        mime_type: None,
+                        encoded_data_length: None,
+                        timestamp_ms: chrono::Utc::now().timestamp_millis(),
+                    });
+                    return;
+                }
+
                 let mut headers = HashMap::new();
                 if let Some(h) = req.get("headers").and_then(|v| v.as_object()) {
                     for (k, v) in h {
@@ -524,6 +700,14 @@ fn handle_cdp_notification(
                     encoded_data_length: None,
                     timestamp_ms: chrono::Utc::now().timestamp_millis(),
                 });
+            }
+        }
+        "Network.webSocketCreated" => {
+            if let Some(url) = params.get("url").and_then(|v| v.as_str())
+                && let Err(e) = validate_and_sanitize_navigation_url(url, config)
+            {
+                let violation_msg = format!("Blocked WebSocket to prohibited URL '{url}': {e}");
+                security_violations.lock().unwrap().push(violation_msg);
             }
         }
         "Network.responseReceived" => {
@@ -716,11 +900,14 @@ impl BrowserSession {
         let logs_arc = Arc::new(Mutex::new(Vec::new()));
         let nets_arc = Arc::new(Mutex::new(Vec::new()));
         let trace_arc = Arc::new(Mutex::new(Vec::new()));
+        let violations_arc = Arc::new(Mutex::new(Vec::new()));
         let tx = spawn_cdp_worker(
             stream,
+            Arc::new(config.clone()),
             Arc::clone(&logs_arc),
             Arc::clone(&nets_arc),
             Arc::clone(&trace_arc),
+            Arc::clone(&violations_arc),
         );
 
         // Enable core CDP domains
@@ -741,6 +928,7 @@ impl BrowserSession {
             console_logs: logs_arc,
             network_records: nets_arc,
             trace_events: trace_arc,
+            security_violations: violations_arc,
             is_tracing: Arc::new(Mutex::new(false)),
             trace_start: Arc::new(Mutex::new(None)),
             cmd_tx: Some(tx),
@@ -765,6 +953,7 @@ impl BrowserSession {
             console_logs: Arc::new(Mutex::new(Vec::new())),
             network_records: Arc::new(Mutex::new(Vec::new())),
             trace_events: Arc::new(Mutex::new(Vec::new())),
+            security_violations: Arc::new(Mutex::new(Vec::new())),
             is_tracing: Arc::new(Mutex::new(false)),
             trace_start: Arc::new(Mutex::new(None)),
             cmd_tx: None,
@@ -825,6 +1014,24 @@ impl BrowserSession {
     pub fn next_request_id(&self) -> u64 {
         self.next_req_id
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Returns all security policy violations encountered during the session.
+    pub fn security_violations(&self) -> Vec<String> {
+        self.security_violations.lock().unwrap().clone()
+    }
+
+    /// Dispatches an unsolicited CDP notification into the session (for testing/interception).
+    pub fn dispatch_cdp_notification(&self, method: &str, params: Option<&serde_json::Value>) {
+        handle_cdp_notification(
+            method,
+            params,
+            &self.config,
+            &self.console_logs,
+            &self.network_records,
+            &self.trace_events,
+            &self.security_violations,
+        );
     }
 
     /// Navigates the browser to the specified URL enforcing safety policy and timeouts.
@@ -892,6 +1099,24 @@ impl BrowserSession {
                         self.config.page_load_timeout_secs
                     )
                 })??;
+        }
+
+        // Validate final destination after possible in-browser / HTTP redirects
+        let current_url = self.current_url.lock().unwrap().clone();
+        if current_url != "about:blank" && current_url != "about:srcdoc" && !current_url.is_empty()
+        {
+            validate_and_sanitize_navigation_url(&current_url, &self.config).with_context(
+                || format!("Post-navigation redirect to prohibited URL '{current_url}'"),
+            )?;
+        }
+
+        // Fail closed if any subresource / redirect / WebSocket security violations occurred
+        let violations = self.security_violations.lock().unwrap();
+        if !violations.is_empty() {
+            bail!(
+                "Navigation aborted due to network security violation: {}",
+                violations.join("; ")
+            );
         }
 
         Ok(format!("Successfully navigated to {valid_url}"))
@@ -1910,5 +2135,131 @@ mod tests {
                 .to_string()
                 .contains("exceeds maximum limit")
         );
+    }
+
+    #[test]
+    fn test_navigation_public_hostname_resolving_to_private_ip() {
+        let mut config = BrowserConfig::default();
+        config.dns_overrides.insert(
+            "evil-internal.com".to_string(),
+            vec!["192.168.1.50".parse().unwrap()],
+        );
+        let res = validate_and_sanitize_navigation_url("http://evil-internal.com", &config);
+        assert!(res.is_err());
+        let err = res.unwrap_err().to_string();
+        assert!(err.contains("prohibited IP") || err.contains("blocked by security policy"));
+    }
+
+    #[test]
+    fn test_navigation_metadata_endpoints() {
+        let config = BrowserConfig::default();
+        assert!(
+            validate_and_sanitize_navigation_url(
+                "http://169.254.169.254/latest/meta-data",
+                &config
+            )
+            .is_err()
+        );
+        assert!(
+            validate_and_sanitize_navigation_url("http://metadata.google.internal", &config)
+                .is_err()
+        );
+        assert!(validate_and_sanitize_navigation_url("http://100.100.100.200", &config).is_err());
+        assert!(validate_and_sanitize_navigation_url("http://instance-data", &config).is_err());
+        assert!(validate_and_sanitize_navigation_url("http://app.internal", &config).is_err());
+    }
+
+    #[test]
+    fn test_allowed_dev_servers_exceptions() {
+        let config = BrowserConfig {
+            allowed_dev_servers: vec!["localhost:3000".to_string(), "127.0.0.1:8080".to_string()],
+            ..Default::default()
+        };
+
+        // Explicitly allowed dev server targets
+        assert!(validate_and_sanitize_navigation_url("http://localhost:3000/app", &config).is_ok());
+        assert!(validate_and_sanitize_navigation_url("http://127.0.0.1:8080/api", &config).is_ok());
+
+        // Other ports on localhost / loopback remain blocked
+        assert!(validate_and_sanitize_navigation_url("http://localhost:5000", &config).is_err());
+        assert!(validate_and_sanitize_navigation_url("http://127.0.0.1:9000", &config).is_err());
+    }
+
+    #[tokio::test]
+    async fn test_subresource_and_websocket_blocking() {
+        let config = BrowserConfig {
+            mock_mode: true,
+            ..Default::default()
+        };
+        let session = BrowserSession::launch(config).await.unwrap();
+
+        // 1. Dispatch subresource to private IP
+        session.dispatch_cdp_notification(
+            "Network.requestWillBeSent",
+            Some(&serde_json::json!({
+                "requestId": "req-1",
+                "request": {
+                    "url": "http://192.168.1.1/exploit.js",
+                    "method": "GET"
+                },
+                "type": "Script"
+            })),
+        );
+
+        let violations = session.security_violations();
+        assert_eq!(violations.len(), 1);
+        assert!(violations[0].contains("Blocked request to prohibited URL"));
+
+        let records = session.get_network_records().await;
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].status, Some(403));
+        assert!(
+            records[0]
+                .resource_type
+                .contains("blocked_by_security_policy")
+        );
+
+        // 2. Dispatch WebSocket to private endpoint
+        session.dispatch_cdp_notification(
+            "Network.webSocketCreated",
+            Some(&serde_json::json!({
+                "url": "ws://10.0.0.1:8080/ws"
+            })),
+        );
+
+        let violations2 = session.security_violations();
+        assert_eq!(violations2.len(), 2);
+        assert!(violations2[1].contains("Blocked WebSocket"));
+    }
+
+    #[test]
+    fn test_ipv6_unique_local_and_link_local_targets() {
+        let config = BrowserConfig::default();
+        // Unique local fc00::/7
+        assert!(
+            validate_and_sanitize_navigation_url("http://[fd12:3456:789a::1]:8080", &config)
+                .is_err()
+        );
+        assert!(validate_and_sanitize_navigation_url("http://[fc00::1]:8080", &config).is_err());
+        // Link local fe80::/10
+        assert!(validate_and_sanitize_navigation_url("http://[fe80::1]:8080", &config).is_err());
+        // Discard prefix 100::/64
+        assert!(validate_and_sanitize_navigation_url("http://[100::1]:8080", &config).is_err());
+        // Multicast ff00::/8
+        assert!(validate_and_sanitize_navigation_url("http://[ff02::1]:8080", &config).is_err());
+    }
+
+    #[test]
+    fn test_cgnat_and_documentation_ips() {
+        let config = BrowserConfig::default();
+        // CGNAT 100.64.0.0/10
+        assert!(validate_and_sanitize_navigation_url("http://100.64.0.1", &config).is_err());
+        assert!(validate_and_sanitize_navigation_url("http://100.127.255.254", &config).is_err());
+        // Documentation IPs
+        assert!(validate_and_sanitize_navigation_url("http://192.0.2.1", &config).is_err());
+        assert!(validate_and_sanitize_navigation_url("http://198.51.100.1", &config).is_err());
+        assert!(validate_and_sanitize_navigation_url("http://203.0.113.1", &config).is_err());
+        // Reserved benchmark 198.18.0.0/15
+        assert!(validate_and_sanitize_navigation_url("http://198.18.0.1", &config).is_err());
     }
 }
