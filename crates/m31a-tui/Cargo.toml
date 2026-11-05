@@ -44,7 +44,7 @@ serde.workspace = true
 serde_json.workspace = true
 uuid.workspace = true
 shlex.workspace = true
-base64 = "0.22"
+base64 = "0.23"
 unicode-width.workspace = true
 unicode-segmentation.workspace = true
 

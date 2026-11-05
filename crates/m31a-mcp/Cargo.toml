@@ -8,7 +8,7 @@ description = "Advanced Model Context Protocol (MCP) client, OAuth elicitation, 
 
 [dependencies]
 anyhow = { workspace = true }
-base64 = { version = "0.22", features = ["std"] }
+base64 = { version = "0.23", features = ["std"] }
 chrono = { workspace = true }
 m31a-core = { path = "../m31a-core" }
 m31a-storage = { path = "../m31a-storage" }

@@ -8,7 +8,7 @@ description = "Image generation extension for M31A"
 
 [dependencies]
 anyhow = { workspace = true }
-base64 = { version = "0.22", features = ["std"] }
+base64 = { version = "0.23", features = ["std"] }
 m31a-core = { path = "../m31a-core" }
 rand = { version = "0.8", features = ["std"] }
 reqwest = { workspace = true }

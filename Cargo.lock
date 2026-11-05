@@ -1640,7 +1640,7 @@ name = "m31a-browser"
 version = "0.1.13"
 dependencies = [
  "anyhow",
- "base64 0.22.1",
+ "base64 0.23.1",
  "chrono",
  "reqwest 0.12.28",
  "serde",
@@ -1973,7 +1973,7 @@ name = "m31a-image-generation"
 version = "0.1.13"
 dependencies = [
  "anyhow",
- "base64 0.22.1",
+ "base64 0.23.1",
  "hex",
  "m31a-core",
  "m31a-image-generation",
@@ -1994,7 +1994,7 @@ version = "0.1.13"
 dependencies = [
  "anyhow",
  "async-trait",
- "base64 0.22.1",
+ "base64 0.23.1",
  "chrono",
  "futures",
  "m31a-core",
@@ -2200,7 +2200,7 @@ version = "0.1.13"
 dependencies = [
  "anyhow",
  "async-trait",
- "base64 0.22.1",
+ "base64 0.23.1",
  "chrono",
  "libc",
  "m31a-ast",
@@ -2256,7 +2256,7 @@ name = "m31a-tui"
 version = "0.1.13"
 dependencies = [
  "anyhow",
- "base64 0.22.1",
+ "base64 0.23.1",
  "chrono",
  "crossterm 0.29.0",
  "futures-util",

@@ -41,7 +41,7 @@ regex.workspace = true
 chrono = { version = "0.4", features = ["serde"] }
 libc.workspace = true
 sha1.workspace = true
-base64 = "0.22"
+base64 = "0.23"
 toml = { workspace = true }
 
 [dev-dependencies]
