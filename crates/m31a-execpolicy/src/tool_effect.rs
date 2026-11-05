@@ -311,40 +311,19 @@ fn is_strictly_readonly_program(prog: &str, args: &[String]) -> bool {
     match lower_prog.as_str() {
         // Read-only filesystem query utilities
         "ls" | "dir" | "cat" | "head" | "tail" | "more" | "less" | "wc" | "grep" | "egrep"
-        | "fgrep" | "rg" | "ag" | "ack" | "find" | "fd" | "file" | "stat" | "which" | "where"
-        | "type" | "echo" | "printf" | "true" | "false" | "pwd" => {
-            // Verify no output flags or in-place modifiers (e.g. sed -i)
-            true
-        }
+        | "fgrep" | "rg" | "ag" | "ack" | "file" | "stat" | "which" | "where" | "type" | "echo"
+        | "printf" | "true" | "false" | "pwd" => true,
 
-        // Git commands: only allow read-only queries
-        "git" => {
-            if args.is_empty() {
-                return true;
-            }
-            let subcmd = &args[0];
-            matches!(
-                subcmd.as_str(),
-                "status"
-                    | "diff"
-                    | "log"
-                    | "show"
-                    | "branch"
-                    | "tag"
-                    | "rev-parse"
-                    | "remote"
-                    | "config"
-                    | "describe"
-                    | "check-ignore"
-                    | "ls-files"
-                    | "ls-tree"
-                    | "shortlog"
-                    | "blame"
-            ) && !args.iter().any(|a| {
-                // Reject git mutation flags
-                a == "-d" || a == "-D" || a == "-m" || a == "--delete" || a == "--set-upstream"
-            })
-        }
+        // find command: must reject deletion, execution, and output-writing flags
+        "find" => is_find_strictly_readonly(args),
+
+        // fd command: must reject execution flags (-x, -X, --exec, --exec-batch)
+        "fd" => !args
+            .iter()
+            .any(|a| a == "-x" || a == "-X" || a.starts_with("--exec")),
+
+        // Git commands: only allow verified read-only inspection operations
+        "git" => is_git_strictly_readonly(args),
 
         // Cargo read-only queries
         "cargo" => {
@@ -364,6 +343,188 @@ fn is_strictly_readonly_program(prog: &str, args: &[String]) -> bool {
         // Mutating tools: explicitly forbidden
         "rm" | "mv" | "cp" | "touch" | "mkdir" | "rmdir" | "chmod" | "chown" | "ln" | "unlink"
         | "sed" | "awk" | "tee" | "dd" | "tar" | "unzip" | "gzip" | "patch" => false,
+
+        _ => false,
+    }
+}
+
+/// Strictly checks whether `find` arguments contain execution, deletion, or output file actions.
+fn is_find_strictly_readonly(args: &[String]) -> bool {
+    for arg in args {
+        let a = arg.as_str();
+        if a == "-delete"
+            || a == "-exec"
+            || a == "-execdir"
+            || a == "-ok"
+            || a == "-okdir"
+            || a == "-fls"
+            || a == "-fprint"
+            || a == "-fprint0"
+            || a == "-fprintf"
+            || a.starts_with("-exec")
+            || a.starts_with("-ok")
+            || a.starts_with("-fprint")
+            || a.starts_with("-fls")
+        {
+            return false;
+        }
+    }
+    true
+}
+
+/// Strictly validates Git operations to permit ONLY non-mutating inspection.
+fn is_git_strictly_readonly(args: &[String]) -> bool {
+    if args.is_empty() {
+        return true;
+    }
+
+    // Skip global git flags (-C <dir>, -c <config>, --git-dir=<path>, etc.)
+    let mut i = 0;
+    while i < args.len() {
+        let arg = &args[i];
+        if arg == "-C" || arg == "-c" || arg == "--git-dir" || arg == "--work-tree" {
+            i += 2;
+        } else if arg.starts_with("-C")
+            || arg.starts_with("--git-dir=")
+            || arg.starts_with("--work-tree=")
+            || arg == "--no-pager"
+            || arg == "-p"
+            || arg == "--paginate"
+            || arg == "--no-replace-objects"
+            || arg == "--bare"
+        {
+            i += 1;
+        } else {
+            break;
+        }
+    }
+
+    if i >= args.len() {
+        return true;
+    }
+
+    let subcmd = args[i].as_str();
+    let sub_args = &args[i + 1..];
+
+    // Any output redirection or file creation flag in sub_args makes it non-read-only
+    let has_output_flag = sub_args
+        .iter()
+        .any(|a| a == "-o" || a == "--output" || a.starts_with("--output="));
+    if has_output_flag {
+        return false;
+    }
+
+    match subcmd {
+        "status" | "log" | "rev-parse" | "describe" | "check-ignore" | "ls-files" | "ls-tree"
+        | "shortlog" => true,
+
+        "diff" | "show" | "blame" => {
+            // Read-only unless output flag was supplied (checked above)
+            true
+        }
+
+        "branch" => {
+            // Strictly listing branches.
+            // Positional arguments (e.g. `git branch feature`, `git branch -f main HEAD~1`) or
+            // mutating flags (-d, -D, -m, -M, -c, -C, -f, --force, --set-upstream, -u, etc.) MUTATE!
+            for arg in sub_args {
+                let a = arg.as_str();
+                if a == "-d"
+                    || a == "-D"
+                    || a == "-m"
+                    || a == "-M"
+                    || a == "-c"
+                    || a == "-C"
+                    || a == "-f"
+                    || a == "--force"
+                    || a == "--delete"
+                    || a == "--set-upstream"
+                    || a == "--set-upstream-to"
+                    || a == "-u"
+                    || a == "--unset-upstream"
+                    || a == "--edit-description"
+                {
+                    return false;
+                }
+                if !a.starts_with('-') {
+                    return false;
+                }
+            }
+            true
+        }
+
+        "tag" => {
+            // Strictly listing/verifying tags.
+            // Positional tag name (e.g. `git tag v1.0`), or creation flags (-a, -s, -u, -f, -d, --delete) MUTATE!
+            let has_list_flag = sub_args.iter().any(|a| a == "-l" || a == "--list");
+            for arg in sub_args {
+                let a = arg.as_str();
+                if a == "-d"
+                    || a == "--delete"
+                    || a == "-a"
+                    || a == "-s"
+                    || a == "-u"
+                    || a == "-f"
+                    || a == "--force"
+                {
+                    return false;
+                }
+                if !a.starts_with('-') && !has_list_flag {
+                    return false;
+                }
+            }
+            true
+        }
+
+        "remote" => {
+            if sub_args.is_empty() {
+                return true;
+            }
+            let first = sub_args[0].as_str();
+            matches!(first, "-v" | "--verbose" | "show" | "get-url")
+        }
+
+        "config" => {
+            // Must be strictly reading configuration.
+            let has_mutation_flag = sub_args.iter().any(|a| {
+                a == "--add"
+                    || a == "--replace-all"
+                    || a == "--unset"
+                    || a == "--unset-all"
+                    || a == "--rename-section"
+                    || a == "--remove-section"
+                    || a == "--edit"
+                    || a == "-e"
+            });
+            if has_mutation_flag {
+                return false;
+            }
+
+            let has_explicit_read_flag = sub_args.iter().any(|a| {
+                a == "--get"
+                    || a == "--get-all"
+                    || a == "--get-regexp"
+                    || a == "--get-urlmatch"
+                    || a == "--list"
+                    || a == "-l"
+            });
+
+            let positional: Vec<&str> = sub_args
+                .iter()
+                .map(|s| s.as_str())
+                .filter(|a| !a.starts_with('-'))
+                .collect();
+
+            if has_explicit_read_flag {
+                true
+            } else if positional.len() == 1 {
+                // e.g. `git config user.name` reads
+                true
+            } else {
+                // e.g. `git config user.name example` or `git config --global user.name example` writes!
+                false
+            }
+        }
 
         _ => false,
     }
@@ -496,5 +657,107 @@ mod tests {
             Some(r#"{"command": "ls -la src && grep -rn 'fn main' src"}"#),
         );
         assert_eq!(effect, ToolEffect::ReadOnly);
+    }
+
+    #[test]
+    fn test_git_and_find_mutation_classification_gaps() {
+        // Git mutations that must NEVER be classified as ReadOnly:
+        let git_mutations = [
+            "git branch feature",
+            "git branch -f main HEAD~1",
+            "git branch -d old-branch",
+            "git branch -D old-branch",
+            "git tag v1.0",
+            "git tag -a v1.0 -m 'release'",
+            "git tag -d v1.0",
+            "git remote add origin https://github.com/org/repo.git",
+            "git remote remove origin",
+            "git remote rename origin upstream",
+            "git config --global user.name example",
+            "git config --add core.filemode true",
+            "git config user.email test@example.com",
+            "git diff --output=patch.diff",
+            "git diff --output patch.diff",
+            "git diff -o patch.diff",
+            "git show --output=patch.diff",
+            "git blame -o blame.txt file.rs",
+        ];
+
+        for cmd in git_mutations {
+            let effect = classify_tool("exec_command", Some(&format!(r#"{{"command": "{cmd}"}}"#)));
+            assert_eq!(
+                effect,
+                ToolEffect::WorkspaceMutation,
+                "Expected '{cmd}' to be classified as WorkspaceMutation, got {effect:?}"
+            );
+        }
+
+        // Find mutations that must NEVER be classified as ReadOnly:
+        let find_mutations = [
+            "find . -delete",
+            "find . -name '*.rs' -delete",
+            "find . -exec rm -rf {} +",
+            "find . -exec rm {} \\;",
+            "find . -execdir rm {} \\;",
+            "find . -ok rm {} \\;",
+            "find . -fprint output.txt",
+            "find . -fls output.txt",
+        ];
+
+        for cmd in find_mutations {
+            let effect = classify_tool("exec_command", Some(&format!(r#"{{"command": "{cmd}"}}"#)));
+            assert_eq!(
+                effect,
+                ToolEffect::WorkspaceMutation,
+                "Expected '{cmd}' to be classified as WorkspaceMutation, got {effect:?}"
+            );
+        }
+
+        // Strictly read-only variants MUST be classified as ReadOnly:
+        let readonly_cmds = [
+            "find . -name '*.rs' -type f",
+            "git branch",
+            "git branch -a",
+            "git branch -r",
+            "git branch --list",
+            "git tag",
+            "git tag -l",
+            "git tag --list 'v*'",
+            "git remote",
+            "git remote -v",
+            "git remote show origin",
+            "git remote get-url origin",
+            "git config --get user.name",
+            "git config --list",
+            "git config -l",
+            "git config user.name",
+            "git diff HEAD~1",
+            "git log -n 5",
+            "git status",
+        ];
+
+        for cmd in readonly_cmds {
+            let effect = classify_tool("exec_command", Some(&format!(r#"{{"command": "{cmd}"}}"#)));
+            assert_eq!(
+                effect,
+                ToolEffect::ReadOnly,
+                "Expected '{cmd}' to be classified as ReadOnly, got {effect:?}"
+            );
+        }
+
+        // Command sequences: one mutating command contaminates the whole sequence:
+        let mixed_seq = "git status && git branch new-feature";
+        let effect = classify_tool(
+            "exec_command",
+            Some(&format!(r#"{{"command": "{mixed_seq}"}}"#)),
+        );
+        assert_eq!(effect, ToolEffect::WorkspaceMutation);
+
+        let mixed_find = "ls -la && find . -delete";
+        let effect = classify_tool(
+            "exec_command",
+            Some(&format!(r#"{{"command": "{mixed_find}"}}"#)),
+        );
+        assert_eq!(effect, ToolEffect::WorkspaceMutation);
     }
 }
