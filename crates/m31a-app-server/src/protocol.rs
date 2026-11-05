@@ -90,7 +90,7 @@ pub struct AppServer {
     pub admission: Arc<crate::turn_admission::TurnAdmissionController>,
     pub multiplexer: Arc<crate::connection_multiplexer::ConnectionMultiplexer>,
     pub lifecycle: Arc<crate::daemon_lifecycle::DaemonLifecycleCoordinator>,
-    pub auth_manager: Arc<crate::auth::AuthManager>,
+    pub resource_validator: Arc<crate::resource_validator::ResourceValidator>,
     pub trust_store: Arc<Mutex<m31a_trust::TrustStore>>,
     pub pending_approvals: Arc<Mutex<HashMap<String, PendingApprovalEntry>>>,
     pub pending_questions: Arc<Mutex<HashMap<String, PendingQuestionEntry>>>,
@@ -105,12 +105,14 @@ impl AppServer {
         let lifecycle = Arc::new(crate::daemon_lifecycle::DaemonLifecycleCoordinator::new(
             Arc::clone(&admission),
             Arc::clone(&multiplexer),
-            Some(std::env::temp_dir().join("m31a-daemon.sock")),
+            Some(m31a_core::uds::default_daemon_socket_path()),
         ));
         let pending_approvals = Arc::new(Mutex::new(HashMap::new()));
         let pending_questions = Arc::new(Mutex::new(HashMap::new()));
         let active_turns = Arc::new(Mutex::new(HashMap::new()));
-        let auth_manager = Arc::new(crate::auth::AuthManager::with_storage(storage.clone()));
+        let resource_validator = Arc::new(
+            crate::resource_validator::ResourceValidator::with_storage(storage.clone()),
+        );
         let trust_store = Arc::new(Mutex::new(m31a_trust::TrustStore::new()));
 
         let hooks = Arc::new(m31a_hooks::HookRuntime::new(
@@ -163,7 +165,7 @@ impl AppServer {
             admission,
             multiplexer,
             lifecycle,
-            auth_manager,
+            resource_validator,
             trust_store,
             pending_approvals,
             pending_questions,
@@ -212,11 +214,7 @@ impl AppServer {
             }
 
             let response = match serde_json::from_str::<JsonRpcRequest>(line) {
-                Ok(req) => {
-                    let trusted_local = crate::auth::ClientIdentity::trusted_local();
-                    self.handle_request_with_identity(req, Some(&trusted_local))
-                        .await
-                }
+                Ok(req) => self.handle_request(req).await,
                 Err(err) => JsonRpcResponse {
                     jsonrpc: "2.0".to_string(),
                     id: None,
@@ -244,14 +242,9 @@ impl AppServer {
             "M31A App Server listening on Unix domain socket: {:?}",
             socket_path
         );
-        if socket_path.exists() {
-            let _ = std::fs::remove_file(socket_path);
-        }
-        if let Some(parent) = socket_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
 
-        let listener = tokio::net::UnixListener::bind(socket_path)
+        let listener = m31a_core::uds::bind_unix_listener(socket_path)
+            .await
             .with_context(|| format!("Failed to bind Unix domain socket at {:?}", socket_path))?;
 
         let arc_self = Arc::new(self.clone());
@@ -288,12 +281,7 @@ impl AppServer {
                     }
 
                     let response = match serde_json::from_str::<JsonRpcRequest>(line) {
-                        Ok(req) => {
-                            let trusted_local = crate::auth::ClientIdentity::trusted_local();
-                            server_clone
-                                .handle_request_with_identity(req, Some(&trusted_local))
-                                .await
-                        }
+                        Ok(req) => server_clone.handle_request(req).await,
                         Err(err) => JsonRpcResponse {
                             jsonrpc: "2.0".to_string(),
                             id: None,
@@ -633,35 +621,27 @@ impl AppServer {
     }
 
     pub async fn handle_request(&self, req: JsonRpcRequest) -> JsonRpcResponse {
-        self.handle_request_with_identity(req, None).await
-    }
-
-    pub async fn handle_request_with_identity(
-        &self,
-        req: JsonRpcRequest,
-        identity: Option<&crate::auth::ClientIdentity>,
-    ) -> JsonRpcResponse {
         let id = req.id.clone();
         let params_val = req.params.clone().unwrap_or(serde_json::Value::Null);
 
-        // §2.1: Centralized RPC authorization enforcement before sensitive dispatch
-        if let Err(auth_err) = self
-            .auth_manager
-            .authorize_rpc(&req.method, &params_val, identity)
+        // Centralized RPC resource validation before dispatch
+        if let Err(val_err) = self
+            .resource_validator
+            .validate_rpc(&req.method, &params_val)
         {
             return JsonRpcResponse {
                 jsonrpc: "2.0".to_string(),
                 id,
                 result: None,
                 error: Some(JsonRpcError {
-                    code: auth_err.jsonrpc_code(),
-                    message: auth_err.to_string(),
+                    code: val_err.jsonrpc_code(),
+                    message: val_err.to_string(),
                     data: None,
                 }),
             };
         }
 
-        match self.dispatch(&req.method, req.params, identity).await {
+        match self.dispatch(&req.method, req.params).await {
             Ok(result) => JsonRpcResponse {
                 jsonrpc: "2.0".to_string(),
                 id,
@@ -694,7 +674,6 @@ impl AppServer {
         &self,
         method: &str,
         params: Option<serde_json::Value>,
-        identity: Option<&crate::auth::ClientIdentity>,
     ) -> Result<serde_json::Value> {
         let params = params.unwrap_or(serde_json::Value::Null);
 
@@ -781,11 +760,6 @@ impl AppServer {
                 self.storage
                     .save_thread(&session.metadata, "", "workspace-write", "on-request")?;
 
-                if let Some(ident) = identity {
-                    self.auth_manager
-                        .register_thread_owner(&session.metadata.id, &ident.client_id);
-                }
-
                 Ok(serde_json::to_value(&session.metadata)?)
             }
 
@@ -795,9 +769,6 @@ impl AppServer {
                     .or_else(|| params.get("id"))
                     .and_then(|v| v.as_str())
                     .context("Missing 'thread_id'")?;
-                if let Some(ident) = identity {
-                    self.auth_manager.require_thread_access(id, ident)?;
-                }
                 let thread = self
                     .storage
                     .get_thread(id)?
@@ -812,19 +783,7 @@ impl AppServer {
             "thread/list" => {
                 let limit = params.get("limit").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
                 let threads = self.storage.list_threads(limit)?;
-                let filtered: Vec<_> = if let Some(ident) = identity {
-                    if ident.is_admin() {
-                        threads
-                    } else {
-                        threads
-                            .into_iter()
-                            .filter(|t| self.auth_manager.is_thread_owner(&t.id, &ident.client_id))
-                            .collect()
-                    }
-                } else {
-                    threads
-                };
-                Ok(serde_json::to_value(filtered)?)
+                Ok(serde_json::to_value(threads)?)
             }
 
             "workspace/trust_request" => {
@@ -846,14 +805,6 @@ impl AppServer {
             }
 
             "workspace/trust_grant" => {
-                if let Some(ident) = identity
-                    && !ident.is_admin()
-                    && !ident.has_scope(crate::auth::AuthScope::Admin)
-                {
-                    anyhow::bail!(
-                        "Permission denied: Admin scope required to grant workspace trust"
-                    );
-                }
                 let path = params
                     .get("path")
                     .and_then(|v| v.as_str())
@@ -870,8 +821,7 @@ impl AppServer {
                 };
                 let target = PathBuf::from(path);
                 self.trust_store.lock().unwrap().trust(&target, level)?;
-                self.auth_manager.record_audit(
-                    identity.map(|i| i.client_id.as_str()),
+                self.resource_validator.record_audit(
                     "workspace_trust_grant",
                     true,
                     &format!("Granted trust level {:?} to '{}'", level, target.display()),
@@ -919,18 +869,11 @@ impl AppServer {
                     .or_else(|| params.get("id"))
                     .and_then(|v| v.as_str())
                     .context("Missing 'thread_id'")?;
-                if let Some(ident) = identity {
-                    self.auth_manager.require_thread_access(parent_id, ident)?;
-                }
                 let new_title = params
                     .get("title")
                     .and_then(|v| v.as_str())
                     .unwrap_or("Forked Session");
                 let forked = self.storage.fork_thread(parent_id, new_title)?;
-                if let Some(ident) = identity {
-                    self.auth_manager
-                        .register_thread_owner(&forked.id, &ident.client_id);
-                }
                 Ok(serde_json::to_value(forked)?)
             }
 
@@ -1057,9 +1000,6 @@ impl AppServer {
                     .get("thread_id")
                     .and_then(|v| v.as_str())
                     .context("Missing 'thread_id'")?;
-                if let Some(ident) = identity {
-                    self.auth_manager.require_thread_access(thread_id, ident)?;
-                }
                 let prompt = params
                     .get("prompt")
                     .and_then(|v| v.as_str())
@@ -1248,11 +1188,6 @@ impl AppServer {
                     );
                 }
 
-                if let Some(ident) = identity {
-                    self.auth_manager
-                        .require_thread_access(&entry.thread_id, ident)?;
-                }
-
                 let entry = pending.remove(approval_id).unwrap();
                 let _ = entry.response_tx.send(decision);
                 Ok(serde_json::json!({
@@ -1285,11 +1220,6 @@ impl AppServer {
                         entry.thread_id,
                         param_tid
                     );
-                }
-
-                if let Some(ident) = identity {
-                    self.auth_manager
-                        .require_thread_access(&entry.thread_id, ident)?;
                 }
 
                 let entry = pending.remove(approval_id).unwrap();
@@ -1335,11 +1265,6 @@ impl AppServer {
                         entry.thread_id,
                         param_tid
                     );
-                }
-
-                if let Some(ident) = identity {
-                    self.auth_manager
-                        .require_thread_access(&entry.thread_id, ident)?;
                 }
 
                 let entry = pending.remove(question_id).unwrap();
@@ -1389,11 +1314,6 @@ impl AppServer {
                     bail!("Missing target identifier");
                 };
 
-                if let Some(ident) = identity {
-                    self.auth_manager
-                        .require_thread_access(&handle.thread_id, ident)?;
-                }
-
                 handle
                     .steer_tx
                     .send(message.to_string())
@@ -1437,11 +1357,6 @@ impl AppServer {
                 } else {
                     bail!("Missing target identifier");
                 };
-
-                if let Some(ident) = identity {
-                    self.auth_manager
-                        .require_thread_access(&handle.thread_id, ident)?;
-                }
 
                 handle.cancel_token.cancel();
                 let cancelled_turn_id = handle.turn_id.clone();
@@ -1541,11 +1456,6 @@ impl AppServer {
                         "Conflicting thread identifier: checkpoint belongs to '{}', got '{param_tid}'",
                         checkpoint.thread_id
                     );
-                }
-
-                if let Some(ident) = identity {
-                    self.auth_manager
-                        .require_thread_access(&checkpoint.thread_id, ident)?;
                 }
 
                 let record = self
@@ -1824,7 +1734,6 @@ mod tests {
         let storage = Storage::open_in_memory().unwrap();
         let tools = Arc::new(ToolRegistry::new());
         let server = AppServer::new(config, storage, tools).unwrap();
-        let local_id = crate::auth::ClientIdentity::trusted_local();
 
         let req = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
@@ -1866,9 +1775,7 @@ mod tests {
             method: "thread/create".to_string(),
             params: Some(serde_json::json!({"cwd": "/tmp"})),
         };
-        let res_untrusted = server
-            .handle_request_with_identity(req_untrusted, Some(&local_id))
-            .await;
+        let res_untrusted = server.handle_request(req_untrusted).await;
         assert!(
             res_untrusted.error.is_some(),
             "Untrusted workspace without authorization must fail closed"
@@ -1881,9 +1788,7 @@ mod tests {
             method: "workspace/trust_grant".to_string(),
             params: Some(serde_json::json!({"path": "/tmp", "level": "session_only"})),
         };
-        let res_grant = server
-            .handle_request_with_identity(req_grant, Some(&local_id))
-            .await;
+        let res_grant = server.handle_request(req_grant).await;
         assert!(res_grant.error.is_none());
 
         // Thread creation now succeeds in authorized workspace
@@ -1893,9 +1798,7 @@ mod tests {
             method: "thread/create".to_string(),
             params: Some(serde_json::json!({"cwd": "/tmp"})),
         };
-        let res_thread = server
-            .handle_request_with_identity(req_thread, Some(&local_id))
-            .await;
+        let res_thread = server.handle_request(req_thread).await;
         assert!(res_thread.error.is_none());
         let thread_id = res_thread
             .result
@@ -1913,9 +1816,7 @@ mod tests {
             method: "thread/fork".to_string(),
             params: Some(serde_json::json!({"thread_id": thread_id, "title": "Forked Branch"})),
         };
-        let res_fork = server
-            .handle_request_with_identity(req_fork, Some(&local_id))
-            .await;
+        let res_fork = server.handle_request(req_fork).await;
         assert!(res_fork.error.is_none());
 
         // Test checkpoint creation and notification
@@ -1931,9 +1832,7 @@ mod tests {
                 "modified_files": ["crates/lib.rs"]
             })),
         };
-        let res_cp = server
-            .handle_request_with_identity(req_cp, Some(&local_id))
-            .await;
+        let res_cp = server.handle_request(req_cp).await;
         assert!(res_cp.error.is_none());
         let cp_val = res_cp.result.unwrap();
         let cp_id = cp_val.get("id").unwrap().as_str().unwrap().to_string();
@@ -1953,9 +1852,7 @@ mod tests {
             method: "checkpoint/list".to_string(),
             params: Some(serde_json::json!({ "thread_id": thread_id })),
         };
-        let res_list_cp = server
-            .handle_request_with_identity(req_list_cp, Some(&local_id))
-            .await;
+        let res_list_cp = server.handle_request(req_list_cp).await;
         assert!(res_list_cp.error.is_none());
         let list_val = res_list_cp.result.unwrap();
         assert_eq!(list_val.as_array().unwrap().len(), 1);
@@ -1967,9 +1864,7 @@ mod tests {
             method: "locks/list".to_string(),
             params: None,
         };
-        let res_locks = server
-            .handle_request_with_identity(req_locks, Some(&local_id))
-            .await;
+        let res_locks = server.handle_request(req_locks).await;
         assert!(res_locks.error.is_none());
 
         // Test thread sections RPC
@@ -1983,9 +1878,7 @@ mod tests {
                 "icon": "shield"
             })),
         };
-        let res_sec_create = server
-            .handle_request_with_identity(req_sec_create, Some(&local_id))
-            .await;
+        let res_sec_create = server.handle_request(req_sec_create).await;
         assert!(res_sec_create.error.is_none());
         let sec_id = res_sec_create
             .result
@@ -2002,9 +1895,7 @@ mod tests {
             method: "thread/section/list".to_string(),
             params: None,
         };
-        let res_sec_list = server
-            .handle_request_with_identity(req_sec_list, Some(&local_id))
-            .await;
+        let res_sec_list = server.handle_request(req_sec_list).await;
         assert!(res_sec_list.error.is_none());
         assert!(!res_sec_list.result.unwrap().as_array().unwrap().is_empty());
 
@@ -2017,9 +1908,7 @@ mod tests {
                 "section_id": sec_id
             })),
         };
-        let res_sec_move = server
-            .handle_request_with_identity(req_sec_move, Some(&local_id))
-            .await;
+        let res_sec_move = server.handle_request(req_sec_move).await;
         assert!(res_sec_move.error.is_none());
         assert_eq!(res_sec_move.result.unwrap().get("moved").unwrap(), true);
 
@@ -2069,9 +1958,7 @@ mod tests {
                 "decision": "allow",
             })),
         };
-        let res_approve = server
-            .handle_request_with_identity(req_approve, Some(&local_id))
-            .await;
+        let res_approve = server.handle_request(req_approve).await;
         assert!(res_approve.error.is_none());
         assert_eq!(res_approve.result.unwrap().get("resolved").unwrap(), true);
 
@@ -2120,9 +2007,7 @@ mod tests {
                 "answers": ["gRPC"],
             })),
         };
-        let res_answer = server
-            .handle_request_with_identity(req_answer, Some(&local_id))
-            .await;
+        let res_answer = server.handle_request(req_answer).await;
         assert!(res_answer.error.is_none());
         assert_eq!(res_answer.result.unwrap().get("resolved").unwrap(), true);
 
@@ -2156,9 +2041,7 @@ mod tests {
                 "message": "Focus on security",
             })),
         };
-        let res_steer = server
-            .handle_request_with_identity(req_steer, Some(&local_id))
-            .await;
+        let res_steer = server.handle_request(req_steer).await;
         assert!(res_steer.error.is_none());
         assert_eq!(steer_rx.recv().await.unwrap(), "Focus on security");
 
@@ -2171,9 +2054,7 @@ mod tests {
                 "turn_id": "turn_active_1",
             })),
         };
-        let res_interrupt = server
-            .handle_request_with_identity(req_interrupt, Some(&local_id))
-            .await;
+        let res_interrupt = server.handle_request(req_interrupt).await;
         assert!(res_interrupt.error.is_none());
         assert!(cancel_token.is_cancelled());
 
@@ -2188,9 +2069,7 @@ mod tests {
                 "budget": 50000,
             })),
         };
-        let res_goal = server
-            .handle_request_with_identity(req_goal, Some(&local_id))
-            .await;
+        let res_goal = server.handle_request(req_goal).await;
         assert!(res_goal.error.is_none());
 
         let req_get_goal = JsonRpcRequest {
@@ -2201,9 +2080,7 @@ mod tests {
                 "thread_id": thread_id,
             })),
         };
-        let res_get_goal = server
-            .handle_request_with_identity(req_get_goal, Some(&local_id))
-            .await;
+        let res_get_goal = server.handle_request(req_get_goal).await;
         assert!(res_get_goal.error.is_none());
         assert_eq!(
             res_get_goal.result.unwrap().get("objective").unwrap(),
@@ -2221,9 +2098,7 @@ mod tests {
                 "payload": "Deferred user message",
             })),
         };
-        let res_inbox = server
-            .handle_request_with_identity(req_inbox, Some(&local_id))
-            .await;
+        let res_inbox = server.handle_request(req_inbox).await;
         assert!(res_inbox.error.is_none());
 
         let req_deq = JsonRpcRequest {
@@ -2234,9 +2109,7 @@ mod tests {
                 "thread_id": thread_id,
             })),
         };
-        let res_deq = server
-            .handle_request_with_identity(req_deq, Some(&local_id))
-            .await;
+        let res_deq = server.handle_request(req_deq).await;
         assert!(res_deq.error.is_none());
         assert_eq!(
             res_deq.result.unwrap().get("payload").unwrap(),
