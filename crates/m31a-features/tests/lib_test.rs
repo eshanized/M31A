@@ -70,7 +70,7 @@ fn sample_flag(id: &str, state: FeatureState, percentage: u8) -> FeatureFlag {
 #[tokio::test]
 async fn test_builtin_flags_registered() {
     let tmp = tempdir().unwrap();
-    let manager = FeatureFlagManager::new(tmp.path().to_path_buf());
+    let manager = FeatureFlagManager::new(tmp.path().to_path_buf()).unwrap();
 
     let flags = manager.list_flags().await;
     assert!(!flags.is_empty(), "Builtin flags should be pre-registered");
@@ -84,7 +84,7 @@ async fn test_builtin_flags_registered() {
 #[tokio::test]
 async fn test_targeting_rules_evaluation() {
     let tmp = tempdir().unwrap();
-    let manager = FeatureFlagManager::new(tmp.path().to_path_buf());
+    let manager = FeatureFlagManager::new(tmp.path().to_path_buf()).unwrap();
 
     let flag = sample_flag("feature-targeted", FeatureState::Enabled, 100);
     manager
@@ -144,7 +144,7 @@ async fn test_targeting_rules_evaluation() {
 #[tokio::test]
 async fn test_overrides_and_clearing() {
     let tmp = tempdir().unwrap();
-    let manager = FeatureFlagManager::new(tmp.path().to_path_buf());
+    let manager = FeatureFlagManager::new(tmp.path().to_path_buf()).unwrap();
 
     let mut flag = sample_flag("feature-override", FeatureState::Disabled, 0);
     flag.targeting = TargetingRules::default();
@@ -188,7 +188,7 @@ async fn test_overrides_and_clearing() {
 #[tokio::test]
 async fn test_dependencies_gate() {
     let tmp = tempdir().unwrap();
-    let manager = FeatureFlagManager::new(tmp.path().to_path_buf());
+    let manager = FeatureFlagManager::new(tmp.path().to_path_buf()).unwrap();
 
     let mut parent = sample_flag("dep-parent", FeatureState::Disabled, 100);
     parent.targeting = TargetingRules::default();
@@ -241,7 +241,7 @@ async fn test_dependencies_gate() {
 #[tokio::test]
 async fn test_rollout_advancement_and_rollback_audit() {
     let tmp = tempdir().unwrap();
-    let manager = FeatureFlagManager::new(tmp.path().to_path_buf());
+    let manager = FeatureFlagManager::new(tmp.path().to_path_buf()).unwrap();
 
     let flag = sample_flag("feature-rollout", FeatureState::Enabled, 10);
     manager
@@ -291,7 +291,7 @@ async fn test_storage_persistence_roundtrip() {
 
     // Create flag in first manager instance and write to disk
     {
-        let manager = FeatureFlagManager::new(storage_dir.clone());
+        let manager = FeatureFlagManager::new(storage_dir.clone()).unwrap();
         let flag = sample_flag("persisted-feature", FeatureState::Enabled, 50);
         manager
             .create_flag(flag, "admin".to_string())
@@ -301,7 +301,7 @@ async fn test_storage_persistence_roundtrip() {
 
     // Load second manager instance from the same disk path
     {
-        let manager2 = FeatureFlagManager::new(storage_dir);
+        let manager2 = FeatureFlagManager::new(storage_dir).unwrap();
         let loaded = manager2.get_flag("persisted-feature").await;
         assert!(loaded.is_some(), "Flag must persist across manager reboots");
         assert_eq!(loaded.unwrap().name, "Flag persisted-feature");
