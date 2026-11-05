@@ -186,16 +186,16 @@ pub struct FeatureFlagManager {
 }
 
 impl FeatureFlagManager {
-    pub fn new(storage_path: PathBuf) -> Self {
+    pub fn new(storage_path: PathBuf) -> Result<Self> {
         let manager = Self {
             flags: Arc::new(RwLock::new(HashMap::new())),
             audit_log: Arc::new(RwLock::new(Vec::new())),
             overrides: Arc::new(RwLock::new(HashMap::new())),
             storage_path,
         };
-        manager.load_from_storage().ok();
         manager.register_builtin_flags();
-        manager
+        manager.load_from_storage()?;
+        Ok(manager)
     }
 
     /// Register built-in feature flags
@@ -821,9 +821,14 @@ impl FeatureFlagManager {
         }
         let content = std::fs::read_to_string(&path)
             .with_context(|| format!("Failed to read feature flags file: {}", path.display()))?;
-        let flags: HashMap<String, FeatureFlag> = serde_json::from_str(&content)
+        let stored_flags: HashMap<String, FeatureFlag> = serde_json::from_str(&content)
             .with_context(|| format!("Failed to parse feature flags JSON: {}", path.display()))?;
-        *self.flags.try_write().expect("uncontended") = flags;
+        {
+            let mut flags = self.flags.try_write().expect("uncontended");
+            for (id, flag) in stored_flags {
+                flags.insert(id, flag);
+            }
+        }
 
         let audit_path = self.storage_path.join("feature_flags_audit.json");
         if audit_path.exists() {
@@ -836,6 +841,104 @@ impl FeatureFlagManager {
             *self.audit_log.try_write().expect("uncontended") = audit;
         }
         Ok(())
+    }
+
+    /// Enable a feature flag by ID and persist to storage
+    pub async fn enable_flag(&self, flag_id: &str, actor: String) -> Result<()> {
+        if self.get_flag(flag_id).await.is_none() {
+            let flag = FeatureFlag {
+                id: flag_id.to_string(),
+                name: flag_id.to_string(),
+                description: format!("Feature flag {}", flag_id),
+                category: FeatureCategory::Experimental,
+                state: FeatureState::Enabled,
+                rollout: RolloutConfig {
+                    strategy: RolloutStrategy::Instant,
+                    percentage: 100,
+                    stages: vec![],
+                    current_stage: 0,
+                },
+                targeting: TargetingRules::default(),
+                dependencies: vec![],
+                metadata: FeatureMetadata {
+                    jira_ticket: None,
+                    github_pr: None,
+                    owner_team: "custom".to_string(),
+                    documentation_url: None,
+                    migration_guide_url: None,
+                    sunset_date: None,
+                },
+                created_at: SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs(),
+                updated_at: SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs(),
+                created_by: actor.clone(),
+            };
+            self.create_flag(flag, actor).await
+        } else {
+            self.update_flag(
+                flag_id,
+                FlagUpdates {
+                    state: Some(FeatureState::Enabled),
+                    ..Default::default()
+                },
+                actor,
+            )
+            .await
+        }
+    }
+
+    /// Disable a feature flag by ID and persist to storage
+    pub async fn disable_flag(&self, flag_id: &str, actor: String) -> Result<()> {
+        if self.get_flag(flag_id).await.is_none() {
+            let flag = FeatureFlag {
+                id: flag_id.to_string(),
+                name: flag_id.to_string(),
+                description: format!("Feature flag {}", flag_id),
+                category: FeatureCategory::Experimental,
+                state: FeatureState::Disabled,
+                rollout: RolloutConfig {
+                    strategy: RolloutStrategy::Instant,
+                    percentage: 0,
+                    stages: vec![],
+                    current_stage: 0,
+                },
+                targeting: TargetingRules::default(),
+                dependencies: vec![],
+                metadata: FeatureMetadata {
+                    jira_ticket: None,
+                    github_pr: None,
+                    owner_team: "custom".to_string(),
+                    documentation_url: None,
+                    migration_guide_url: None,
+                    sunset_date: None,
+                },
+                created_at: SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs(),
+                updated_at: SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs(),
+                created_by: actor.clone(),
+            };
+            self.create_flag(flag, actor).await
+        } else {
+            self.update_flag(
+                flag_id,
+                FlagUpdates {
+                    state: Some(FeatureState::Disabled),
+                    ..Default::default()
+                },
+                actor,
+            )
+            .await
+        }
     }
 
     /// Save flags to storage atomically
@@ -1399,7 +1502,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_feature_flag_evaluation() {
-        let manager = FeatureFlagManager::new(PathBuf::from("/tmp/features"));
+        let temp = tempfile::tempdir().unwrap();
+        let manager = FeatureFlagManager::new(temp.path().to_path_buf()).unwrap();
 
         // Test builtin flags exist
         let flags = manager.list_flags().await;
@@ -1410,7 +1514,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_evaluation() {
-        let manager = FeatureFlagManager::new(PathBuf::from("/tmp/features"));
+        let temp = tempfile::tempdir().unwrap();
+        let manager = FeatureFlagManager::new(temp.path().to_path_buf()).unwrap();
 
         let context = EvaluationContext {
             user_id: Some("test-user".to_string()),
@@ -1428,7 +1533,7 @@ mod tests {
     #[tokio::test]
     async fn test_empty_stages_instant_rollout_does_not_panic() {
         let temp = tempfile::tempdir().unwrap();
-        let manager = FeatureFlagManager::new(temp.path().to_path_buf());
+        let manager = FeatureFlagManager::new(temp.path().to_path_buf()).unwrap();
 
         let context = EvaluationContext {
             user_id: Some("user-1".to_string()),
@@ -1447,7 +1552,7 @@ mod tests {
     #[tokio::test]
     async fn test_custom_attributes_targeting_and_archived_dependency() {
         let temp = tempfile::tempdir().unwrap();
-        let manager = FeatureFlagManager::new(temp.path().to_path_buf());
+        let manager = FeatureFlagManager::new(temp.path().to_path_buf()).unwrap();
 
         // Create base flag and dependent flag
         let base_flag = FeatureFlag {
@@ -1530,5 +1635,37 @@ mod tests {
         let res = manager.evaluate("child_feature", &ctx).await.unwrap();
         assert!(!res.enabled);
         assert_eq!(res.reason, EvaluationReason::Archived);
+    }
+
+    #[tokio::test]
+    async fn test_builtin_feature_flag_state_persistence_across_reboots() {
+        let temp = tempfile::tempdir().unwrap();
+        let storage_path = temp.path().to_path_buf();
+
+        // 1. Initial manager instance has web_search Enabled by default
+        {
+            let manager = FeatureFlagManager::new(storage_path.clone()).unwrap();
+            let flag = manager.get_flag("web_search").await.unwrap();
+            assert_eq!(flag.state, FeatureState::Enabled);
+
+            // User disables web_search
+            manager
+                .disable_flag("web_search", "operator".to_string())
+                .await
+                .unwrap();
+            let updated = manager.get_flag("web_search").await.unwrap();
+            assert_eq!(updated.state, FeatureState::Disabled);
+        }
+
+        // 2. Restarted manager instance must preserve Disabled state and NOT overwrite with builtin default
+        {
+            let manager2 = FeatureFlagManager::new(storage_path).unwrap();
+            let loaded = manager2.get_flag("web_search").await.unwrap();
+            assert_eq!(
+                loaded.state,
+                FeatureState::Disabled,
+                "Persisted disabled state for builtin flag must not be overwritten by register_builtin_flags"
+            );
+        }
     }
 }
