@@ -378,20 +378,22 @@ impl BottomPaneState {
             composer.buffer.split('\n').count().max(1)
         };
         let subagent_extra = if self.subagent_tabs.is_empty() { 0 } else { 1 };
-        let max_h = 8 + subagent_extra;
+        let max_h = 14 + subagent_extra;
         // 1 line status bar + 2 lines border + line_count text lines + optional subagent strip
         (line_count as u16 + 3 + subagent_extra).clamp(4, max_h)
     }
 
     /// Handles character input, delegating authoritative buffer mutation to ChatComposer.
     pub fn on_char(&mut self, c: char, composer: &mut crate::composer::ChatComposer) {
-        composer.insert_char(c);
+        let ch = if c == '\r' { '\n' } else { c };
+        composer.insert_char(ch);
         self.update_autocomplete(composer);
     }
 
     /// Handles pasting text into the composer buffer.
     pub fn on_paste(&mut self, text: &str, composer: &mut crate::composer::ChatComposer) {
-        composer.insert_str(text);
+        let clean = text.replace("\r\n", "\n").replace('\r', "\n");
+        composer.insert_str(&clean);
         self.update_autocomplete(composer);
     }
 
@@ -1003,7 +1005,7 @@ impl BottomPaneState {
             .title(Line::from(vec![
                 Span::styled(" Input ", t.style_secondary().add_modifier(Modifier::BOLD)),
                 Span::styled(
-                    " / commands  @ files  $ skills  ! shell  Shift+Enter newline  Tab mode ",
+                    " / commands  @ files  $ skills  Shift+Enter / Alt+Enter newline  Ctrl+V paste ",
                     t.style_muted(),
                 ),
             ]))
@@ -1433,6 +1435,12 @@ mod tests {
         assert_eq!(pane.desired_height(&composer), 8);
 
         composer.buffer = "1\n2\n3\n4\n5\n6\n7\n8\n9\n10".to_string();
-        assert_eq!(pane.desired_height(&composer), 8); // clamped to 8
+        assert_eq!(pane.desired_height(&composer), 13);
+
+        composer.buffer = (1..=20)
+            .map(|i| i.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_eq!(pane.desired_height(&composer), 14); // clamped to max_h = 14
     }
 }

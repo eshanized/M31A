@@ -43,7 +43,9 @@ pub use chatwidget::{
     AutoScrollController, ChatWidgetState, StreamMetricsSnapshot, StreamingTokenBuffer,
     TurnExecutionState,
 };
-pub use clipboard::{ClipboardResult, copy_to_clipboard, copy_to_clipboard_bool};
+pub use clipboard::{
+    ClipboardResult, copy_to_clipboard, copy_to_clipboard_bool, read_from_clipboard,
+};
 pub use diff_render::DiffRenderer;
 pub use icons::{Icon, IconMode};
 pub use interrupts::{DeferredInterrupt, DeferredInterruptQueue, ToolActivityStatus};
@@ -68,8 +70,8 @@ pub use scrollable_diff::{ScrollViewState, ScrollableDiff};
 pub use stash::{PromptStash, PromptStashEntry};
 pub use subcell::{SubcellCanvas, octant_glyph, smootherstep, tab_pulse_factor};
 pub use terminal::{
-    execute_palette_action, filter_palette_items, handle_key_event, handle_screen_key_event,
-    run_tui_app,
+    execute_palette_action, filter_palette_items, handle_key_event, handle_paste_event,
+    handle_screen_key_event, run_tui_app,
 };
 pub use terminal_detection::{MultiplexerKind, TerminalCapabilities, TerminalInfo, TerminalKind};
 pub use theme::{ColorRole, Theme, ThemeColors, ThemeVariant, init_theme, theme};

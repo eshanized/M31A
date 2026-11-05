@@ -181,6 +181,69 @@ pub fn copy_to_clipboard_bool(text: &str) -> bool {
     copy_to_clipboard(text).is_any_success()
 }
 
+/// Reads the current system clipboard content using available platform CLI utilities.
+pub fn read_from_clipboard() -> Option<String> {
+    #[cfg(target_os = "linux")]
+    {
+        if std::env::var_os("WAYLAND_DISPLAY").is_some()
+            && let Ok(output) = std::process::Command::new("wl-paste")
+                .arg("--no-newline")
+                .output()
+            && output.status.success()
+            && let Ok(text) = String::from_utf8(output.stdout)
+            && !text.is_empty()
+        {
+            return Some(text);
+        }
+
+        if let Ok(output) = std::process::Command::new("xclip")
+            .args(["-selection", "clipboard", "-o"])
+            .output()
+            && output.status.success()
+            && let Ok(text) = String::from_utf8(output.stdout)
+            && !text.is_empty()
+        {
+            return Some(text);
+        }
+
+        if let Ok(output) = std::process::Command::new("xsel")
+            .args(["--clipboard", "--output"])
+            .output()
+            && output.status.success()
+            && let Ok(text) = String::from_utf8(output.stdout)
+            && !text.is_empty()
+        {
+            return Some(text);
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(output) = std::process::Command::new("pbpaste").output()
+            && output.status.success()
+            && let Ok(text) = String::from_utf8(output.stdout)
+            && !text.is_empty()
+        {
+            return Some(text);
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(output) = std::process::Command::new("powershell.exe")
+            .args(["-NoProfile", "-Command", "Get-Clipboard"])
+            .output()
+            && output.status.success()
+            && let Ok(text) = String::from_utf8(output.stdout)
+            && !text.is_empty()
+        {
+            return Some(text);
+        }
+    }
+
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

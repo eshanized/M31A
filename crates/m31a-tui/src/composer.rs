@@ -122,14 +122,15 @@ impl ChatComposer {
 
     /// Inserts a single unicode character at the current cursor position.
     pub fn insert_char(&mut self, c: char) {
+        let ch = if c == '\r' { '\n' } else { c };
         self.push_undo();
         self.ensure_cursor_boundary();
         if self.cursor >= self.buffer.len() {
-            self.buffer.push(c);
+            self.buffer.push(ch);
             self.cursor = self.buffer.len();
         } else {
-            self.buffer.insert(self.cursor, c);
-            self.cursor += c.len_utf8();
+            self.buffer.insert(self.cursor, ch);
+            self.cursor += ch.len_utf8();
         }
         self.popup_index = 0;
     }
@@ -139,14 +140,15 @@ impl ChatComposer {
         if s.is_empty() {
             return;
         }
+        let clean = s.replace("\r\n", "\n").replace('\r', "\n");
         self.push_undo();
         self.ensure_cursor_boundary();
         if self.cursor >= self.buffer.len() {
-            self.buffer.push_str(s);
+            self.buffer.push_str(&clean);
             self.cursor = self.buffer.len();
         } else {
-            self.buffer.insert_str(self.cursor, s);
-            self.cursor += s.len();
+            self.buffer.insert_str(self.cursor, &clean);
+            self.cursor += clean.len();
         }
         self.popup_index = 0;
     }
@@ -246,6 +248,74 @@ impl ChatComposer {
         }
     }
 
+    /// Moves cursor up to the preceding line if multi-line.
+    /// Returns true if cursor was moved within the buffer, or false if already on line 0.
+    pub fn move_cursor_up(&mut self) -> bool {
+        self.ensure_cursor_boundary();
+        let before_cursor = &self.buffer[..self.cursor];
+        let lines: Vec<&str> = before_cursor.split('\n').collect();
+        if lines.len() <= 1 {
+            return false;
+        }
+
+        let current_line_idx = lines.len() - 1;
+        let col_offset = lines.last().map(|l| l.chars().count()).unwrap_or(0);
+
+        let all_lines: Vec<&str> = self.buffer.split('\n').collect();
+        let target_line_idx = current_line_idx - 1;
+        let target_line = all_lines[target_line_idx];
+
+        let mut target_byte_start = 0;
+        for line in all_lines.iter().take(target_line_idx) {
+            target_byte_start += line.len() + 1;
+        }
+
+        let target_chars: Vec<(usize, char)> = target_line.char_indices().collect();
+        let target_col_byte = if col_offset >= target_chars.len() {
+            target_line.len()
+        } else {
+            target_chars[col_offset].0
+        };
+
+        self.cursor = target_byte_start + target_col_byte;
+        self.ensure_cursor_boundary();
+        true
+    }
+
+    /// Moves cursor down to the succeeding line if multi-line.
+    /// Returns true if cursor was moved within the buffer, or false if already on the last line.
+    pub fn move_cursor_down(&mut self) -> bool {
+        self.ensure_cursor_boundary();
+        let before_cursor = &self.buffer[..self.cursor];
+        let lines: Vec<&str> = before_cursor.split('\n').collect();
+        let current_line_idx = lines.len().saturating_sub(1);
+        let col_offset = lines.last().map(|l| l.chars().count()).unwrap_or(0);
+
+        let all_lines: Vec<&str> = self.buffer.split('\n').collect();
+        if current_line_idx + 1 >= all_lines.len() {
+            return false;
+        }
+
+        let target_line_idx = current_line_idx + 1;
+        let target_line = all_lines[target_line_idx];
+
+        let mut target_byte_start = 0;
+        for line in all_lines.iter().take(target_line_idx) {
+            target_byte_start += line.len() + 1;
+        }
+
+        let target_chars: Vec<(usize, char)> = target_line.char_indices().collect();
+        let target_col_byte = if col_offset >= target_chars.len() {
+            target_line.len()
+        } else {
+            target_chars[col_offset].0
+        };
+
+        self.cursor = target_byte_start + target_col_byte;
+        self.ensure_cursor_boundary();
+        true
+    }
+
     /// Checks if the composer text buffer is empty.
     pub fn is_empty(&self) -> bool {
         self.buffer.is_empty()
@@ -270,7 +340,8 @@ impl ChatComposer {
 
     /// Replaces the current composer text and moves cursor to the end.
     pub fn set_text(&mut self, text: &str) {
-        self.buffer = text.to_string();
+        let clean = text.replace("\r\n", "\n").replace('\r', "\n");
+        self.buffer = clean;
         self.cursor = self.buffer.len();
         self.history_index = None;
         self.viewport_offset = 0;

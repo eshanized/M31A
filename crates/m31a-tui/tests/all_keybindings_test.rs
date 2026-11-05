@@ -11,7 +11,7 @@ use m31a_tui::keybindings::{
 };
 use m31a_tui::screens::Screen;
 use m31a_tui::transcript::{NoticeLevel, TranscriptItem};
-use m31a_tui::{App, ModalState, ThemeVariant, handle_key_event, init_theme};
+use m31a_tui::{App, ModalState, ThemeVariant, handle_key_event, handle_paste_event, init_theme};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use tempfile::tempdir;
@@ -659,5 +659,106 @@ fn test_all_keybindings_terminal_render_integrity_across_viewports() {
                     )
                 });
         }
+    }
+}
+
+#[test]
+fn test_paste_large_prompts_and_crlf_normalization() {
+    let (_tmp, mut app) = create_test_app();
+    app.switch_screen(Screen::Chat);
+    app.composer.clear();
+
+    // 1. Paste large multiline prompt with CRLF
+    let big_prompt = "Line 1: Refactor the architecture.\r\nLine 2: Ensure zero secret leakage.\r\nLine 3: Implement exhaustive tests.\r\nLine 4: Support big prompt pasting without corruption.\r\nLine 5: End of prompt.";
+    handle_paste_event(&mut app, big_prompt);
+
+    assert_eq!(
+        app.composer.buffer,
+        "Line 1: Refactor the architecture.\nLine 2: Ensure zero secret leakage.\nLine 3: Implement exhaustive tests.\nLine 4: Support big prompt pasting without corruption.\nLine 5: End of prompt."
+    );
+    assert!(
+        !app.composer.buffer.contains('\r'),
+        "Buffer must never contain carriage returns"
+    );
+    assert!(
+        !app.composer.buffer.contains("```"),
+        "Pasting prompt must not be wrapped in code fences"
+    );
+
+    // 2. Large prompt exceeding 5000 characters
+    let long_sentence = "This is a very long instruction line designed to verify that pasting large prompts directly preserves verbatim text. ";
+    let huge_paste = long_sentence.repeat(50);
+    app.composer.clear();
+    handle_paste_event(&mut app, &huge_paste);
+
+    assert_eq!(app.composer.buffer.len(), huge_paste.len());
+    assert_eq!(app.composer.buffer, huge_paste);
+
+    // 3. Verify bottom pane desired height scales appropriately
+    let desired = app.bottom_pane.desired_height(&app.composer);
+    assert!((4..=15).contains(&desired));
+}
+
+#[test]
+fn test_all_newline_shortcuts_and_multiline_cursor_navigation() {
+    let (_tmp, mut app) = create_test_app();
+    app.switch_screen(Screen::Chat);
+    app.composer.clear();
+
+    // Line 1
+    for c in "First line".chars() {
+        handle_key_event(&mut app, key(KeyCode::Char(c)));
+    }
+
+    // Shift+Enter creates newline without submitting
+    handle_key_event(&mut app, shift_key(KeyCode::Enter));
+    assert_eq!(app.composer.buffer, "First line\n");
+
+    // Line 2
+    for c in "Second line".chars() {
+        handle_key_event(&mut app, key(KeyCode::Char(c)));
+    }
+
+    // Alt+Enter creates newline
+    handle_key_event(&mut app, alt_key(KeyCode::Enter));
+    assert_eq!(app.composer.buffer, "First line\nSecond line\n");
+
+    // Line 3
+    for c in "Third line".chars() {
+        handle_key_event(&mut app, key(KeyCode::Char(c)));
+    }
+
+    // Ctrl+J creates newline
+    handle_key_event(&mut app, ctrl_key(KeyCode::Char('j')));
+    assert_eq!(app.composer.buffer, "First line\nSecond line\nThird line\n");
+
+    // Test multi-line vertical cursor navigation with Up and Down arrows
+    // Cursor is currently at end of line 3
+    handle_key_event(&mut app, key(KeyCode::Up));
+    handle_key_event(&mut app, key(KeyCode::Up));
+    handle_key_event(&mut app, key(KeyCode::Down));
+    handle_key_event(&mut app, key(KeyCode::Down));
+}
+
+#[test]
+fn test_paste_into_active_modals() {
+    let (_tmp, mut app) = create_test_app();
+    app.switch_screen(Screen::Chat);
+
+    // Open Setup Wizard at Credentials step
+    let mut wizard = m31a_tui::SetupWizardState::new(&app.config, &app.available_models);
+    wizard.step = m31a_tui::SetupStep::Credentials;
+    wizard.preserve_existing_key = false;
+    app.push_modal(ModalState::SetupWizard { state: wizard });
+
+    // Paste API key into setup wizard credentials step
+    let test_key = "nvapi-runtime-integration-token\r\n";
+    handle_paste_event(&mut app, test_key);
+
+    if let Some(ModalState::SetupWizard { state }) = app.current_modal() {
+        assert_eq!(state.api_key_input, "nvapi-runtime-integration-token");
+        assert!(!state.api_key_input.contains('\r'));
+    } else {
+        panic!("Setup wizard modal must remain open after paste");
     }
 }

@@ -10,10 +10,7 @@ use crossterm::{
         PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
     },
     execute,
-    terminal::{
-        EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
-        supports_keyboard_enhancement,
-    },
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use futures_util::StreamExt;
 use ratatui::{Terminal, backend::CrosstermBackend};
@@ -37,13 +34,13 @@ impl TerminalSessionGuard {
         enable_raw_mode()?;
         let mut stdout = stdout();
 
-        let keyboard_enhanced = matches!(supports_keyboard_enhancement(), Ok(true));
-        if keyboard_enhanced {
-            let _ = execute!(
-                stdout,
-                PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
-            );
-        }
+        // Always push keyboard enhancement flags so any terminal supporting Kitty / CSI u
+        // protocol disambiguates Shift+Enter and modified keys. Terminals without support
+        // safely ignore this private sequence.
+        let _ = execute!(
+            stdout,
+            PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+        );
 
         if mouse_enabled {
             execute!(
@@ -63,7 +60,7 @@ impl TerminalSessionGuard {
         }
 
         Ok(Self {
-            keyboard_enhanced,
+            keyboard_enhanced: true,
             mouse_captured: mouse_enabled,
             active: true,
         })
@@ -153,25 +150,53 @@ pub async fn run_tui_app(mut app: App, initial_prompt: Option<String>) -> Result
     Ok(())
 }
 
-fn handle_paste_event(app: &mut App, pasted_str: String) {
-    if app.has_active_modal() {
+pub fn handle_paste_event(app: &mut App, pasted_str: impl Into<String>) {
+    let raw = pasted_str.into();
+    let clean = raw.replace("\r\n", "\n").replace('\r', "\n");
+    if clean.is_empty() {
         return;
     }
 
-    if let Some(pill) = app.paste_detector.flush_if_large_paste(&pasted_str) {
-        let snippet = format!("\n```\n{}\n```\n", pill.full_content);
-        app.composer.insert_str(&snippet);
-        app.transcript
-            .push(crate::transcript::TranscriptItem::notice(
-                format!(
-                    "Attached pasted snippet: {} ({} lines)",
-                    pill.title, pill.line_count
-                ),
-                crate::transcript::NoticeLevel::Info,
-            ));
-    } else {
-        app.bottom_pane.on_paste(&pasted_str, &mut app.composer);
+    if let Some(modal) = app.pop_modal() {
+        match modal {
+            ModalState::SetupWizard { mut state } => {
+                if state.step == crate::modals::SetupStep::Credentials {
+                    if state.preserve_existing_key && state.has_existing_key {
+                        state.preserve_existing_key = false;
+                        state.api_key_input.clear();
+                    }
+                    state.api_key_input.push_str(clean.trim());
+                    state.invalidate_connectivity();
+                }
+                app.push_modal(ModalState::SetupWizard { state });
+                return;
+            }
+            ModalState::CommandPalette {
+                mut query,
+                selected_index,
+                scroll_offset,
+                items,
+                ..
+            } => {
+                query.push_str(clean.trim());
+                let filtered_indices = filter_palette_items(&query, &items);
+                app.push_modal(ModalState::CommandPalette {
+                    query,
+                    selected_index: selected_index.min(filtered_indices.len().saturating_sub(1)),
+                    scroll_offset,
+                    items,
+                    filtered_indices,
+                });
+                return;
+            }
+            other => {
+                app.push_modal(other);
+                return;
+            }
+        }
     }
+
+    app.bottom_pane.on_paste(&clean, &mut app.composer);
 }
 
 pub fn handle_key_event(app: &mut App, key: crossterm::event::KeyEvent) {
@@ -2741,13 +2766,49 @@ pub fn handle_composer_key_event(app: &mut App, key: crossterm::event::KeyEvent)
             app.composer.move_cursor_end();
         }
         KeyCode::Up => {
-            if !app.bottom_pane.on_up() {
+            if !app.bottom_pane.on_up() && !app.composer.move_cursor_up() {
                 app.composer.history_prev();
             }
         }
         KeyCode::Down => {
-            if !app.bottom_pane.on_down() {
+            if !app.bottom_pane.on_down() && !app.composer.move_cursor_down() {
                 app.composer.history_next();
+            }
+        }
+        KeyCode::Char('v') | KeyCode::Char('V')
+            if key.modifiers.contains(KeyModifiers::CONTROL) =>
+        {
+            if let Some(text) = crate::clipboard::read_from_clipboard() {
+                let clean = text.replace("\r\n", "\n").replace('\r', "\n");
+                app.bottom_pane.on_paste(&clean, &mut app.composer);
+            }
+        }
+        KeyCode::Char('j') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.bottom_pane.on_char('\n', &mut app.composer);
+        }
+        KeyCode::Char('\n') => {
+            app.bottom_pane.on_char('\n', &mut app.composer);
+        }
+        KeyCode::Char('\r') => {
+            if key.modifiers.contains(KeyModifiers::SHIFT)
+                || key.modifiers.contains(KeyModifiers::ALT)
+            {
+                app.bottom_pane.on_char('\n', &mut app.composer);
+            } else if let Some(submission) = app.bottom_pane.on_enter(&mut app.composer) {
+                match submission {
+                    crate::bottom_pane::BottomPaneSubmit::Message(msg) => {
+                        app.submit_prompt(msg);
+                    }
+                    crate::bottom_pane::BottomPaneSubmit::SlashCommand(cmd) => {
+                        app.execute_slash_command(&cmd);
+                    }
+                    crate::bottom_pane::BottomPaneSubmit::ModelSelected(slug) => {
+                        if let Err(e) = app.switch_model_async(&slug) {
+                            app.provider_status_message =
+                                Some(format!("Failed to activate model: {e}"));
+                        }
+                    }
+                }
             }
         }
         KeyCode::Char('?') if app.composer.is_empty() => {
