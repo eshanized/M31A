@@ -146,7 +146,9 @@ pub use connectors::{
 pub use context_compactor::{
     CompactTokenBudget, CompactedHistory, ContextCompactor, digest_tool_output,
 };
-pub use continuous_learning::{ContinuousLearningEngine, DpoPreferencePair, FewShotExemplar};
+pub use continuous_learning::{
+    ContinuousLearningEngine, DpoPreferencePair, FewShotExemplar, VerificationRecord,
+};
 pub use cost_accounting::{
     BudgetEnforcementAction, CostBudgetPolicy, ModelPricing, ModelUsageBreakdown,
     ThreadCostTracker, TurnCostRecord,
@@ -213,7 +215,11 @@ pub use keyring_store::{
     CredentialStoreError, FileFallbackKeyringStore, KeyringStore, MemoryKeyringStore,
 };
 pub use lru_cache::{AsyncLruCache, LruStats};
-pub use memories::{MemoryItem, MemoryManager, MemoryRecord};
+pub use memories::{
+    EmbeddingGenerator, HttpEmbeddingGenerator, MemoryItem, MemoryManager, MemoryRecord,
+    MockEmbeddingGenerator, RetrievalMethod, ScoredMemoryItem, calculate_cosine_similarity,
+    normalize_vector,
+};
 pub use message_board_client::{
     BoardNotification, BoardPostInfo, BoardThreadSummary, ChannelInfo, RemoteAgentMessageBoard,
 };
@@ -247,8 +253,8 @@ pub use realtime_conversation::{
 };
 pub use realtime_voice::{
     AudioControls, AudioDevice, AudioDeviceKind, AudioDeviceManager, AudioJitterBuffer, AudioState,
-    MAX_SDP_SIZE_BYTES, SessionDescription, VoiceHostControlMessage, VoiceSessionCoordinator,
-    VoiceSessionStatus,
+    AudioStreamHandle, MAX_SDP_SIZE_BYTES, SessionDescription, VoiceHostControlMessage,
+    VoiceSessionCoordinator, VoiceSessionStatus,
 };
 pub use redacted_string::RedactedString;
 pub use response_debug::{
@@ -319,8 +325,9 @@ pub use types::{
     ToolDefinition,
 };
 pub use uds::{
-    SOCKET_DIR_MODE, bind_unix_listener, is_stale_socket_path, prepare_private_socket_directory,
-    shared_daemon_socket_directory, unlink_stale_socket_if_needed,
+    SOCKET_DIR_MODE, bind_unix_listener, default_daemon_socket_path, is_stale_socket_path,
+    prepare_private_socket_directory, shared_daemon_socket_directory,
+    unlink_stale_socket_if_needed,
 };
 pub use user_verification::{
     LocalUserVerificationProvider, UserVerificationKeyCreation, UserVerificationKeyInfo,
