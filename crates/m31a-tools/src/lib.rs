@@ -92,8 +92,8 @@ pub use multi_env_copy::{
 pub use patch::{ApplyPatchArgs, PatchResult, apply_patch_to_workspace, parse_patch};
 pub use plugin_install::{
     DiscoverableTool, DiscoverableToolAction, DiscoverableToolType, HostPluginApproval,
-    RequestPluginInstallArgs, RequestPluginInstallResult, handle_request_plugin_install,
-    list_discoverable_tools,
+    PluginApprovalError, RequestPluginInstallArgs, RequestPluginInstallResult, ToolCallContext,
+    handle_request_plugin_install, list_discoverable_tools,
 };
 pub use pr::{IssueDetails, PullRequestManager, PullRequestResult};
 pub use question::{
