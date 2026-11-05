@@ -116,3 +116,61 @@ fn test_cli_apply_patch_file() {
     let updated = std::fs::read_to_string(&file_path).unwrap();
     assert_eq!(updated, "version = 2\n");
 }
+
+#[test]
+fn test_cli_features_enable_disable_and_list() {
+    let tmp = tempdir().unwrap();
+
+    // 1. List features initially
+    let output = m31a_bin()
+        .env("HOME", tmp.path())
+        .args(["features", "list"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("M31A Feature Flags:"));
+    assert!(stdout.contains("web_search"));
+
+    // 2. Disable web_search feature
+    let output = m31a_bin()
+        .env("HOME", tmp.path())
+        .args(["features", "disable", "web_search"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Disabled feature `web_search`"));
+
+    // 3. Verify it is listed as disabled
+    let output = m31a_bin()
+        .env("HOME", tmp.path())
+        .args(["features", "list"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("web_search"));
+    assert!(stdout.contains("disabled"));
+
+    // 4. Re-enable web_search feature
+    let output = m31a_bin()
+        .env("HOME", tmp.path())
+        .args(["features", "enable", "web_search"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Enabled feature `web_search`"));
+
+    // 5. Verify it is listed as enabled
+    let output = m31a_bin()
+        .env("HOME", tmp.path())
+        .args(["features", "list"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("web_search"));
+    assert!(stdout.contains("enabled"));
+}
