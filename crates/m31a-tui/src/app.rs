@@ -4882,8 +4882,8 @@ impl App {
         candidate_config.model = target_slug.to_string();
         if let Some(info) = m31a_provider::find_model(target_slug) {
             candidate_config.model_context_window = info.context_window as usize;
-        } else if let Some(cw) = m31a_provider::find_canonical_model(target_slug)
-            .and_then(|canon| canon.context_window)
+        } else if let Some(cw) =
+            m31a_provider::find_canonical_model(target_slug).and_then(|canon| canon.context_window)
         {
             candidate_config.model_context_window = cw as usize;
         }
