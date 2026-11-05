@@ -35,7 +35,7 @@ async-trait.workspace = true
 uuid.workspace = true
 reqwest.workspace = true
 urlencoding = "2.1"
-similar = "2.7"
+similar = "3.2"
 walkdir = "2.5"
 regex.workspace = true
 chrono = { version = "0.4", features = ["serde"] }
