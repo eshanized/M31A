@@ -2,15 +2,195 @@
 //!
 //! Manages persistent memory records across sessions, indexing insights and project guidelines.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::{LazyLock, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 use uuid::Uuid;
 
 static MEMORY_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
+/// Method used to retrieve memory items.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RetrievalMethod {
+    Semantic,
+    Lexical,
+    Hybrid,
+}
+
+impl std::fmt::Display for RetrievalMethod {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Semantic => write!(f, "semantic"),
+            Self::Lexical => write!(f, "lexical"),
+            Self::Hybrid => write!(f, "hybrid"),
+        }
+    }
+}
+
+/// Abstract generator for dense vector text embeddings.
+pub trait EmbeddingGenerator: Send + Sync {
+    /// Computes dense embedding vector for the given input text.
+    fn generate_embedding(&self, text: &str) -> Result<Vec<f32>>;
+    /// Returns the embedding vector dimensionality.
+    fn dimension(&self) -> usize;
+}
+
+/// Mock embedding generator for tests and deterministic offline use.
+#[derive(Debug, Clone)]
+pub struct MockEmbeddingGenerator {
+    dim: usize,
+}
+
+impl MockEmbeddingGenerator {
+    pub fn new(dim: usize) -> Self {
+        Self { dim }
+    }
+}
+
+impl Default for MockEmbeddingGenerator {
+    fn default() -> Self {
+        Self { dim: 8 }
+    }
+}
+
+impl EmbeddingGenerator for MockEmbeddingGenerator {
+    fn generate_embedding(&self, text: &str) -> Result<Vec<f32>> {
+        if self.dim == 0 {
+            anyhow::bail!("Embedding dimension cannot be 0");
+        }
+        let mut vec = vec![0.0f32; self.dim];
+        for (i, b) in text.as_bytes().iter().enumerate() {
+            vec[i % self.dim] += (*b as f32) / 255.0 + 0.01;
+        }
+        normalize_vector(&vec)
+    }
+
+    fn dimension(&self) -> usize {
+        self.dim
+    }
+}
+
+/// HTTP client embedding generator for remote providers (NVIDIA NIM, OpenAI).
+#[derive(Clone)]
+pub struct HttpEmbeddingGenerator {
+    endpoint: String,
+    api_key: String,
+    model: String,
+    dim: usize,
+    client: reqwest::Client,
+}
+
+impl HttpEmbeddingGenerator {
+    pub fn new(
+        endpoint: impl Into<String>,
+        api_key: impl Into<String>,
+        model: impl Into<String>,
+        dim: usize,
+    ) -> Self {
+        Self {
+            endpoint: endpoint.into(),
+            api_key: api_key.into(),
+            model: model.into(),
+            dim,
+            client: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(10))
+                .build()
+                .unwrap_or_else(|_| reqwest::Client::new()),
+        }
+    }
+}
+
+impl EmbeddingGenerator for HttpEmbeddingGenerator {
+    fn generate_embedding(&self, text: &str) -> Result<Vec<f32>> {
+        let endpoint = self.endpoint.clone();
+        let api_key = self.api_key.clone();
+        let model = self.model.clone();
+        let text_owned = text.to_string();
+        let client = self.client.clone();
+        let dim = self.dim;
+
+        let res = std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()?;
+            rt.block_on(async move {
+                let body = serde_json::json!({
+                    "input": text_owned,
+                    "model": model,
+                });
+                let resp = client
+                    .post(&endpoint)
+                    .header("Authorization", format!("Bearer {}", api_key))
+                    .header("Content-Type", "application/json")
+                    .json(&body)
+                    .send()
+                    .await?;
+                if !resp.status().is_success() {
+                    let status = resp.status();
+                    let text = resp.text().await.unwrap_or_default();
+                    anyhow::bail!("Embedding endpoint error {}: {}", status, text);
+                }
+                let parsed: serde_json::Value = resp.json().await?;
+                let embedding_val = parsed
+                    .get("data")
+                    .and_then(|d| d.get(0))
+                    .and_then(|d| d.get("embedding"))
+                    .context("Invalid embedding response structure: missing data[0].embedding")?;
+                let raw_vec: Vec<f32> = serde_json::from_value(embedding_val.clone())?;
+                if dim > 0 && raw_vec.len() != dim {
+                    anyhow::bail!(
+                        "Dimension mismatch from provider: expected {}, got {}",
+                        dim,
+                        raw_vec.len()
+                    );
+                }
+                normalize_vector(&raw_vec)
+            })
+        })
+        .join()
+        .map_err(|_| anyhow::anyhow!("Embedding generation thread panicked"))??;
+
+        Ok(res)
+    }
+
+    fn dimension(&self) -> usize {
+        self.dim
+    }
+}
+
+/// Normalizes a float vector to unit Euclidean norm.
+pub fn normalize_vector(v: &[f32]) -> Result<Vec<f32>> {
+    if v.is_empty() {
+        anyhow::bail!("Cannot normalize an empty vector");
+    }
+    let norm: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
+    if norm < 1e-12 {
+        anyhow::bail!("Cannot normalize a zero-norm vector");
+    }
+    Ok(v.iter().map(|x| x / norm).collect())
+}
+
+/// Computes cosine similarity between two dense embedding vectors, validating dimensional consistency.
+pub fn calculate_cosine_similarity(a: &[f32], b: &[f32]) -> Result<f32> {
+    if a.len() != b.len() {
+        anyhow::bail!("Vector dimension mismatch: {} vs {}", a.len(), b.len());
+    }
+    if a.is_empty() {
+        anyhow::bail!("Cannot calculate cosine similarity for empty vectors");
+    }
+    let norm_a = normalize_vector(a)?;
+    let norm_b = normalize_vector(b)?;
+    let dot: f32 = norm_a.iter().zip(norm_b.iter()).map(|(x, y)| x * y).sum();
+    Ok(dot.clamp(-1.0, 1.0))
+}
+
+/// Computes non-negative cosine similarity clamped to [0.0, 1.0], returning 0.0 on error or mismatch.
+pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
+    calculate_cosine_similarity(a, b).unwrap_or(0.0).max(0.0)
+}
 
 /// Advisory cross-process file lock guard for memory operations.
 struct FileLock {
@@ -78,27 +258,6 @@ pub struct ScoredMemoryItem {
     pub hybrid_score: f32,
 }
 
-/// Computes cosine similarity between two dense embedding vectors.
-pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
-    if a.len() != b.len() || a.is_empty() {
-        return 0.0;
-    }
-    let mut dot = 0.0f32;
-    let mut norm_a = 0.0f32;
-    let mut norm_b = 0.0f32;
-    for (x, y) in a.iter().zip(b.iter()) {
-        dot += x * y;
-        norm_a += x * x;
-        norm_b += y * y;
-    }
-    let denom = norm_a.sqrt() * norm_b.sqrt();
-    if denom > 1e-6 {
-        (dot / denom).clamp(0.0, 1.0)
-    } else {
-        0.0
-    }
-}
-
 fn compute_lexical_score(query: &str, topic: &str, detail: &str) -> f32 {
     let q = query.trim().to_ascii_lowercase();
     if q.is_empty() {
@@ -144,6 +303,7 @@ pub struct MemoryRecord {
 
 pub struct MemoryManager {
     memories_dir: PathBuf,
+    embedding_generator: Option<Arc<dyn EmbeddingGenerator>>,
 }
 
 impl MemoryManager {
@@ -152,17 +312,60 @@ impl MemoryManager {
         PathBuf::from(home).join(".m31a").join("memories")
     }
 
+    fn detect_embedding_generator() -> Option<Arc<dyn EmbeddingGenerator>> {
+        if let Ok(key) = std::env::var("NVIDIA_API_KEY") {
+            let key = key.trim();
+            if !key.is_empty() {
+                return Some(Arc::new(HttpEmbeddingGenerator::new(
+                    "https://integrate.api.nvidia.com/v1/embeddings",
+                    key,
+                    "nvidia/nv-embedqa-e5-v5",
+                    1024,
+                )));
+            }
+        }
+        if let Ok(key) = std::env::var("OPENAI_API_KEY") {
+            let key = key.trim();
+            if !key.is_empty() {
+                return Some(Arc::new(HttpEmbeddingGenerator::new(
+                    "https://api.openai.com/v1/embeddings",
+                    key,
+                    "text-embedding-3-small",
+                    1536,
+                )));
+            }
+        }
+        None
+    }
+
     pub fn new() -> Result<Self> {
         let dir = Self::default_dir();
         fs::create_dir_all(&dir)?;
         fs::create_dir_all(dir.join("rollout_summaries"))?;
-        Ok(Self { memories_dir: dir })
+        let generator = Self::detect_embedding_generator();
+        Ok(Self {
+            memories_dir: dir,
+            embedding_generator: generator,
+        })
     }
 
     pub fn with_dir(dir: PathBuf) -> Self {
         let _ = fs::create_dir_all(&dir);
         let _ = fs::create_dir_all(dir.join("rollout_summaries"));
-        Self { memories_dir: dir }
+        let generator = Self::detect_embedding_generator();
+        Self {
+            memories_dir: dir,
+            embedding_generator: generator,
+        }
+    }
+
+    pub fn with_embedding_generator(mut self, generator: Arc<dyn EmbeddingGenerator>) -> Self {
+        self.embedding_generator = Some(generator);
+        self
+    }
+
+    pub fn set_embedding_generator(&mut self, generator: Option<Arc<dyn EmbeddingGenerator>>) {
+        self.embedding_generator = generator;
     }
 
     fn items_file(&self) -> PathBuf {
@@ -203,8 +406,24 @@ impl MemoryManager {
     }
 
     /// Consolidates a new fact or learning into persistent memory store with strict transactional isolation.
+    /// If an embedding generator is configured, dense vectors are calculated and normalized automatically.
     pub fn consolidate_fact(&self, topic: &str, detail: &str) -> Result<MemoryItem> {
-        self.consolidate_fact_with_embedding(topic, detail, None)
+        let embedding = if let Some(ref generator) = self.embedding_generator {
+            let text = format!("{}: {}", topic.trim(), detail.trim());
+            match generator.generate_embedding(&text) {
+                Ok(emb) => Some(emb),
+                Err(err) => {
+                    tracing::warn!(
+                        "Failed to generate embedding for fact consolidation: {}",
+                        err
+                    );
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        self.consolidate_fact_with_embedding(topic, detail, embedding)
     }
 
     /// Consolidates a fact with an optional dense vector embedding for hybrid retrieval.
@@ -214,6 +433,7 @@ impl MemoryManager {
         detail: &str,
         embedding: Option<Vec<f32>>,
     ) -> Result<MemoryItem> {
+        let normalized_embedding = embedding.and_then(|v| normalize_vector(&v).ok());
         let _guard = MEMORY_LOCK.lock().unwrap();
         let _file_lock = FileLock::acquire(&self.lock_file())?;
 
@@ -235,8 +455,8 @@ impl MemoryManager {
                 items[idx].detail = detail.to_string();
                 items[idx].citation_count += 1;
                 items[idx].last_used_at = Some(now);
-                if embedding.is_some() {
-                    items[idx].embedding = embedding;
+                if normalized_embedding.is_some() {
+                    items[idx].embedding = normalized_embedding;
                 }
                 items[idx].clone()
             }
@@ -249,7 +469,7 @@ impl MemoryManager {
                     citation_count: 1,
                     last_used_at: Some(now),
                     created_at: now,
-                    embedding,
+                    embedding: normalized_embedding,
                 };
                 items.push(new_item.clone());
                 new_item
@@ -345,9 +565,44 @@ impl MemoryManager {
         scored
     }
 
+    /// Searches memories returning both the retrieval method used and scored results.
+    /// If an embedding generator is present and succeeds, hybrid retrieval is performed.
+    /// Otherwise, it safely falls back to local lexical retrieval.
+    pub fn search_memories_with_mode(
+        &self,
+        query: &str,
+    ) -> (RetrievalMethod, Vec<ScoredMemoryItem>) {
+        if let Some(ref generator) = self.embedding_generator {
+            match generator.generate_embedding(query) {
+                Ok(query_emb) => {
+                    let hits = self.search_memories_hybrid(query, Some(&query_emb));
+                    let has_semantic = hits.iter().any(|h| h.semantic_score > 0.0);
+                    let mode = if has_semantic {
+                        RetrievalMethod::Hybrid
+                    } else {
+                        RetrievalMethod::Lexical
+                    };
+                    (mode, hits)
+                }
+                Err(err) => {
+                    tracing::warn!(
+                        "Embedding generation failed for search query, falling back to lexical: {}",
+                        err
+                    );
+                    let hits = self.search_memories_hybrid(query, None);
+                    (RetrievalMethod::Lexical, hits)
+                }
+            }
+        } else {
+            let hits = self.search_memories_hybrid(query, None);
+            (RetrievalMethod::Lexical, hits)
+        }
+    }
+
     /// Searches memories by keyword query in topic or detail using hybrid scoring with fallback.
     pub fn search_memories(&self, query: &str) -> Vec<MemoryItem> {
-        self.search_memories_hybrid(query, None)
+        self.search_memories_with_mode(query)
+            .1
             .into_iter()
             .map(|s| s.item)
             .collect()
@@ -562,5 +817,67 @@ mod tests {
         let rust_hits = mgr.search_memories("jemalloc");
         assert_eq!(rust_hits.len(), 1);
         assert_eq!(rust_hits[0].topic, "Rust Performance");
+    }
+
+    #[test]
+    fn test_vector_normalization() {
+        assert!(normalize_vector(&[]).is_err());
+        assert!(normalize_vector(&[0.0, 0.0, 0.0]).is_err());
+
+        let v = vec![3.0, 4.0];
+        let norm_v = normalize_vector(&v).unwrap();
+        assert!((norm_v[0] - 0.6).abs() < 1e-6);
+        assert!((norm_v[1] - 0.8).abs() < 1e-6);
+        let len_sq = norm_v[0] * norm_v[0] + norm_v[1] * norm_v[1];
+        assert!((len_sq - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_cosine_similarity_dimension_validation() {
+        // Dimension mismatch fails closed
+        let a = vec![1.0, 0.0];
+        let b = vec![1.0, 0.0, 0.0];
+        let err = calculate_cosine_similarity(&a, &b);
+        assert!(err.is_err());
+        assert!(err.unwrap_err().to_string().contains("dimension mismatch"));
+
+        // Cosine similarity between identical vectors is 1.0
+        let sim_ident = calculate_cosine_similarity(&[1.0, 2.0, 3.0], &[1.0, 2.0, 3.0]).unwrap();
+        assert!((sim_ident - 1.0).abs() < 1e-6);
+
+        // Cosine similarity between orthogonal vectors is 0.0
+        let sim_ortho = calculate_cosine_similarity(&[1.0, 0.0], &[0.0, 1.0]).unwrap();
+        assert!(sim_ortho.abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_search_memories_with_mode_hybrid_and_lexical() {
+        let tmp = tempdir().unwrap();
+        let generator = Arc::new(MockEmbeddingGenerator::new(4));
+        let mgr =
+            MemoryManager::with_dir(tmp.path().to_path_buf()).with_embedding_generator(generator);
+
+        // Consolidate fact with automatic embedding generation
+        let item = mgr
+            .consolidate_fact(
+                "Asynchronous Rust",
+                "Use tokio runtime with cooperative cancellation",
+            )
+            .unwrap();
+        assert!(item.embedding.is_some());
+        assert_eq!(item.embedding.as_ref().unwrap().len(), 4);
+
+        // Search with embedding generator -> Hybrid retrieval
+        let (mode, hits) = mgr.search_memories_with_mode("Asynchronous Rust");
+        assert_eq!(mode, RetrievalMethod::Hybrid);
+        assert!(!hits.is_empty());
+        assert_eq!(hits[0].item.topic, "Asynchronous Rust");
+        assert!(hits[0].hybrid_score > 0.0);
+
+        // Manager without generator -> Lexical retrieval
+        let mgr_offline = MemoryManager::with_dir(tmp.path().to_path_buf());
+        let (offline_mode, offline_hits) = mgr_offline.search_memories_with_mode("Asynchronous");
+        assert_eq!(offline_mode, RetrievalMethod::Lexical);
+        assert!(!offline_hits.is_empty());
     }
 }
