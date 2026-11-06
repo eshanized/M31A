@@ -242,11 +242,11 @@ impl WorkflowStore {
                     status, retry_count, max_retries, started_at_epoch_ms,
                     completed_at_epoch_ms, worker_id, lease_expires_at_epoch_ms,
                     error_details, input_artifacts_json, output_artifacts_json,
-                    verification_result_json
+                    verification_result_json, task_kind, attempt_id, execution_result_json
                 ) VALUES (
                     ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
                     ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20,
-                    ?21, ?22, ?23, ?24, ?25, ?26
+                    ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29
                 )
                 "#,
                 params![
@@ -276,6 +276,9 @@ impl WorkflowStore {
                     in_arts_json,
                     out_arts_json,
                     task.verification_result_json,
+                    task.task_kind.as_str(),
+                    task.attempt_id,
+                    task.execution_result_json,
                 ],
             )?;
 
@@ -369,7 +372,7 @@ impl WorkflowStore {
                    status, retry_count, max_retries, started_at_epoch_ms,
                    completed_at_epoch_ms, worker_id, lease_expires_at_epoch_ms,
                    error_details, input_artifacts_json, output_artifacts_json,
-                   verification_result_json
+                   verification_result_json, task_kind, attempt_id, execution_result_json
             FROM workflow_tasks
             WHERE workflow_id = ?1 AND id = ?2
             "#,
@@ -395,7 +398,7 @@ impl WorkflowStore {
                    status, retry_count, max_retries, started_at_epoch_ms,
                    completed_at_epoch_ms, worker_id, lease_expires_at_epoch_ms,
                    error_details, input_artifacts_json, output_artifacts_json,
-                   verification_result_json
+                   verification_result_json, task_kind, attempt_id, execution_result_json
             FROM workflow_tasks
             WHERE workflow_id = ?1
             ORDER BY wave_index ASC, priority DESC, id ASC
@@ -436,10 +439,19 @@ impl WorkflowStore {
 
         let wave_idx: i64 = row.get(8)?;
 
+        let kind_str: Option<String> = row.get(26).ok();
+        let task_kind = kind_str
+            .as_deref()
+            .and_then(m31a_core::workflow::WorkflowTaskKind::from_str)
+            .unwrap_or(m31a_core::workflow::WorkflowTaskKind::Implementation);
+        let attempt_id: u32 = row.get::<_, Option<u32>>(27).ok().flatten().unwrap_or(1);
+        let execution_result_json: Option<String> = row.get(28).ok().flatten();
+
         Ok(WorkflowTask {
             id: row.get(0)?,
             workflow_id: row.get(1)?,
             plan_revision: row.get(2)?,
+            task_kind,
             name: row.get(3)?,
             description: row.get(4)?,
             assigned_role: row.get(5)?,
@@ -457,6 +469,7 @@ impl WorkflowStore {
                 .unwrap_or(WorkflowTaskStatus::Pending),
             retry_count: row.get(16)?,
             max_retries: row.get(17)?,
+            attempt_id,
             started_at_epoch_ms: row.get(18)?,
             completed_at_epoch_ms: row.get(19)?,
             worker_id: row.get(20)?,
@@ -465,6 +478,7 @@ impl WorkflowStore {
             input_artifacts,
             output_artifacts,
             verification_result_json: row.get(25)?,
+            execution_result_json,
         })
     }
 
@@ -514,7 +528,134 @@ impl WorkflowStore {
         Ok(())
     }
 
-    /// Atomically claims the next ready or retry_pending task with worker lease semantics.
+    /// Atomically updates a task's status, error, execution result, and timestamps, enforcing worker and attempt fencing.
+    #[allow(clippy::too_many_arguments)]
+    pub fn update_task_execution_result(
+        &self,
+        workflow_id: &str,
+        task_id: &str,
+        expected_attempt_id: Option<u32>,
+        expected_worker_id: Option<&str>,
+        status: WorkflowTaskStatus,
+        result: Option<&m31a_core::workflow::TaskExecutionResult>,
+        error: Option<&str>,
+    ) -> Result<()> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        let now = Utc::now().timestamp_millis();
+
+        let started_at: Option<i64> = if status == WorkflowTaskStatus::Running {
+            Some(now)
+        } else {
+            None
+        };
+        let completed_at: Option<i64> = if status.is_terminal() {
+            Some(now)
+        } else {
+            None
+        };
+        let res_json = result.map(serde_json::to_string).transpose()?;
+
+        let rows = match (expected_attempt_id, expected_worker_id) {
+            (Some(att), Some(worker)) => tx.execute(
+                r#"
+                UPDATE workflow_tasks
+                SET status = ?1,
+                    error_details = COALESCE(?2, error_details),
+                    execution_result_json = COALESCE(?3, execution_result_json),
+                    started_at_epoch_ms = COALESCE(started_at_epoch_ms, ?4),
+                    completed_at_epoch_ms = COALESCE(completed_at_epoch_ms, ?5)
+                WHERE workflow_id = ?6 AND id = ?7 AND attempt_id = ?8 AND worker_id = ?9
+                "#,
+                params![
+                    status.as_str(),
+                    error,
+                    res_json,
+                    started_at,
+                    completed_at,
+                    workflow_id,
+                    task_id,
+                    att,
+                    worker
+                ],
+            )?,
+            (Some(att), None) => tx.execute(
+                r#"
+                UPDATE workflow_tasks
+                SET status = ?1,
+                    error_details = COALESCE(?2, error_details),
+                    execution_result_json = COALESCE(?3, execution_result_json),
+                    started_at_epoch_ms = COALESCE(started_at_epoch_ms, ?4),
+                    completed_at_epoch_ms = COALESCE(completed_at_epoch_ms, ?5)
+                WHERE workflow_id = ?6 AND id = ?7 AND attempt_id = ?8
+                "#,
+                params![
+                    status.as_str(),
+                    error,
+                    res_json,
+                    started_at,
+                    completed_at,
+                    workflow_id,
+                    task_id,
+                    att
+                ],
+            )?,
+            (None, Some(worker)) => tx.execute(
+                r#"
+                UPDATE workflow_tasks
+                SET status = ?1,
+                    error_details = COALESCE(?2, error_details),
+                    execution_result_json = COALESCE(?3, execution_result_json),
+                    started_at_epoch_ms = COALESCE(started_at_epoch_ms, ?4),
+                    completed_at_epoch_ms = COALESCE(completed_at_epoch_ms, ?5)
+                WHERE workflow_id = ?6 AND id = ?7 AND worker_id = ?8
+                "#,
+                params![
+                    status.as_str(),
+                    error,
+                    res_json,
+                    started_at,
+                    completed_at,
+                    workflow_id,
+                    task_id,
+                    worker
+                ],
+            )?,
+            (None, None) => tx.execute(
+                r#"
+                UPDATE workflow_tasks
+                SET status = ?1,
+                    error_details = COALESCE(?2, error_details),
+                    execution_result_json = COALESCE(?3, execution_result_json),
+                    started_at_epoch_ms = COALESCE(started_at_epoch_ms, ?4),
+                    completed_at_epoch_ms = COALESCE(completed_at_epoch_ms, ?5)
+                WHERE workflow_id = ?6 AND id = ?7
+                "#,
+                params![
+                    status.as_str(),
+                    error,
+                    res_json,
+                    started_at,
+                    completed_at,
+                    workflow_id,
+                    task_id
+                ],
+            )?,
+        };
+
+        if rows == 0 && (expected_attempt_id.is_some() || expected_worker_id.is_some()) {
+            return Err(anyhow!(
+                "Fencing violation or stale lease: task '{task_id}' was not updated (attempt {:?}, worker {:?})",
+                expected_attempt_id,
+                expected_worker_id
+            ));
+        }
+
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Atomically claims the next ready or retry_pending task with worker lease semantics and dependency validation.
     pub fn claim_ready_task(
         &self,
         workflow_id: &str,
@@ -526,39 +667,65 @@ impl WorkflowStore {
         let now = Utc::now().timestamp_millis();
         let lease_expires = now + lease_duration_ms;
 
-        // Find highest priority, lowest wave ready or retry_pending task
-        let task_id: Option<String> = tx
+        // Find highest priority, lowest wave ready or retry_pending task whose dependencies are ALL completed
+        let candidate: Option<(String, u32)> = tx
             .query_row(
                 r#"
-                SELECT id
-                FROM workflow_tasks
-                WHERE workflow_id = ?1
-                  AND status IN ('ready', 'retry_pending')
-                ORDER BY wave_index ASC, priority DESC, id ASC
+                SELECT t.id, t.attempt_id
+                FROM workflow_tasks t
+                WHERE t.workflow_id = ?1
+                  AND t.status IN ('ready', 'retry_pending')
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM workflow_task_dependencies d
+                      JOIN workflow_tasks dep ON dep.workflow_id = d.workflow_id AND dep.id = d.depends_on_task_id
+                      WHERE d.workflow_id = ?1
+                        AND d.task_id = t.id
+                        AND dep.status != 'completed'
+                  )
+                ORDER BY t.wave_index ASC, t.priority DESC, t.id ASC
                 LIMIT 1
                 "#,
                 params![workflow_id],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .ok();
 
-        if let Some(ref id) = task_id {
-            tx.execute(
+        let mut claimed_task_id = None;
+        if let Some((ref id, current_attempt)) = candidate {
+            let next_attempt = current_attempt + 1;
+            let rows_updated = tx.execute(
                 r#"
                 UPDATE workflow_tasks
                 SET status = 'claimed',
                     worker_id = ?1,
                     lease_expires_at_epoch_ms = ?2,
-                    started_at_epoch_ms = COALESCE(started_at_epoch_ms, ?3)
-                WHERE workflow_id = ?4 AND id = ?5
+                    attempt_id = ?3,
+                    started_at_epoch_ms = COALESCE(started_at_epoch_ms, ?4)
+                WHERE workflow_id = ?5
+                  AND id = ?6
+                  AND status IN ('ready', 'retry_pending')
+                  AND attempt_id = ?7
                 "#,
-                params![worker_id, lease_expires, now, workflow_id, id],
+                params![
+                    worker_id,
+                    lease_expires,
+                    next_attempt,
+                    now,
+                    workflow_id,
+                    id,
+                    current_attempt
+                ],
             )?;
+
+            if rows_updated > 0 {
+                claimed_task_id = Some(id.clone());
+            }
         }
 
         tx.commit()?;
 
-        if let Some(id) = task_id {
+        if let Some(id) = claimed_task_id {
             drop(conn);
             self.get_task(workflow_id, &id)
         } else {
@@ -918,6 +1085,7 @@ mod tests {
             id: "task-1".into(),
             workflow_id: wf_id.into(),
             plan_revision: 1,
+            task_kind: m31a_core::workflow::WorkflowTaskKind::Implementation,
             name: "Initial task".into(),
             description: "Do something".into(),
             assigned_role: "Implementer".into(),
@@ -933,6 +1101,7 @@ mod tests {
             status: WorkflowTaskStatus::Ready,
             retry_count: 0,
             max_retries: 2,
+            attempt_id: 1,
             started_at_epoch_ms: None,
             completed_at_epoch_ms: None,
             worker_id: None,
@@ -941,6 +1110,7 @@ mod tests {
             input_artifacts: vec![],
             output_artifacts: vec![],
             verification_result_json: None,
+            execution_result_json: None,
         };
 
         let plan = WorkflowPlan {
@@ -1031,5 +1201,162 @@ mod tests {
         let list = store.list_artifacts(wf_id).unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].content_sha256, artifact.content_sha256);
+    }
+
+    #[test]
+    fn test_task_dependency_claiming_and_fencing() {
+        let (store, _) = setup_test_db();
+        let wf_id = "wf-dep-test";
+
+        let run = WorkflowRun {
+            id: wf_id.to_string(),
+            thread_id: None,
+            workspace_root: PathBuf::from("/workspace"),
+            objective: "Dependency and fencing test".into(),
+            workflow_type: "autonomous".into(),
+            state: WorkflowState::Running,
+            plan_revision: 1,
+            configuration_json: "{}".into(),
+            created_at_epoch_ms: 1000,
+            updated_at_epoch_ms: 1000,
+            started_at_epoch_ms: Some(1000),
+            completed_at_epoch_ms: None,
+            cancellation_reason: None,
+            overall_result_json: None,
+            resource_usage_json: None,
+        };
+        store.create_workflow(&run).unwrap();
+
+        let task_a = WorkflowTask {
+            id: "task-A".into(),
+            workflow_id: wf_id.into(),
+            plan_revision: 1,
+            task_kind: m31a_core::workflow::WorkflowTaskKind::Implementation,
+            name: "Task A".into(),
+            description: "First task".into(),
+            assigned_role: "Dev".into(),
+            assigned_agent_id: None,
+            priority: 10,
+            wave_index: 1,
+            dependencies: vec![],
+            acceptance_criteria: vec![],
+            required_verification: vec![],
+            declared_read_paths: vec![],
+            declared_write_paths: vec![],
+            workspace_isolation: WorkspaceIsolationStrategy::Worktree,
+            status: WorkflowTaskStatus::Ready,
+            retry_count: 0,
+            max_retries: 2,
+            attempt_id: 1,
+            started_at_epoch_ms: None,
+            completed_at_epoch_ms: None,
+            worker_id: None,
+            lease_expires_at_epoch_ms: None,
+            error_details: None,
+            input_artifacts: vec![],
+            output_artifacts: vec![],
+            verification_result_json: None,
+            execution_result_json: None,
+        };
+
+        let task_b = WorkflowTask {
+            id: "task-B".into(),
+            workflow_id: wf_id.into(),
+            plan_revision: 1,
+            task_kind: m31a_core::workflow::WorkflowTaskKind::Verification,
+            name: "Task B (depends on A)".into(),
+            description: "Second task".into(),
+            assigned_role: "QA".into(),
+            assigned_agent_id: None,
+            priority: 20, // Higher priority than A, but depends on A!
+            wave_index: 2,
+            dependencies: vec!["task-A".into()],
+            acceptance_criteria: vec![],
+            required_verification: vec![],
+            declared_read_paths: vec![],
+            declared_write_paths: vec![],
+            workspace_isolation: WorkspaceIsolationStrategy::Worktree,
+            status: WorkflowTaskStatus::Ready,
+            retry_count: 0,
+            max_retries: 2,
+            attempt_id: 1,
+            started_at_epoch_ms: None,
+            completed_at_epoch_ms: None,
+            worker_id: None,
+            lease_expires_at_epoch_ms: None,
+            error_details: None,
+            input_artifacts: vec![],
+            output_artifacts: vec![],
+            verification_result_json: None,
+            execution_result_json: None,
+        };
+
+        let plan = WorkflowPlan {
+            workflow_id: wf_id.into(),
+            revision: 1,
+            rationale: "Dependency test".into(),
+            created_at_epoch_ms: 1000,
+            tasks: vec![task_a, task_b],
+        };
+        store.save_workflow_plan(&plan).unwrap();
+
+        // 1. Claim: Even though Task B has higher priority (20 > 10), Task A must be claimed
+        // because Task B has an uncompleted dependency on Task A!
+        let claimed = store
+            .claim_ready_task(wf_id, "worker-1", 10_000)
+            .unwrap()
+            .unwrap();
+        assert_eq!(claimed.id, "task-A");
+        assert_eq!(claimed.attempt_id, 2);
+        assert_eq!(claimed.worker_id.as_deref(), Some("worker-1"));
+
+        // Second claim right now returns None, because Task B is blocked on Task A!
+        let second_claim = store.claim_ready_task(wf_id, "worker-2", 10_000).unwrap();
+        assert!(second_claim.is_none());
+
+        // 2. Fencing test: Stale worker (attempt 1 or wrong worker) tries to update Task A
+        let stale_res = store.update_task_execution_result(
+            wf_id,
+            "task-A",
+            Some(1), // Stale attempt ID!
+            Some("worker-1"),
+            WorkflowTaskStatus::Completed,
+            None,
+            None,
+        );
+        assert!(stale_res.is_err());
+
+        // Wrong worker ID fails
+        let wrong_worker_res = store.update_task_execution_result(
+            wf_id,
+            "task-A",
+            Some(2),
+            Some("worker-stale"),
+            WorkflowTaskStatus::Completed,
+            None,
+            None,
+        );
+        assert!(wrong_worker_res.is_err());
+
+        // Valid update by worker-1 with attempt 2 completes Task A
+        store
+            .update_task_execution_result(
+                wf_id,
+                "task-A",
+                Some(2),
+                Some("worker-1"),
+                WorkflowTaskStatus::Completed,
+                None,
+                None,
+            )
+            .unwrap();
+
+        // 3. Now that Task A is completed, Task B is immediately claimable!
+        let claimed_b = store
+            .claim_ready_task(wf_id, "worker-2", 10_000)
+            .unwrap()
+            .unwrap();
+        assert_eq!(claimed_b.id, "task-B");
+        assert_eq!(claimed_b.worker_id.as_deref(), Some("worker-2"));
     }
 }

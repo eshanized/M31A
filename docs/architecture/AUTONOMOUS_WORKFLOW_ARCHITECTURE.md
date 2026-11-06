@@ -43,11 +43,17 @@ Rather than running unstructured LLM loops, M31A coordinates execution through f
 
 ## 2. DAG Plan Generation and Wave Partitioning
 
-### 1. Architectural Plan Decomposition
+### 1. Architectural Plan Decomposition & Typed Task Kinds
 When an engineering objective is received:
 1. `WorkflowOrchestrator::generate_plan` inspects project structure, languages, build files, and configuration.
 2. Identifies whether speculative execution is beneficial (for optimization, performance, refactoring, or algorithmic redesign).
-3. Produces a `WorkflowPlan` consisting of discrete, verifiable `WorkflowTask` nodes.
+3. Produces a `WorkflowPlan` consisting of discrete, verifiable `WorkflowTask` nodes typed with `WorkflowTaskKind`:
+   - `Analysis`: Read-only structural inspection and baseline verification.
+   - `Implementation`: Source modification by genuine child agents in isolated Git worktrees.
+   - `Speculative`: Parallel candidate generation, execution, and hard-gated competition.
+   - `Integration`: Patch validation and atomic commit into the primary workspace.
+   - `Verification`: Native test suite, compiler checks, and blast-radius safety gating.
+   - `Delivery`: Structured report generation and artifact finalization.
 
 ### 2. Topological Validation (Kahn's Algorithm)
 Before execution, `WorkflowPlan::validate` performs strict acyclicity checking:
@@ -63,38 +69,41 @@ Tasks that depend on earlier tasks must run in later waves. Furthermore, tasks t
 
 ---
 
-## 3. Worker Leasing and Stale Task Recovery
+## 3. Worker Leasing, Dependency Fencing, and Stale Task Recovery
 
-To ensure robust local execution that survives daemon crashes, process restarts, or unexpected worker failures, M31A implements a lightweight distributed leasing model atop SQLite:
+To ensure robust local execution that survives daemon crashes, process restarts, or unexpected worker failures, M31A implements a lightweight distributed leasing model atop SQLite with Migration 16 optimistic concurrency:
 
 ```
-[Task: Ready] ──(claim_ready_task)──> [Task: Claimed] (lease_expires = now + 60s)
-                                              │
-                                      (task begins run)
-                                              │
-                                              ▼
-                                      [Task: Running]
-                                              │
-                      ┌───────────────────────┴───────────────────────┐
-                      │ (worker crash / unrenewed)                    │ (normal execution)
-                      ▼                                               ▼
-          [reconcile_stale_tasks]                             [Task: Verifying]
-             (lease_expires < now)                                    │
-                      │                                               ▼
-      ┌───────────────┴───────────────┐                       [Task: Completed]
-      ▼                               ▼
+[Task: Ready] ──(claim_ready_task with deps check)──> [Task: Claimed] (lease_expires = now + 60s, attempt++)
+                                                              │
+                                                      (task begins run)
+                                                              │
+                                                              ▼
+                                                      [Task: Running]
+                                                              │
+                      ┌───────────────────────────────────────┴───────────────────────────────────────┐
+                      │ (worker crash / unrenewed)                                                    │ (normal execution)
+                      ▼                                                                               ▼
+          [reconcile_stale_tasks]                                                             [Task: Verifying]
+             (lease_expires < now)                                                                    │
+                      │                                                                               ▼
+      ┌───────────────┴───────────────┐                                                       [Task: Completed]
+      ▼                               ▼                                                    (with TaskExecutionResult)
  [retry_count < max]         [retry_count >= max]
 [Task: RetryPending]           [Task: Failed]
  (rescheduled for pickup)
 ```
 
-1. **Atomic Claiming:**  
-   `WorkflowStore::claim_ready_task` uses an immediate SQLite transaction to locate the highest-priority, lowest-wave `ready` or `retry_pending` task, assigns `worker_id`, updates status to `claimed`, and establishes an epoch lease expiration timestamp (`lease_expires_at_epoch_ms`).
+1. **Dependency-Gated Atomic Claiming:**  
+   `WorkflowStore::claim_ready_task` uses an immediate SQLite transaction to locate the highest-priority, lowest-wave `ready` or `retry_pending` task. A SQL subquery guarantees that a task is claimed **only when all its declared upstream dependencies have reached `status = 'completed'`**. Claiming atomically assigns `worker_id`, increments `attempt_id`, sets `status = 'claimed'`, and establishes an epoch lease expiration timestamp (`lease_expires_at_epoch_ms`).
 
-2. **Heartbeat & Lease Renewal:**  
+2. **Optimistic Concurrency & Worker Fencing:**  
+   `WorkflowStore::update_task_execution_result` verifies `expected_attempt_id` and `expected_worker_id` before committing results. If a worker lease expired and was reassigned or failed, any late result commit is rejected, preventing zombie tasks from corrupting state.
+
+3. **Heartbeat & Lease Renewal:**  
    Active workers periodically call `WorkflowStore::renew_task_lease` during execution, extending the lease boundary.
 
-3. **Stale Task Reconciliation:**  
+4. **Stale Task Reconciliation:**  
    `WorkflowStore::reconcile_stale_tasks` queries for tasks where `lease_expires_at_epoch_ms < now_epoch_ms` in `claimed`, `running`, or `verifying` states:
    - If `retry_count < max_retries`: increments `retry_count`, clears `worker_id`, and reschedules task to `WorkflowTaskStatus::RetryPending`.
    - If `retry_count >= max_retries`: marks task `WorkflowTaskStatus::Failed` with descriptive error details.

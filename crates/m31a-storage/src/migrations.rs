@@ -481,6 +481,16 @@ pub const BUILTIN_MIGRATIONS: &[Migration] = &[
         CREATE INDEX IF NOT EXISTS idx_workflow_artifacts_wf_name ON workflow_artifacts(workflow_id, name);
         "#,
     ),
+    Migration::new(
+        16,
+        "workflow_execution_integrity",
+        r#"
+        ALTER TABLE workflow_tasks ADD COLUMN task_kind TEXT NOT NULL DEFAULT 'implementation';
+        ALTER TABLE workflow_tasks ADD COLUMN attempt_id INTEGER NOT NULL DEFAULT 1;
+        ALTER TABLE workflow_tasks ADD COLUMN execution_result_json TEXT;
+        CREATE INDEX IF NOT EXISTS idx_workflow_tasks_kind ON workflow_tasks(workflow_id, task_kind);
+        "#,
+    ),
 ];
 
 /// Migration engine responsible for running and validating SQLite migrations.

@@ -125,20 +125,22 @@ If any hard gate fails, $\text{Composite Score} = 0.0$ strictly.
 Promoting code changes into the user's primary repository requires rigorous transactional guards:
 
 1. **Preflight Clean-Workspace Verification:**  
-   Before any patch is applied, `WorktreeManager::is_dirty` checks the primary workspace. If uncommitted changes exist, promotion is blocked immediately to prevent overwriting user work.
+   Before any patch is applied, `WorktreeManager::is_dirty` checks the primary workspace. If uncommitted changes exist or if inspecting repository status fails, promotion fails closed immediately to prevent corrupting user workspaces.
 
 2. **Patch Path Containment Verification:**  
    `WorktreeManager::validate_patch_paths` inspects every modified file path. Any directory traversal (`..`), root paths (`/`), or protected directories (`.git`, `.m31a`, `.ssh`, `.env`) are rejected before disk modification.
 
-3. **Application:**  
+3. **Application & Modified File Tracking:**  
    - If in M31A tool format (`*** Begin Patch`), applied via `m31a_tools::patch::apply_patch_to_workspace`.
    - If in unified git diff format, applied via atomic `git apply --ignore-whitespace`.
+   - Every modified or created file path is recorded in `files_integrated` for exact transactional tracking.
 
 4. **Post-Integration Verification Gate:**  
-   Immediately following patch application, `AutonomousVerifier::verify_check` and `AutonomousVerifier::verify_tests` execute on the primary workspace.
+   Immediately following patch application, `AutonomousVerifier::verify_check` and `AutonomousVerifier::verify_tests` execute on the primary workspace. Both must pass cleanly; otherwise rollback is triggered.
 
-5. **Automated Rollback:**  
+5. **Exact Transactional Rollback:**  
    If post-integration build or tests fail:
-   - `git checkout -- .` and `git clean -fd` restore the primary workspace to its exact pre-integration state.
+   - Broad destructive operations (`git checkout -- .` and `git clean -fd`) are forbidden.
+   - Exact per-file restoration: modified existing files in `files_integrated` are checked out via `git checkout HEAD -- <file>`, and newly created files are removed via `fs::remove_file`.
    - `rollback_executed` is set to `true` in `SpeculativeIntegrationReport`.
-   - The failure details are recorded in the audit trail.
+   - The failure details and rollback actions are recorded in the audit trail.

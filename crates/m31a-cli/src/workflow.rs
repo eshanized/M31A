@@ -7,8 +7,13 @@ use anyhow::{Result, anyhow};
 use clap::Subcommand;
 use colored::Colorize;
 use m31a_agent_engine::workflow::{WorkflowExecutionConfig, WorkflowOrchestrator};
+use m31a_core::Config;
+use m31a_execpolicy::ExecPolicy;
+use m31a_provider::{ProviderBuilder, ProviderConfig, ProviderType};
 use m31a_storage::Storage;
+use m31a_tools::registry::ToolRegistry;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum WorkflowCommands {
@@ -92,9 +97,67 @@ pub enum WorkflowCommands {
 pub async fn run_workflow_mode(
     cwd: PathBuf,
     storage: Storage,
+    config: &Config,
     cmd: WorkflowCommands,
 ) -> Result<()> {
-    let orchestrator = WorkflowOrchestrator::new(storage, None, None, None, None);
+    let provider_client = if let Some(ref api_key) = config.api_key {
+        let pt = ProviderType::resolve(
+            config.model_provider.as_deref(),
+            &config.model,
+            Some(&config.api_base),
+        )
+        .unwrap_or(ProviderType::Nim);
+
+        let provider_config = ProviderConfig {
+            provider_type: pt,
+            api_base: Some(config.api_base.clone()),
+            api_key: Some(api_key.clone()),
+            model: config.model.clone(),
+            extra: std::collections::HashMap::new(),
+        };
+        ProviderBuilder::build_client(provider_config).ok()
+    } else if let Ok(api_key) = std::env::var("NVIDIA_API_KEY") {
+        let provider_config = ProviderConfig {
+            provider_type: ProviderType::Nim,
+            api_base: Some(config.api_base.clone()),
+            api_key: Some(api_key),
+            model: config.model.clone(),
+            extra: std::collections::HashMap::new(),
+        };
+        ProviderBuilder::build_client(provider_config).ok()
+    } else {
+        None
+    };
+
+    let exec_policy = ExecPolicy::standard();
+    let tools = ToolRegistry::new();
+    let wt_settings = m31a_storage::worktree::WorktreeSettings::new(&cwd);
+    let wt_mgr = Arc::new(m31a_storage::worktree::WorktreeManager::new(wt_settings));
+
+    let runtime = provider_client.as_ref().map(|client| {
+        Arc::new(
+            m31a_agent_engine::agents::EngineAgentRuntime::new(
+                client.clone(),
+                tools.clone(),
+                storage.clone(),
+                exec_policy.clone(),
+                cwd.clone(),
+                None,
+                config.model_context_window,
+                config.agents.max_depth as u32,
+            )
+            .with_worktree_manager(wt_mgr.clone()),
+        )
+    });
+
+    let orchestrator = WorkflowOrchestrator::new(
+        storage.clone(),
+        runtime,
+        provider_client,
+        Some(tools),
+        Some(exec_policy),
+    )
+    .with_worktree_manager(wt_mgr);
 
     match cmd {
         WorkflowCommands::Run {
@@ -102,6 +165,11 @@ pub async fn run_workflow_mode(
             json,
             no_speculate,
         } => {
+            if orchestrator.runtime().is_none() {
+                return Err(anyhow!(
+                    "API credentials required for autonomous workflow execution. Set NVIDIA_API_KEY environment variable or run 'm31a setup' to configure API credentials."
+                ));
+            }
             if !json {
                 println!(
                     "{} {}",
@@ -221,18 +289,23 @@ pub async fn run_workflow_mode(
                 println!();
                 println!("{}", "─── TASK DAG ───".dimmed());
                 println!(
-                    "{:<25} {:<15} {:<6} {:<12} {:<20}",
-                    "TASK ID", "ROLE", "WAVE", "STATUS", "NAME"
+                    "{:<32} {:<15} {:<15} {:<6} {:<5} {:<12} {:<20}",
+                    "TASK ID", "KIND", "ROLE", "WAVE", "ATT", "STATUS", "NAME"
                 );
                 for t in &tasks {
                     println!(
-                        "{:<25} {:<15} {:<6} {:<12} {:<20}",
+                        "{:<32} {:<15} {:<15} {:<6} {:<5} {:<12} {:<20}",
                         t.id,
+                        t.task_kind.as_str().magenta(),
                         t.assigned_role.cyan(),
                         t.wave_index,
+                        t.attempt_id,
                         t.status.as_str().yellow(),
                         t.name.bold()
                     );
+                    if let Some(ref err) = t.error_details {
+                        println!("    └── {} {}", "Error:".red().bold(), err.red());
+                    }
                 }
                 println!();
                 println!("{}", "─── ARTIFACTS ───".dimmed());
@@ -367,10 +440,13 @@ mod tests {
 
         let wf_id = run.id.clone();
 
+        let config = Config::default();
+
         // 2. Status command
         let res_status = run_workflow_mode(
             ws_root.clone(),
             storage.clone(),
+            &config,
             WorkflowCommands::Status {
                 workflow_id: wf_id.clone(),
                 json: true,
@@ -383,6 +459,7 @@ mod tests {
         let res_inspect = run_workflow_mode(
             ws_root.clone(),
             storage.clone(),
+            &config,
             WorkflowCommands::Inspect {
                 workflow_id: wf_id.clone(),
                 json: true,
@@ -395,6 +472,7 @@ mod tests {
         let res_events = run_workflow_mode(
             ws_root.clone(),
             storage.clone(),
+            &config,
             WorkflowCommands::Events {
                 workflow_id: wf_id.clone(),
                 json: true,
@@ -407,6 +485,7 @@ mod tests {
         let res_artifacts = run_workflow_mode(
             ws_root.clone(),
             storage.clone(),
+            &config,
             WorkflowCommands::Artifacts {
                 workflow_id: wf_id.clone(),
                 json: true,
@@ -419,6 +498,7 @@ mod tests {
         let res_cancel = run_workflow_mode(
             ws_root.clone(),
             storage.clone(),
+            &config,
             WorkflowCommands::Cancel {
                 workflow_id: wf_id.clone(),
                 reason: "CLI test termination".to_string(),

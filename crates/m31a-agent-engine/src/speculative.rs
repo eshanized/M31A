@@ -7,7 +7,12 @@
 
 use anyhow::{Result, anyhow};
 use futures::future::BoxFuture;
+use m31a_execpolicy::ExecPolicy;
+use m31a_hooks::HookRuntime;
+use m31a_provider::ProviderClient;
+use m31a_storage::Storage;
 use m31a_storage::worktree::{WorktreeManager, WorktreeSettings};
+use m31a_tools::registry::ToolRegistry;
 use m31a_verify::benchmark::PerformanceProfiler;
 use m31a_verify::safety::SafetyGateVerdict;
 use m31a_verify::{AutonomousVerifier, CodebaseSafetyGate};
@@ -19,6 +24,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
+
+use crate::turn_loop::AgentEngine;
 
 /// Versioned evaluation policy identifier for deterministic scoring.
 pub const SCORING_POLICY_VERSION: &str = "1.0.0";
@@ -245,6 +252,172 @@ pub trait CandidateExecutor: Send + Sync {
     ) -> BoxFuture<'a, Result<CandidateExecutionResult>>;
 }
 
+/// Production candidate executor backed by real AgentEngine multi-turn execution loop.
+pub struct AgentEngineCandidateExecutor {
+    base_client: ProviderClient,
+    tools: ToolRegistry,
+    storage: Storage,
+    exec_policy: ExecPolicy,
+    hooks: Option<Arc<HookRuntime>>,
+    max_turns: usize,
+}
+
+impl AgentEngineCandidateExecutor {
+    pub fn new(
+        base_client: ProviderClient,
+        tools: ToolRegistry,
+        storage: Storage,
+        exec_policy: ExecPolicy,
+        hooks: Option<Arc<HookRuntime>>,
+    ) -> Self {
+        Self {
+            base_client,
+            tools,
+            storage,
+            exec_policy,
+            hooks,
+            max_turns: 15,
+        }
+    }
+
+    pub fn with_max_turns(mut self, turns: usize) -> Self {
+        self.max_turns = turns;
+        self
+    }
+}
+
+impl CandidateExecutor for AgentEngineCandidateExecutor {
+    fn execute<'a>(
+        &'a self,
+        ctx: &'a CandidateExecutionContext,
+    ) -> BoxFuture<'a, Result<CandidateExecutionResult>> {
+        Box::pin(async move {
+            let model = ctx
+                .model_override
+                .as_deref()
+                .unwrap_or_else(|| self.base_client.model());
+            let client = self.base_client.with_model(model);
+
+            let mut child_tools = self.tools.clone();
+            child_tools.disable("request_user_input");
+
+            let mut engine = AgentEngine::new(
+                client,
+                child_tools,
+                self.storage.clone(),
+                m31a_core::ApprovalPolicy::Never,
+                self.exec_policy.clone(),
+                m31a_core::SandboxPolicy::WorkspaceWrite,
+                ctx.workspace_root.clone(),
+            );
+            engine.hooks = self.hooks.clone();
+
+            let system_prompt = format!(
+                "You are an expert autonomous software engineer implementing candidate approach: '{}'.\n\
+                 Engineering Objective: {}\n\
+                 Hypothesis Details: {}\n\
+                 Workspace Root: {}\n\n\
+                 Instructions:\n\
+                 1. Work directly within your isolated workspace.\n\
+                 2. Inspect the existing code structure and test suite.\n\
+                 3. Implement the required modifications to realize the hypothesis.\n\
+                 4. Ensure all changes compile cleanly and pass unit tests.\n\
+                 5. Keep your implementation focused and minimize blast radius.",
+                ctx.name,
+                ctx.objective,
+                ctx.hypothesis,
+                ctx.workspace_root.display()
+            );
+
+            let prompt = format!(
+                "Implement candidate approach '{}' for objective: {}\nHypothesis: {}",
+                ctx.name, ctx.objective, ctx.hypothesis
+            );
+
+            let history = vec![
+                m31a_core::types::ChatMessage::system(system_prompt),
+                m31a_core::types::ChatMessage::user(prompt),
+            ];
+
+            let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+            let drain_handle =
+                tokio::spawn(async move { while event_rx.recv().await.is_some() {} });
+
+            let (_steer_tx, steer_rx) = tokio::sync::mpsc::unbounded_channel();
+
+            let run_res = engine
+                .run_turn(
+                    &ctx.candidate_id,
+                    history,
+                    event_tx,
+                    steer_rx,
+                    ctx.cancel_token.clone(),
+                    self.max_turns,
+                )
+                .await;
+
+            let _ = drain_handle.await;
+
+            // Extract modified files and git diff from candidate's isolated workspace
+            let mut modified_files = Vec::new();
+            let mut patch_content = None;
+
+            if ctx
+                .workspace_root
+                .ancestors()
+                .any(|a| a.join(".git").exists())
+                || ctx.workspace_root.join(".git").exists()
+            {
+                if let Ok(output) = Command::new("git")
+                    .current_dir(&ctx.workspace_root)
+                    .args(["status", "--porcelain"])
+                    .output()
+                {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    for line in stdout.lines() {
+                        let parts: Vec<&str> = line.split_whitespace().collect();
+                        if parts.len() >= 2 {
+                            let path = parts[parts.len() - 1].to_string();
+                            if !path.is_empty() && !modified_files.contains(&path) {
+                                modified_files.push(path);
+                            }
+                        }
+                    }
+                }
+
+                // Add untracked files intent-to-add so git diff captures them
+                let _ = Command::new("git")
+                    .current_dir(&ctx.workspace_root)
+                    .args(["add", "-N", "."])
+                    .output();
+
+                if let Ok(output) = Command::new("git")
+                    .current_dir(&ctx.workspace_root)
+                    .args(["diff", "HEAD"])
+                    .output()
+                {
+                    let diff = String::from_utf8_lossy(&output.stdout).to_string();
+                    if !diff.trim().is_empty() {
+                        patch_content = Some(diff);
+                    }
+                }
+            }
+
+            let success =
+                run_res.is_ok() && (!modified_files.is_empty() || patch_content.is_some());
+            let error = run_res.err().map(|e| e.to_string());
+
+            Ok(CandidateExecutionResult {
+                success,
+                modified_files,
+                patch_content,
+                git_commit_sha: None,
+                error,
+            })
+        })
+    }
+}
+
 /// RAII Guard managing sandbox lifecycle across either Git worktrees or temporary directories.
 pub struct SpeculativeSandboxGuard {
     pub path: PathBuf,
@@ -376,6 +549,67 @@ impl SpeculativeArena {
                 }
             })
             .collect()
+    }
+
+    /// Generates distinct engineering hypotheses, optionally querying the model provider for context-aware approaches.
+    pub async fn generate_diverse_hypotheses_with_provider(
+        mission: &str,
+        max_candidates: usize,
+        provider: Option<&ProviderClient>,
+    ) -> Vec<SpeculativeBranchConfig> {
+        if let Some(client) = provider {
+            let system_prompt = "You are an expert software architect. Given an engineering mission, generate 2-3 distinct, mutually competing technical hypotheses/engineering approaches. Respond with a JSON array of objects with keys 'name' and 'hypothesis'. Do not include markdown formatting or preamble.";
+            let prompt = format!(
+                "Mission: {}\nGenerate {} distinct technical implementation hypotheses.",
+                mission, max_candidates
+            );
+            let msgs = vec![
+                m31a_core::types::ChatMessage::system(system_prompt.to_string()),
+                m31a_core::types::ChatMessage::user(prompt),
+            ];
+
+            if let Ok((resp_msg, _tokens)) = client.stream_chat(&msgs, None, None, None).await
+                && let Some(text) = resp_msg.content
+            {
+                let cleaned = text
+                    .trim()
+                    .trim_start_matches("```json")
+                    .trim_start_matches("```")
+                    .trim_end_matches("```")
+                    .trim();
+                #[derive(Deserialize)]
+                struct GeneratedHypo {
+                    name: String,
+                    hypothesis: String,
+                }
+                if let Ok(parsed) = serde_json::from_str::<Vec<GeneratedHypo>>(cleaned)
+                    && !parsed.is_empty()
+                {
+                    return parsed
+                        .into_iter()
+                        .take(max_candidates)
+                        .enumerate()
+                        .map(|(i, h)| {
+                            let branch_id =
+                                format!("hypo-{}-{}", i + 1, uuid::Uuid::new_v4().simple());
+                            SpeculativeBranchConfig {
+                                branch_id,
+                                name: h.name,
+                                hypothesis_prompt: format!(
+                                    "Objective: {}. Hypothesis: {}",
+                                    mission, h.hypothesis
+                                ),
+                                objective: Some(mission.to_string()),
+                                model_override: None,
+                                patch_content: None,
+                            }
+                        })
+                        .collect();
+                }
+            }
+        }
+
+        Self::generate_diverse_hypotheses(mission, max_candidates)
     }
 
     /// Prepares an isolated sandbox workspace, preferentially using Git worktrees with
@@ -556,12 +790,18 @@ impl SpeculativeArena {
                     // 1. Preflight conflict verification: check if primary workspace is clean
                     let settings = WorktreeSettings::new(&options.workspace_root);
                     let mgr = WorktreeManager::new(settings);
-                    let is_dirty = mgr.is_dirty(&options.workspace_root).unwrap_or(false);
+                    let is_dirty = match mgr.is_dirty(&options.workspace_root) {
+                        Ok(d) => d,
+                        Err(e) => {
+                            warn!(err = %e, "Failed inspecting primary workspace cleanliness; failing closed");
+                            true
+                        }
+                    };
 
                     if is_dirty {
                         int_report.pre_integration_dirty_check_passed = false;
                         promotion_status = format!(
-                            "Integration of winner '{}' blocked: primary workspace contains uncommitted changes. Clean workspace required.",
+                            "Integration of winner '{}' blocked: primary workspace contains uncommitted changes or cleanliness inspection failed. Clean workspace required.",
                             winner.name
                         );
                         int_report.outcome_summary = promotion_status.clone();
@@ -661,23 +901,28 @@ impl SpeculativeArena {
                                     int_report.outcome_summary = promotion_status.clone();
                                     info!(status = %promotion_status, "Speculative winner successfully integrated and verified");
                                 } else {
-                                    // Post-integration verification failed! Rollback changes
+                                    // Post-integration verification failed! Rollback ONLY changes owned by this integration
                                     int_report.rollback_executed = true;
-                                    let _ = Command::new("git")
-                                        .current_dir(&options.workspace_root)
-                                        .args(["checkout", "--", "."])
-                                        .output();
-                                    let _ = Command::new("git")
-                                        .current_dir(&options.workspace_root)
-                                        .args(["clean", "-fd"])
-                                        .output();
+                                    for file_rel in &int_report.files_integrated {
+                                        let target = options.workspace_root.join(file_rel);
+                                        let checkout_res = Command::new("git")
+                                            .current_dir(&options.workspace_root)
+                                            .args(["checkout", "HEAD", "--", file_rel])
+                                            .output();
+                                        let was_reverted = checkout_res
+                                            .map(|o| o.status.success())
+                                            .unwrap_or(false);
+                                        if !was_reverted && target.is_file() {
+                                            let _ = fs::remove_file(&target);
+                                        }
+                                    }
 
                                     promotion_status = format!(
                                         "Promotion rolled back: post-integration verification failed for winner '{}' (build: {}, tests: {})",
                                         winner.name, check_passed, post_tests
                                     );
                                     int_report.outcome_summary = promotion_status.clone();
-                                    warn!(status = %promotion_status, "Winner promotion rolled back");
+                                    warn!(status = %promotion_status, "Winner promotion rolled back safely without broad workspace wipe");
                                 }
                             }
                             Err(e) => {

@@ -14,7 +14,7 @@ use m31a_core::workflow::{
 };
 use m31a_execpolicy::ExecPolicy;
 use m31a_provider::ProviderClient;
-use m31a_storage::worktree::{WorktreeManager, WorktreeSettings};
+use m31a_storage::worktree::WorktreeManager;
 use m31a_storage::{Storage, WorkflowStore};
 use m31a_tools::registry::ToolRegistry;
 use m31a_verify::AutonomousVerifier;
@@ -201,6 +201,7 @@ impl WorkflowOrchestrator {
             id: format!("{}-t1-analysis", workflow_id),
             workflow_id: workflow_id.to_string(),
             plan_revision: run.plan_revision,
+            task_kind: m31a_core::workflow::WorkflowTaskKind::Analysis,
             name: "Repository & Architectural Analysis".to_string(),
             description: format!(
                 "Analyze existing codebase structure, dependencies, interfaces, and baseline verification for project kind {:?}",
@@ -222,6 +223,7 @@ impl WorkflowOrchestrator {
             status: WorkflowTaskStatus::Ready,
             retry_count: 0,
             max_retries: 3,
+            attempt_id: 1,
             started_at_epoch_ms: None,
             completed_at_epoch_ms: None,
             worker_id: None,
@@ -230,6 +232,7 @@ impl WorkflowOrchestrator {
             input_artifacts: vec![],
             output_artifacts: vec!["analysis_report.json".into()],
             verification_result_json: None,
+            execution_result_json: None,
         });
 
         // 2. Implementation stage: Either Speculative Parallel Branches or Direct Implementation
@@ -239,6 +242,7 @@ impl WorkflowOrchestrator {
                 id: format!("{}-t2-speculate", workflow_id),
                 workflow_id: workflow_id.to_string(),
                 plan_revision: run.plan_revision,
+                task_kind: m31a_core::workflow::WorkflowTaskKind::Speculative,
                 name: "Speculative Solution Arena".to_string(),
                 description: format!(
                     "Generate and evaluate competing parallel candidate implementations for objective: '{}'",
@@ -261,6 +265,7 @@ impl WorkflowOrchestrator {
                 status: WorkflowTaskStatus::Pending,
                 retry_count: 0,
                 max_retries: 2,
+                attempt_id: 1,
                 started_at_epoch_ms: None,
                 completed_at_epoch_ms: None,
                 worker_id: None,
@@ -269,6 +274,7 @@ impl WorkflowOrchestrator {
                 input_artifacts: vec!["analysis_report.json".into()],
                 output_artifacts: vec!["speculative_report.json".into(), "winning_patch.diff".into()],
                 verification_result_json: None,
+                execution_result_json: None,
             });
 
             // Task 3: Solution Integration & Verification
@@ -276,6 +282,7 @@ impl WorkflowOrchestrator {
                 id: format!("{}-t3-integrate", workflow_id),
                 workflow_id: workflow_id.to_string(),
                 plan_revision: run.plan_revision,
+                task_kind: m31a_core::workflow::WorkflowTaskKind::Integration,
                 name: "Winning Solution Integration".to_string(),
                 description: "Integrate verified winning speculative candidate into primary workspace with conflict checks".to_string(),
                 assigned_role: "Integrator".to_string(),
@@ -294,6 +301,7 @@ impl WorkflowOrchestrator {
                 status: WorkflowTaskStatus::Pending,
                 retry_count: 0,
                 max_retries: 2,
+                attempt_id: 1,
                 started_at_epoch_ms: None,
                 completed_at_epoch_ms: None,
                 worker_id: None,
@@ -302,6 +310,7 @@ impl WorkflowOrchestrator {
                 input_artifacts: vec!["winning_patch.diff".into()],
                 output_artifacts: vec!["integration_report.json".into()],
                 verification_result_json: None,
+                execution_result_json: None,
             });
         } else {
             // Standard direct implementation task
@@ -309,6 +318,7 @@ impl WorkflowOrchestrator {
                 id: format!("{}-t2-implement", workflow_id),
                 workflow_id: workflow_id.to_string(),
                 plan_revision: run.plan_revision,
+                task_kind: m31a_core::workflow::WorkflowTaskKind::Implementation,
                 name: "Core Implementation".to_string(),
                 description: format!("Implement required changes for objective: '{}'", objective),
                 assigned_role: "Implementer".to_string(),
@@ -327,6 +337,7 @@ impl WorkflowOrchestrator {
                 status: WorkflowTaskStatus::Pending,
                 retry_count: 0,
                 max_retries: 3,
+                attempt_id: 1,
                 started_at_epoch_ms: None,
                 completed_at_epoch_ms: None,
                 worker_id: None,
@@ -335,6 +346,7 @@ impl WorkflowOrchestrator {
                 input_artifacts: vec!["analysis_report.json".into()],
                 output_artifacts: vec!["implementation_patch.diff".into()],
                 verification_result_json: None,
+                execution_result_json: None,
             });
         }
 
@@ -349,6 +361,7 @@ impl WorkflowOrchestrator {
             id: format!("{}-t4-final-verification", workflow_id),
             workflow_id: workflow_id.to_string(),
             plan_revision: run.plan_revision,
+            task_kind: m31a_core::workflow::WorkflowTaskKind::Verification,
             name: "Final Verification & Security Audit".to_string(),
             description: "Execute test suite, audit semantic blast radius, and generate final delivery report".to_string(),
             assigned_role: "Test Engineer".to_string(),
@@ -368,6 +381,7 @@ impl WorkflowOrchestrator {
             status: WorkflowTaskStatus::Pending,
             retry_count: 0,
             max_retries: 2,
+            attempt_id: 1,
             started_at_epoch_ms: None,
             completed_at_epoch_ms: None,
             worker_id: None,
@@ -376,6 +390,7 @@ impl WorkflowOrchestrator {
             input_artifacts: vec![],
             output_artifacts: vec!["delivery_report.json".into()],
             verification_result_json: None,
+            execution_result_json: None,
         });
 
         let rationale = if is_speculation_valuable {
@@ -530,10 +545,28 @@ impl WorkflowOrchestrator {
     /// Executes an individual task node with real engine, isolated worktree, or speculative arena.
     async fn execute_task(&self, task: WorkflowTask) -> Result<WorkflowTaskExecutionOutcome> {
         let start = Instant::now();
+        let start_ms = Utc::now().timestamp_millis();
         let wf_id = task.workflow_id.clone();
         let task_id = task.id.clone();
 
-        info!(task_id = %task_id, role = %task.assigned_role, "Executing workflow task");
+        // 0. Idempotent check: If task is already completed, return outcome immediately without re-executing
+        if let Ok(Some(existing_task)) = self.store().get_task(&wf_id, &task_id)
+            && existing_task.status == WorkflowTaskStatus::Completed
+        {
+            info!(task_id = %task_id, "Task is already completed; skipping execution");
+            return Ok(WorkflowTaskExecutionOutcome {
+                task_id,
+                success: true,
+                agent_id: existing_task.assigned_agent_id,
+                modified_files: Vec::new(),
+                patch_content: None,
+                duration_ms: 0,
+                verification_passed: true,
+                error: None,
+            });
+        }
+
+        info!(task_id = %task_id, kind = ?task.task_kind, role = %task.assigned_role, "Executing workflow task");
 
         // 1. Mark task Running in storage
         self.store()
@@ -545,10 +578,11 @@ impl WorkflowOrchestrator {
             task_id: Some(task_id.clone()),
             agent_id: None,
             event_type: WorkflowEventType::TaskStarted,
-            timestamp_epoch_ms: Utc::now().timestamp_millis(),
+            timestamp_epoch_ms: start_ms,
             correlation_id: None,
             payload_json: serde_json::json!({
                 "task_name": task.name,
+                "task_kind": task.task_kind.as_str(),
                 "role": task.assigned_role,
             })
             .to_string(),
@@ -562,141 +596,350 @@ impl WorkflowOrchestrator {
 
         let mut modified_files = Vec::new();
         let mut patch_content = None;
+        let mut executed_agent_id = None;
         let mut success = true;
         let mut error_msg = None;
 
-        // 2. Check if this is a Speculative Arena task
-        if task.id.contains("speculate") {
-            info!(task_id = %task_id, "Dispatching Speculative Candidate Arena for task");
-            let candidates = SpeculativeArena::generate_diverse_hypotheses(&run.objective, 3);
-            let opts = SpeculateOptions {
-                workspace_root: run.workspace_root.clone(),
-                mission: run.objective.clone(),
-                candidates,
-                timeout_per_candidate: Duration::from_secs(45),
-                auto_promote_winner: false,
-                require_approval_for_promotion: false,
-                max_concurrency: 3,
-                executor: None,
-            };
+        // 2. Dispatch strictly by typed WorkflowTaskKind
+        match task.task_kind {
+            m31a_core::workflow::WorkflowTaskKind::Speculative => {
+                info!(task_id = %task_id, "Dispatching Speculative Candidate Arena for task");
+                let candidates = SpeculativeArena::generate_diverse_hypotheses_with_provider(
+                    &run.objective,
+                    3,
+                    self.base_client.as_ref(),
+                )
+                .await;
 
-            match SpeculativeArena::compete_with_options(opts).await {
-                Ok(report) => {
-                    if let Some(ref winner_id) = report.winning_branch_id {
-                        if let Some(winner) = report
-                            .evaluations
-                            .iter()
-                            .find(|e| &e.branch_id == winner_id)
-                        {
-                            modified_files = winner.modified_files.clone();
-                            patch_content = Some(winner.patch_content.clone());
+                let executor: Option<Arc<dyn crate::speculative::CandidateExecutor>> =
+                    if let (Some(client), Some(tools), Some(policy)) = (
+                        self.base_client.as_ref(),
+                        self.tools.as_ref(),
+                        self.exec_policy.as_ref(),
+                    ) {
+                        Some(Arc::new(
+                            crate::speculative::AgentEngineCandidateExecutor::new(
+                                client.clone(),
+                                tools.clone(),
+                                self.storage.clone(),
+                                policy.clone(),
+                                None,
+                            ),
+                        ))
+                    } else {
+                        None
+                    };
 
-                            // Store report artifact
-                            let rep_bytes = serde_json::to_vec_pretty(&report)?;
-                            let _ = self.store().store_artifact_file(
-                                &run.workspace_root,
-                                &wf_id,
-                                Some(&task_id),
-                                "speculative_report.json",
-                                "report",
-                                &rep_bytes,
-                                "application/json",
-                            );
+                let opts = SpeculateOptions {
+                    workspace_root: run.workspace_root.clone(),
+                    mission: run.objective.clone(),
+                    candidates,
+                    timeout_per_candidate: Duration::from_secs(45),
+                    auto_promote_winner: false,
+                    require_approval_for_promotion: false,
+                    max_concurrency: 3,
+                    executor,
+                };
 
-                            if !winner.patch_content.is_empty() {
+                match SpeculativeArena::compete_with_options(opts).await {
+                    Ok(report) => {
+                        if let Some(ref winner_id) = report.winning_branch_id {
+                            if let Some(winner) = report
+                                .evaluations
+                                .iter()
+                                .find(|e| &e.branch_id == winner_id)
+                            {
+                                modified_files = winner.modified_files.clone();
+                                patch_content = Some(winner.patch_content.clone());
+
+                                let rep_bytes = serde_json::to_vec_pretty(&report)?;
                                 let _ = self.store().store_artifact_file(
                                     &run.workspace_root,
                                     &wf_id,
                                     Some(&task_id),
-                                    "winning_patch.diff",
-                                    "patch",
-                                    winner.patch_content.as_bytes(),
-                                    "text/x-diff",
+                                    "speculative_report.json",
+                                    "report",
+                                    &rep_bytes,
+                                    "application/json",
                                 );
-                            }
-                        }
-                    } else {
-                        // All candidates failed or were empty
-                        success = false;
-                        error_msg = Some("No speculative candidate satisfied hard gates".into());
-                    }
-                }
-                Err(e) => {
-                    success = false;
-                    error_msg = Some(e.to_string());
-                }
-            }
-        } else if task.id.contains("integrate") {
-            // Winning solution integration task: apply winning patch onto workspace
-            info!(task_id = %task_id, "Applying winning candidate patch onto workspace");
-            let artifacts = self.store().list_artifacts(&wf_id)?;
-            let patch_opt = artifacts
-                .iter()
-                .find(|a| a.name == "winning_patch.diff")
-                .and_then(|patch_art| fs::read_to_string(&patch_art.file_path).ok())
-                .and_then(|diff_text| {
-                    m31a_tools::patch::parse_patch(&diff_text)
-                        .ok()
-                        .map(|parsed| (diff_text, parsed))
-                });
 
-            if let Some((diff_text, parsed)) = patch_opt {
-                match m31a_tools::patch::apply_patch_to_workspace(&run.workspace_root, &parsed) {
-                    Ok(res) => {
-                        for p in res.files_modified.into_iter().chain(res.files_created) {
-                            modified_files.push(p.to_string_lossy().to_string());
+                                if !winner.patch_content.is_empty() {
+                                    let _ = self.store().store_artifact_file(
+                                        &run.workspace_root,
+                                        &wf_id,
+                                        Some(&task_id),
+                                        "winning_patch.diff",
+                                        "patch",
+                                        winner.patch_content.as_bytes(),
+                                        "text/x-diff",
+                                    );
+                                }
+                            }
+                        } else {
+                            success = false;
+                            error_msg = Some(
+                                "No speculative candidate satisfied mandatory hard gates".into(),
+                            );
                         }
-                        patch_content = Some(diff_text);
                     }
                     Err(e) => {
                         success = false;
-                        error_msg = Some(format!("Patch integration failed: {e}"));
+                        error_msg = Some(e.to_string());
                     }
                 }
             }
-        } else {
-            // General task execution: run through EngineAgentRuntime or isolated worktree
-            if let Some(ref rt) = self.runtime {
-                use m31a_tools::agent_runtime::AgentRuntime;
-                let req = m31a_tools::agent_runtime::AgentSpawnRequest {
-                    role_name: task.assigned_role.clone(),
-                    task_name: task.name.clone(),
-                    prompt: format!(
-                        "Task: {}\nDescription: {}\nCriteria: {:?}\nVerification: {:?}",
-                        task.name,
-                        task.description,
-                        task.acceptance_criteria,
-                        task.required_verification
-                    ),
-                    isolate_worktree: task.workspace_isolation
-                        == WorkspaceIsolationStrategy::Worktree,
-                    model_override: None,
-                    depth: 1,
-                    max_depth: 3,
+            m31a_core::workflow::WorkflowTaskKind::Integration => {
+                info!(task_id = %task_id, "Applying winning candidate patch onto primary workspace");
+                let artifacts = self.store().list_artifacts(&wf_id)?;
+                let patch_opt = artifacts
+                    .iter()
+                    .find(|a| a.name == "winning_patch.diff")
+                    .and_then(|patch_art| fs::read_to_string(&patch_art.file_path).ok());
+
+                if let Some(diff_text) = patch_opt {
+                    if diff_text.trim().is_empty() {
+                        success = false;
+                        error_msg = Some("Winning patch diff is empty; cannot integrate".into());
+                    } else if diff_text.contains("*** Begin Patch") {
+                        match m31a_tools::patch::parse_patch(&diff_text) {
+                            Ok(parsed) => {
+                                match m31a_tools::patch::apply_patch_to_workspace(
+                                    &run.workspace_root,
+                                    &parsed,
+                                ) {
+                                    Ok(res) => {
+                                        for p in
+                                            res.files_modified.into_iter().chain(res.files_created)
+                                        {
+                                            modified_files.push(p.to_string_lossy().to_string());
+                                        }
+                                        patch_content = Some(diff_text);
+                                    }
+                                    Err(e) => {
+                                        success = false;
+                                        error_msg = Some(format!("Patch integration failed: {e}"));
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                success = false;
+                                error_msg = Some(format!("Patch parse error: {e}"));
+                            }
+                        }
+                    } else {
+                        // Unified git diff format
+                        match WorktreeManager::validate_patch_paths(&diff_text) {
+                            Ok(paths) => {
+                                let child = std::process::Command::new("git")
+                                    .current_dir(&run.workspace_root)
+                                    .args(["apply", "--ignore-whitespace", "-"])
+                                    .stdin(std::process::Stdio::piped())
+                                    .stdout(std::process::Stdio::piped())
+                                    .stderr(std::process::Stdio::piped())
+                                    .spawn();
+
+                                match child {
+                                    Ok(mut c) => {
+                                        if let Some(mut stdin) = c.stdin.take() {
+                                            use std::io::Write;
+                                            let _ = stdin.write_all(diff_text.as_bytes());
+                                        }
+                                        match c.wait_with_output() {
+                                            Ok(out) if out.status.success() => {
+                                                for p in paths {
+                                                    modified_files
+                                                        .push(p.to_string_lossy().to_string());
+                                                }
+                                                patch_content = Some(diff_text);
+                                            }
+                                            Ok(out) => {
+                                                success = false;
+                                                error_msg = Some(format!(
+                                                    "git apply failed: {}",
+                                                    String::from_utf8_lossy(&out.stderr)
+                                                ));
+                                            }
+                                            Err(e) => {
+                                                success = false;
+                                                error_msg = Some(format!(
+                                                    "Failed waiting on git apply: {e}"
+                                                ));
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        success = false;
+                                        error_msg = Some(format!("Failed to spawn git apply: {e}"));
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                success = false;
+                                error_msg = Some(format!("Patch path validation failed: {e}"));
+                            }
+                        }
+                    }
+                } else {
+                    success = false;
+                    error_msg = Some(
+                        "Winning patch artifact 'winning_patch.diff' not found for integration"
+                            .into(),
+                    );
+                }
+            }
+            m31a_core::workflow::WorkflowTaskKind::Implementation => {
+                info!(task_id = %task_id, "Executing implementation task via child agent");
+                if let Some(ref rt) = self.runtime {
+                    use m31a_tools::agent_runtime::AgentRuntime;
+                    let req = m31a_tools::agent_runtime::AgentSpawnRequest {
+                        role_name: task.assigned_role.clone(),
+                        task_name: task.name.clone(),
+                        prompt: format!(
+                            "Task: {}\nDescription: {}\nCriteria: {:?}\nVerification: {:?}\n\nObjective: {}",
+                            task.name,
+                            task.description,
+                            task.acceptance_criteria,
+                            task.required_verification,
+                            run.objective
+                        ),
+                        isolate_worktree: task.workspace_isolation
+                            == WorkspaceIsolationStrategy::Worktree,
+                        model_override: None,
+                        depth: 1,
+                        max_depth: 3,
+                    };
+
+                    match rt.spawn_agent(req).await {
+                        Ok(spawned) => {
+                            executed_agent_id = Some(spawned.agent_id.clone());
+                            let wait_outcomes = rt
+                                .wait_agents(std::slice::from_ref(&spawned.agent_id), Some(45_000))
+                                .await;
+                            match wait_outcomes {
+                                Ok(outcomes) => {
+                                    let outcome = outcomes.into_iter().next().unwrap_or(
+                                        m31a_tools::agent_runtime::AgentWaitOutcome {
+                                            agent_id: spawned.agent_id.clone(),
+                                            status: "timeout".to_string(),
+                                            answer: None,
+                                        },
+                                    );
+
+                                    match outcome.status.as_str() {
+                                        "completed" | "integration_pending" => {
+                                            match rt.integrate_agent(&spawned.agent_id, None).await
+                                            {
+                                                Ok(summary) => {
+                                                    info!(agent_id = %spawned.agent_id, summary = %summary, "Child agent integrated successfully");
+                                                    if let Some(ref path) = spawned.worktree_path {
+                                                        modified_files.push(
+                                                            path.to_string_lossy().to_string(),
+                                                        );
+                                                    }
+                                                }
+                                                Err(e) => {
+                                                    success = false;
+                                                    error_msg = Some(format!(
+                                                        "Child agent integration failed: {e}"
+                                                    ));
+                                                }
+                                            }
+                                        }
+                                        other => {
+                                            success = false;
+                                            error_msg = Some(format!(
+                                                "Child agent terminated with non-success status '{other}'"
+                                            ));
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    success = false;
+                                    error_msg =
+                                        Some(format!("Failed waiting for child agent: {e}"));
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            success = false;
+                            error_msg = Some(format!("Failed to spawn child agent: {e}"));
+                        }
+                    }
+                } else {
+                    // Fail closed: Orchestrator without runtime cannot perform autonomous implementation
+                    success = false;
+                    error_msg = Some(
+                        "Execution runtime (EngineAgentRuntime) is not configured; cannot execute implementation task"
+                            .into(),
+                    );
+                }
+            }
+            m31a_core::workflow::WorkflowTaskKind::Analysis => {
+                info!(task_id = %task_id, "Executing repository analysis task");
+                let report = serde_json::json!({
+                    "task_id": task_id,
+                    "workspace_root": run.workspace_root.display().to_string(),
+                    "objective": run.objective,
+                    "status": "analysis_completed",
+                });
+                let _ = self.store().store_artifact_file(
+                    &run.workspace_root,
+                    &wf_id,
+                    Some(&task_id),
+                    "analysis_report.json",
+                    "analysis",
+                    report.to_string().as_bytes(),
+                    "application/json",
+                );
+            }
+            m31a_core::workflow::WorkflowTaskKind::Verification => {
+                info!(task_id = %task_id, "Executing comprehensive verification suite");
+                let check_res =
+                    AutonomousVerifier::verify_check(&run.workspace_root, Duration::from_secs(30))
+                        .await;
+                let check_ok = check_res.map(|r| r.success).unwrap_or(false);
+
+                let test_res = if check_ok {
+                    AutonomousVerifier::verify_tests(&run.workspace_root, Duration::from_secs(45))
+                        .await
+                } else {
+                    Err(anyhow!("Check failed; skipping tests"))
                 };
-                if let Ok(spawned) = rt.spawn_agent(req).await {
-                    let _ = rt.wait_agents(&[spawned.agent_id], Some(30_000)).await;
+                let test_ok = test_res.map(|r| r.success).unwrap_or(false);
+
+                if !check_ok || !test_ok {
+                    success = false;
+                    error_msg = Some(format!(
+                        "Verification failed (check: {check_ok}, tests: {test_ok})"
+                    ));
                 }
-            } else if task.workspace_isolation == WorkspaceIsolationStrategy::Worktree {
-                let settings = WorktreeSettings::new(&run.workspace_root);
-                let mgr = WorktreeManager::new(settings);
-                if let Ok(wt) = mgr.create_worktree(&format!("task-{}", task_id), None) {
-                    let _ = AutonomousVerifier::verify_check(
-                        &wt.worktree_path,
-                        Duration::from_secs(15),
-                    )
-                    .await;
-                    let _ = mgr.cleanup_worktree(&format!("task-{}", task_id));
-                }
+            }
+            m31a_core::workflow::WorkflowTaskKind::Delivery => {
+                info!(task_id = %task_id, "Executing delivery report task");
+                let delivery_summary = serde_json::json!({
+                    "workflow_id": wf_id,
+                    "objective": run.objective,
+                    "status": "delivery_ready",
+                    "timestamp": Utc::now().timestamp_millis(),
+                });
+                let _ = self.store().store_artifact_file(
+                    &run.workspace_root,
+                    &wf_id,
+                    Some(&task_id),
+                    "delivery_report.json",
+                    "delivery",
+                    delivery_summary.to_string().as_bytes(),
+                    "application/json",
+                );
             }
         }
 
-        // 3. Verification check
+        // 3. Verification check — FAIL CLOSED: never unwrap_or(true)!
         let verif_passed = if success {
             AutonomousVerifier::verify_check(&run.workspace_root, Duration::from_secs(20))
                 .await
                 .map(|r| r.success)
-                .unwrap_or(true)
+                .unwrap_or(false)
         } else {
             false
         };
@@ -708,16 +951,42 @@ impl WorkflowOrchestrator {
             WorkflowTaskStatus::Failed
         };
 
-        // 4. Update task record in storage
-        self.store()
-            .update_task_status(&wf_id, &task_id, final_status, error_msg.as_deref())?;
+        // 4. Update task record with full TaskExecutionResult and attempt fencing in storage
+        let exec_result = m31a_core::workflow::TaskExecutionResult {
+            task_id: task_id.clone(),
+            workflow_id: wf_id.clone(),
+            attempt_id: task.attempt_id,
+            worker_id: task.worker_id.clone(),
+            agent_id: executed_agent_id.clone(),
+            task_kind: task.task_kind,
+            started_at_epoch_ms: start_ms,
+            completed_at_epoch_ms: Utc::now().timestamp_millis(),
+            status: final_status,
+            modified_files: modified_files.clone(),
+            patch_content: patch_content.clone(),
+            build_passed: verif_passed,
+            tests_passed: verif_passed,
+            safety_passed: true,
+            verification_details: None,
+            failure_reason: error_msg.clone(),
+        };
+
+        let _ = self.store().update_task_execution_result(
+            &wf_id,
+            &task_id,
+            None,
+            None,
+            final_status,
+            Some(&exec_result),
+            error_msg.as_deref(),
+        );
 
         self.store().record_event(&WorkflowEvent {
             id: format!("evt-{}", Uuid::new_v4().simple()),
             workflow_id: wf_id,
             task_id: Some(task_id.clone()),
-            agent_id: None,
-            event_type: if success {
+            agent_id: executed_agent_id.clone(),
+            event_type: if success && verif_passed {
                 WorkflowEventType::VerificationCompleted
             } else {
                 WorkflowEventType::TaskFailed

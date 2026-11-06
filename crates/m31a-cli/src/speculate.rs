@@ -5,8 +5,17 @@
 
 use anyhow::Result;
 use colored::Colorize;
-use m31a_agent_engine::speculative::{SpeculativeArena, SpeculativeBranchConfig};
+use m31a_agent_engine::speculative::{
+    AgentEngineCandidateExecutor, CandidateExecutor, SpeculateOptions, SpeculativeArena,
+    SpeculativeBranchConfig,
+};
+use m31a_core::Config;
+use m31a_execpolicy::ExecPolicy;
+use m31a_provider::{ProviderBuilder, ProviderConfig, ProviderType};
+use m31a_storage::Storage;
+use m31a_tools::registry::ToolRegistry;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 pub struct SpeculateCliOptions {
@@ -15,6 +24,8 @@ pub struct SpeculateCliOptions {
     pub hypotheses: Vec<String>,
     pub timeout_seconds: u64,
     pub auto_promote: bool,
+    pub config: Option<Config>,
+    pub storage: Option<Storage>,
 }
 
 pub async fn run_speculate_mode(opts: SpeculateCliOptions) -> Result<()> {
@@ -72,14 +83,71 @@ pub async fn run_speculate_mode(opts: SpeculateCliOptions) -> Result<()> {
         "Evaluating branches in parallel isolated sandboxes...".dimmed()
     );
 
-    let report = SpeculativeArena::compete(
-        &opts.workspace_root,
-        &opts.mission,
+    let provider_client = if let Some(ref cfg) = opts.config {
+        if let Some(ref api_key) = cfg.api_key {
+            let pt = ProviderType::resolve(
+                cfg.model_provider.as_deref(),
+                &cfg.model,
+                Some(&cfg.api_base),
+            )
+            .unwrap_or(ProviderType::Nim);
+
+            let provider_config = ProviderConfig {
+                provider_type: pt,
+                api_base: Some(cfg.api_base.clone()),
+                api_key: Some(api_key.clone()),
+                model: cfg.model.clone(),
+                extra: std::collections::HashMap::new(),
+            };
+            ProviderBuilder::build_client(provider_config).ok()
+        } else if let Ok(api_key) = std::env::var("NVIDIA_API_KEY") {
+            let provider_config = ProviderConfig {
+                provider_type: ProviderType::Nim,
+                api_base: Some(cfg.api_base.clone()),
+                api_key: Some(api_key),
+                model: cfg.model.clone(),
+                extra: std::collections::HashMap::new(),
+            };
+            ProviderBuilder::build_client(provider_config).ok()
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    let executor: Option<Arc<dyn CandidateExecutor>> =
+        if let (Some(client), Some(storage)) = (provider_client, opts.storage.as_ref()) {
+            let tools = ToolRegistry::new();
+            let exec_policy = ExecPolicy::standard();
+            Some(Arc::new(AgentEngineCandidateExecutor::new(
+                client,
+                tools,
+                storage.clone(),
+                exec_policy,
+                None,
+            )))
+        } else {
+            println!(
+                "  {}",
+                "Note: Model credentials unavailable; evaluating existing patches or baselines."
+                    .yellow()
+            );
+            None
+        };
+
+    let spec_opts = SpeculateOptions {
+        workspace_root: opts.workspace_root.clone(),
+        mission: opts.mission.clone(),
         candidates,
-        Duration::from_secs(opts.timeout_seconds),
-        opts.auto_promote,
-    )
-    .await?;
+        timeout_per_candidate: Duration::from_secs(opts.timeout_seconds),
+        auto_promote_winner: opts.auto_promote,
+        require_approval_for_promotion: false,
+        max_concurrency: 3,
+        executor,
+    };
+
+    let report = SpeculativeArena::compete_with_options(spec_opts).await?;
 
     println!(
         "\n{}",

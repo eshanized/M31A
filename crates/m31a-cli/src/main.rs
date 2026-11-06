@@ -3035,19 +3035,22 @@ async fn main() -> Result<()> {
             timeout,
             promote,
         }) => {
+            let storage = Storage::open_default()?;
             speculate::run_speculate_mode(speculate::SpeculateCliOptions {
                 workspace_root: cwd.clone(),
                 mission,
                 hypotheses,
                 timeout_seconds: timeout,
                 auto_promote: promote,
+                config: Some(config.clone()),
+                storage: Some(storage),
             })
             .await
         }
 
         Some(Commands::Workflow { cmd }) => {
             let storage = Storage::open_default()?;
-            workflow::run_workflow_mode(cwd.clone(), storage, cmd).await
+            workflow::run_workflow_mode(cwd.clone(), storage, &config, cmd).await
         }
 
         None => {

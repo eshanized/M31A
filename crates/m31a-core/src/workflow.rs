@@ -309,12 +309,87 @@ impl WorkspaceIsolationStrategy {
     }
 }
 
+/// Typed classification of a workflow task's execution responsibility.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkflowTaskKind {
+    /// Read-only codebase and architecture analysis.
+    Analysis,
+    /// Direct source code modification by an agent.
+    #[default]
+    Implementation,
+    /// Parallel speculative candidate branch execution and competition.
+    Speculative,
+    /// Application and promotion of candidate diff into primary workspace.
+    Integration,
+    /// Final regression and blast-radius verification.
+    Verification,
+    /// Final report and delivery consolidation.
+    Delivery,
+}
+
+impl WorkflowTaskKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Analysis => "analysis",
+            Self::Implementation => "implementation",
+            Self::Speculative => "speculative",
+            Self::Integration => "integration",
+            Self::Verification => "verification",
+            Self::Delivery => "delivery",
+        }
+    }
+
+    #[allow(clippy::should_implement_trait)]
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "analysis" => Some(Self::Analysis),
+            "implementation" => Some(Self::Implementation),
+            "speculative" => Some(Self::Speculative),
+            "integration" => Some(Self::Integration),
+            "verification" => Some(Self::Verification),
+            "delivery" => Some(Self::Delivery),
+            _ => None,
+        }
+    }
+
+    pub fn requires_write_access(&self) -> bool {
+        matches!(
+            self,
+            Self::Implementation | Self::Speculative | Self::Integration
+        )
+    }
+}
+
+/// Verifiable structured execution outcome for a task.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TaskExecutionResult {
+    pub task_id: String,
+    pub workflow_id: String,
+    pub attempt_id: u32,
+    pub worker_id: Option<String>,
+    pub agent_id: Option<String>,
+    pub task_kind: WorkflowTaskKind,
+    pub started_at_epoch_ms: i64,
+    pub completed_at_epoch_ms: i64,
+    pub status: WorkflowTaskStatus,
+    pub modified_files: Vec<String>,
+    pub patch_content: Option<String>,
+    pub build_passed: bool,
+    pub tests_passed: bool,
+    pub safety_passed: bool,
+    pub verification_details: Option<String>,
+    pub failure_reason: Option<String>,
+}
+
 /// An individual verifiable task node in a workflow plan DAG.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkflowTask {
     pub id: String,
     pub workflow_id: String,
     pub plan_revision: u32,
+    #[serde(default)]
+    pub task_kind: WorkflowTaskKind,
     pub name: String,
     pub description: String,
     pub assigned_role: String,
@@ -330,6 +405,8 @@ pub struct WorkflowTask {
     pub status: WorkflowTaskStatus,
     pub retry_count: u32,
     pub max_retries: u32,
+    #[serde(default = "default_attempt_id")]
+    pub attempt_id: u32,
     pub started_at_epoch_ms: Option<i64>,
     pub completed_at_epoch_ms: Option<i64>,
     pub worker_id: Option<String>,
@@ -338,6 +415,11 @@ pub struct WorkflowTask {
     pub input_artifacts: Vec<String>,
     pub output_artifacts: Vec<String>,
     pub verification_result_json: Option<String>,
+    pub execution_result_json: Option<String>,
+}
+
+fn default_attempt_id() -> u32 {
+    1
 }
 
 /// Validated directed acyclic graph (DAG) representing an execution plan.
@@ -658,6 +740,7 @@ mod tests {
             id: "t1".into(),
             workflow_id: "wf-1".into(),
             plan_revision: 1,
+            task_kind: WorkflowTaskKind::Analysis,
             name: "Architecture Analysis".into(),
             description: "Analyze code".into(),
             assigned_role: "Architect".into(),
@@ -673,6 +756,7 @@ mod tests {
             status: WorkflowTaskStatus::Pending,
             retry_count: 0,
             max_retries: 3,
+            attempt_id: 1,
             started_at_epoch_ms: None,
             completed_at_epoch_ms: None,
             worker_id: None,
@@ -681,12 +765,14 @@ mod tests {
             input_artifacts: vec![],
             output_artifacts: vec![],
             verification_result_json: None,
+            execution_result_json: None,
         };
 
         let t2 = WorkflowTask {
             id: "t2".into(),
             workflow_id: "wf-1".into(),
             plan_revision: 1,
+            task_kind: WorkflowTaskKind::Implementation,
             name: "Implementation".into(),
             description: "Write code".into(),
             assigned_role: "Implementer".into(),
@@ -702,6 +788,7 @@ mod tests {
             status: WorkflowTaskStatus::Pending,
             retry_count: 0,
             max_retries: 3,
+            attempt_id: 1,
             started_at_epoch_ms: None,
             completed_at_epoch_ms: None,
             worker_id: None,
@@ -710,6 +797,7 @@ mod tests {
             input_artifacts: vec![],
             output_artifacts: vec![],
             verification_result_json: None,
+            execution_result_json: None,
         };
 
         let plan = WorkflowPlan {
@@ -733,6 +821,7 @@ mod tests {
             id: "t1".into(),
             workflow_id: "wf-1".into(),
             plan_revision: 1,
+            task_kind: WorkflowTaskKind::Implementation,
             name: "Task 1".into(),
             description: "Desc".into(),
             assigned_role: "Role".into(),
@@ -748,6 +837,7 @@ mod tests {
             status: WorkflowTaskStatus::Pending,
             retry_count: 0,
             max_retries: 3,
+            attempt_id: 1,
             started_at_epoch_ms: None,
             completed_at_epoch_ms: None,
             worker_id: None,
@@ -756,12 +846,14 @@ mod tests {
             input_artifacts: vec![],
             output_artifacts: vec![],
             verification_result_json: None,
+            execution_result_json: None,
         };
 
         let t2 = WorkflowTask {
             id: "t2".into(),
             workflow_id: "wf-1".into(),
             plan_revision: 1,
+            task_kind: WorkflowTaskKind::Implementation,
             name: "Task 2".into(),
             description: "Desc".into(),
             assigned_role: "Role".into(),
@@ -777,6 +869,7 @@ mod tests {
             status: WorkflowTaskStatus::Pending,
             retry_count: 0,
             max_retries: 3,
+            attempt_id: 1,
             started_at_epoch_ms: None,
             completed_at_epoch_ms: None,
             worker_id: None,
@@ -785,6 +878,7 @@ mod tests {
             input_artifacts: vec![],
             output_artifacts: vec![],
             verification_result_json: None,
+            execution_result_json: None,
         };
 
         let plan = WorkflowPlan {

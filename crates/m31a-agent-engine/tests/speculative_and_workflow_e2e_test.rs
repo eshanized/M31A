@@ -9,21 +9,29 @@
 
 use anyhow::Result;
 use futures::future::BoxFuture;
+use m31a_agent_engine::agents::EngineAgentRuntime;
 use m31a_agent_engine::speculative::{
     CandidateExecutionContext, CandidateExecutionResult, CandidateExecutor, SpeculateOptions,
     SpeculativeArena, SpeculativeBranchConfig, SpeculativeCandidateState, SpeculativeFailureReason,
 };
 use m31a_agent_engine::workflow::{WorkflowExecutionConfig, WorkflowOrchestrator};
 use m31a_core::workflow::{WorkflowEventType, WorkflowState, WorkflowTaskStatus};
+use m31a_execpolicy::ExecPolicy;
+use m31a_provider::NimProvider;
+use m31a_provider::ProviderClient;
+use m31a_provider::wire_server::{LocalWireServer, WireServerResponse};
 use m31a_storage::db::Storage;
+use m31a_storage::worktree::{WorktreeManager, WorktreeSettings};
+use m31a_tools::ToolRegistry;
+use m31a_trust::{TrustLevel, TrustStore};
 use std::fs;
 use std::path::Path;
 use std::process::Command;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tempfile::tempdir;
 
-fn init_git_repo(path: &Path) {
+fn init_git_repo(path: &Path, failing: bool) {
     Command::new("git")
         .args(["init", "-b", "master"])
         .current_dir(path)
@@ -49,23 +57,26 @@ edition = "2021"
     fs::write(path.join("Cargo.toml"), cargo_toml).unwrap();
     fs::create_dir_all(path.join("src")).unwrap();
 
-    // Failing function in baseline
-    let lib_rs = r#"pub fn add(a: i32, b: i32) -> i32 {
-    a - b // Buggy implementation
-}
+    let op = if failing { "-" } else { "+" };
+    let lib_rs = format!(
+        r#"pub fn add(a: i32, b: i32) -> i32 {{
+    a {} b
+}}
 
 #[cfg(test)]
-mod tests {
+mod tests {{
     use super::*;
 
     #[test]
-    fn test_add() {
+    fn test_add() {{
         assert_eq!(add(2, 2), 4);
-    }
-}
-"#;
+    }}
+}}
+"#,
+        op
+    );
     fs::write(path.join("src").join("lib.rs"), lib_rs).unwrap();
-    fs::write(path.join(".gitignore"), "target/\n").unwrap();
+    fs::write(path.join(".gitignore"), "target/\nartifacts/\n.m31a/\n").unwrap();
 
     // Generate Cargo.lock so it is committed
     Command::new("cargo")
@@ -80,7 +91,7 @@ mod tests {
         .output()
         .expect("git add");
     Command::new("git")
-        .args(["commit", "-m", "Initial failing commit"])
+        .args(["commit", "-m", "Initial commit"])
         .current_dir(path)
         .output()
         .expect("git commit");
@@ -136,7 +147,7 @@ impl CandidateExecutor for MultiHypothesisExecutor {
 async fn test_genuine_speculative_execution_compete_and_promote() {
     let dir = tempdir().unwrap();
     let ws_root = dir.path();
-    init_git_repo(ws_root);
+    init_git_repo(ws_root, true);
 
     // Verify baseline test currently fails
     let initial_test = Command::new("cargo")
@@ -290,12 +301,94 @@ mod tests {
 async fn test_autonomous_workflow_orchestration_full_lifecycle_and_resume() {
     let dir = tempdir().unwrap();
     let ws_root = dir.path();
-    init_git_repo(ws_root);
+    init_git_repo(ws_root, false);
+
+    // 0. Spin up LocalWireServer to mock NIM/OpenAI wire protocol for real turn loop
+    let server = LocalWireServer::start()
+        .await
+        .expect("LocalWireServer start");
+    let tool_args = serde_json::json!({
+        "path": "src/lib.rs",
+        "content": r#"pub fn add(a: i32, b: i32) -> i32 {
+    a + b
+}
+
+pub fn pipeline_stage() -> &'static str {
+    "active"
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_add() {
+        assert_eq!(add(2, 2), 4);
+    }
+
+    #[test]
+    fn test_stage() {
+        assert_eq!(pipeline_stage(), "active");
+    }
+}
+"#,
+    });
+    // Turn 1: Child agent calls write_file to implement the objective
+    server.enqueue_response(
+        WireServerResponse::text("").with_tool_call("write_file", &tool_args.to_string()),
+    );
+    // Turn 2: Child agent confirms completion
+    server.enqueue_response(WireServerResponse::text(
+        "Pipeline implementation complete.",
+    ));
+
+    let api_key = "nvapi-runtime-integration-token".to_string();
+    let provider = NimProvider::new(
+        server.api_base(),
+        api_key,
+        "nvidia/nemotron-3.5-lightning-30b-a3b".to_string(),
+    );
+    let client = ProviderClient::from_provider(provider);
 
     let storage = Storage::open_in_memory().unwrap();
     let store = storage.workflow_store();
 
-    let orchestrator = WorkflowOrchestrator::new(storage.clone(), None, None, None, None);
+    let tools = ToolRegistry::new();
+    let exec_policy = ExecPolicy::standard();
+    let wt_settings = WorktreeSettings::new(ws_root);
+    let wt_mgr = Arc::new(WorktreeManager::new(wt_settings));
+
+    let mut trust_store = TrustStore::new();
+    trust_store
+        .trust(ws_root, TrustLevel::SessionOnly)
+        .expect("trust workspace");
+
+    let runtime = Arc::new(
+        EngineAgentRuntime::new(
+            client.clone(),
+            tools.clone(),
+            storage.clone(),
+            exec_policy.clone(),
+            ws_root.to_path_buf(),
+            None,
+            128_000,
+            3,
+        )
+        .with_worktree_manager(wt_mgr.clone())
+        .with_trust_store(Arc::new(Mutex::new(trust_store)))
+        .with_approval_mediator(Arc::new(|_agent_id, _approval| {
+            Some(m31a_elicitation::ApprovalDecision::AllowOnce)
+        })),
+    );
+
+    let orchestrator = WorkflowOrchestrator::new(
+        storage.clone(),
+        Some(runtime),
+        Some(client),
+        Some(tools),
+        Some(exec_policy),
+    )
+    .with_worktree_manager(wt_mgr);
 
     // 1. Create Workflow
     let run = orchestrator
@@ -378,17 +471,32 @@ async fn test_autonomous_workflow_orchestration_full_lifecycle_and_resume() {
     assert!(!artifact.content_sha256.is_empty());
     assert!(artifact.file_path.exists());
 
-    // 5. Execute Full Workflow
+    // 5. Execute Full Workflow with Genuine Child Agent and Verification
     let executed_run = orchestrator
         .execute_workflow(&wf_id)
         .await
         .expect("Execute workflow");
-    assert_eq!(executed_run.state, WorkflowState::Completed);
+    assert_eq!(
+        executed_run.state,
+        WorkflowState::Completed,
+        "Workflow must complete successfully"
+    );
 
-    // Verify all tasks succeeded
+    // Verify all tasks succeeded with actual execution evidence
     let final_tasks = store.list_tasks(&wf_id).unwrap();
     for task in final_tasks {
-        assert_eq!(task.status, WorkflowTaskStatus::Completed);
+        assert_eq!(
+            task.status,
+            WorkflowTaskStatus::Completed,
+            "Task {} failed: {:?}",
+            task.id,
+            task.error_details
+        );
+        assert!(
+            task.execution_result_json.is_some(),
+            "Task {} must persist execution evidence",
+            task.id
+        );
     }
 
     // 6. Test Crash Resilience & Resume Idempotence across new Orchestrator instance
@@ -403,4 +511,67 @@ async fn test_autonomous_workflow_orchestration_full_lifecycle_and_resume() {
     let stored_wf = store.get_workflow(&wf_id).unwrap().unwrap();
     assert_eq!(stored_wf.state, WorkflowState::Completed);
     assert!(stored_wf.completed_at_epoch_ms.is_some());
+}
+
+#[tokio::test]
+async fn test_autonomous_workflow_orchestration_fails_closed_without_runtime() {
+    let dir = tempdir().unwrap();
+    let ws_root = dir.path();
+    init_git_repo(ws_root, false);
+
+    let storage = Storage::open_in_memory().unwrap();
+    let orchestrator = WorkflowOrchestrator::new(storage.clone(), None, None, None, None);
+
+    let run = orchestrator
+        .create_workflow(
+            ws_root,
+            "Implement high-performance concurrent processing pipeline",
+            "autonomous",
+            None,
+            Some(WorkflowExecutionConfig {
+                max_concurrency: 2,
+                task_timeout_seconds: 30,
+                verify_post_wave: false,
+                allow_speculative_stages: false,
+                require_approval_for_integration: false,
+                max_replan_attempts: 1,
+            }),
+        )
+        .expect("Create workflow");
+
+    let _plan = orchestrator
+        .generate_plan(&run.id)
+        .await
+        .expect("Plan generation");
+
+    let executed_run = orchestrator
+        .execute_workflow(&run.id)
+        .await
+        .expect("Execute workflow returns result");
+
+    assert_eq!(
+        executed_run.state,
+        WorkflowState::Failed,
+        "Workflow without runtime MUST fail closed"
+    );
+
+    // Verify tasks did not falsely succeed
+    let tasks = storage.workflow_store().list_tasks(&run.id).unwrap();
+    let impl_task = tasks
+        .iter()
+        .find(|t| t.task_kind == m31a_core::workflow::WorkflowTaskKind::Implementation)
+        .expect("Implementation task exists");
+    assert_eq!(
+        impl_task.status,
+        WorkflowTaskStatus::Failed,
+        "Implementation task without runtime MUST fail"
+    );
+    assert!(
+        impl_task
+            .error_details
+            .as_deref()
+            .unwrap_or("")
+            .contains("Execution runtime (EngineAgentRuntime) is not configured"),
+        "Failure reason must explain missing runtime"
+    );
 }
