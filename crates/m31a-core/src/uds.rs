@@ -4,6 +4,7 @@
 
 use std::io::{self, ErrorKind};
 use std::path::{Path, PathBuf};
+#[cfg(unix)]
 use tokio::net::{UnixListener, UnixStream};
 
 /// Owner-only permission mode (0700) keeping control socket directories private.
@@ -123,6 +124,7 @@ pub async fn unlink_stale_socket_if_needed(socket_path: impl AsRef<Path>) -> io:
 /// Binds a Unix domain socket listener after preparing the directory, preventing symlink attacks,
 /// cleaning any stale socket file, rejecting non-socket paths or active sockets, and enforcing
 /// restrictive 0600 file permissions on Unix.
+#[cfg(unix)]
 pub async fn bind_unix_listener(socket_path: impl AsRef<Path>) -> io::Result<UnixListener> {
     let path = socket_path.as_ref();
     if let Some(parent) = path.parent() {
@@ -202,7 +204,16 @@ pub async fn bind_unix_listener(socket_path: impl AsRef<Path>) -> io::Result<Uni
     Ok(listener)
 }
 
-#[cfg(test)]
+#[cfg(not(unix))]
+pub async fn bind_unix_listener(socket_path: impl AsRef<Path>) -> io::Result<()> {
+    let _ = socket_path;
+    Err(io::Error::new(
+        ErrorKind::Unsupported,
+        "Unix domain sockets are not supported on this platform",
+    ))
+}
+
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use tempfile::tempdir;

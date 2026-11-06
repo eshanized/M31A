@@ -203,7 +203,7 @@ impl SleepInhibitor {
         cmd.stdout(Stdio::null());
         cmd.stderr(Stdio::null());
 
-        #[cfg(unix)]
+        #[cfg(target_os = "linux")]
         {
             use std::os::unix::process::CommandExt;
             unsafe {

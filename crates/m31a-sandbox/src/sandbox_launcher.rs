@@ -141,7 +141,7 @@ impl SandboxLauncherProbe {
     }
 
     fn check_unprivileged_userns() -> bool {
-        // Check /proc/sys/kernel/unprivileged_userns_clone if present (Debian/Ubuntu specific)
+        // Check /proc/sys/kernel/unprivileged_userns_clone if present (Debian/Ubuntu older)
         let userns_sysctl = Path::new("/proc/sys/kernel/unprivileged_userns_clone");
         if userns_sysctl.exists()
             && let Ok(content) = fs::read_to_string(userns_sysctl)
@@ -149,6 +149,33 @@ impl SandboxLauncherProbe {
         {
             return false;
         }
+
+        // Check /proc/sys/kernel/apparmor_restrict_unprivileged_userns if present (Ubuntu 24.04+)
+        let apparmor_sysctl = Path::new("/proc/sys/kernel/apparmor_restrict_unprivileged_userns");
+        if apparmor_sysctl.exists()
+            && let Ok(content) = fs::read_to_string(apparmor_sysctl)
+            && content.trim() == "1"
+        {
+            return false;
+        }
+
+        // Active probe: check if creating user namespace actually succeeds
+        #[cfg(target_os = "linux")]
+        {
+            if let Ok(bwrap) = which::which("bwrap") {
+                let success = std::process::Command::new(bwrap)
+                    .args(["--ro-bind", "/", "/", "/bin/true"])
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .status()
+                    .map(|s| s.success())
+                    .unwrap_or(false);
+                if !success {
+                    return false;
+                }
+            }
+        }
+
         true
     }
 

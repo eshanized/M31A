@@ -120,11 +120,32 @@ impl Default for SandboxRunner {
 
 impl SandboxRunner {
     pub fn new() -> Self {
-        let bwrap = which::which("bwrap").ok();
+        let bwrap = which::which("bwrap").ok().filter(|path| {
+            // Verify bwrap can actually create user namespaces and run on this kernel/environment.
+            // On systems with AppArmor restricting unprivileged user namespaces (e.g. Ubuntu 24.04+),
+            // an unconfined bwrap binary will fail with "Permission denied".
+            #[cfg(target_os = "linux")]
+            {
+                std::process::Command::new(path)
+                    .args(["--ro-bind", "/", "/", "/bin/true"])
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .status()
+                    .map(|s| s.success())
+                    .unwrap_or(false)
+            }
+            #[cfg(not(target_os = "linux"))]
+            {
+                let _ = path;
+                false
+            }
+        });
         if let Some(ref path) = bwrap {
-            debug!("Bubblewrap found at {:?}", path);
+            debug!("Bubblewrap found and verified functional at {:?}", path);
         } else {
-            debug!("Bubblewrap not found; will use process-level isolation");
+            debug!(
+                "Bubblewrap not found or unprivileged user namespaces restricted; will use process-level isolation"
+            );
         }
         Self {
             bwrap_path: bwrap,

@@ -240,6 +240,7 @@ impl AppServer {
         Ok(())
     }
 
+    #[cfg(unix)]
     pub async fn run_uds(&self, socket_path: &std::path::Path) -> Result<()> {
         info!(
             "M31A App Server listening on Unix domain socket: {:?}",
@@ -310,6 +311,14 @@ impl AppServer {
                 notif_worker.abort();
             });
         }
+    }
+
+    #[cfg(not(unix))]
+    pub async fn run_uds(&self, socket_path: &std::path::Path) -> Result<()> {
+        anyhow::bail!(
+            "Unix domain sockets are not supported on Windows (path: {:?})",
+            socket_path
+        );
     }
 
     /// §2.3: drives a real `AgentEngine` turn for an admitted request, bridging
