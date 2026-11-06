@@ -37,6 +37,7 @@ m31a-watcher = { path = "../m31a-watcher" }
 m31a-review = { path = "../m31a-review" }
 m31a-trust = { path = "../m31a-trust" }
 unicode-segmentation = { workspace = true }
+sha2 = { workspace = true }
 
 [features]
 default = []

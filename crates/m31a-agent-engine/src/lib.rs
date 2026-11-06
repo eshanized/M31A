@@ -4,6 +4,7 @@ pub mod agents;
 pub mod delta_batcher;
 pub mod dispatcher;
 pub mod history_normalizer;
+pub mod integration;
 pub mod oscillation;
 pub mod speculative;
 pub mod stream_recovery;
@@ -16,6 +17,9 @@ pub use agents::EngineAgentRuntime;
 pub use delta_batcher::DeltaBatcher;
 pub use dispatcher::{AuthoritativeToolDispatcher, CodeModeDispatcherBridge, DispatchContext};
 pub use history_normalizer::normalize_tool_history;
+pub use integration::{
+    FileSnapshot, IntegrationOutcome, IntegrationRequest, WorkflowIntegrationService,
+};
 pub use oscillation::{OscillationAlert, OscillationDetector, OscillationKind};
 pub use speculative::{
     CandidateEvaluation, SpeculativeArena, SpeculativeBranchConfig, SpeculativeCandidateState,

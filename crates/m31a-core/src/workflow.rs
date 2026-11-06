@@ -361,6 +361,52 @@ impl WorkflowTaskKind {
     }
 }
 
+/// Explicit verification status dimension for task execution evidence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum VerificationStatus {
+    Passed,
+    Failed,
+    #[default]
+    NotExecuted,
+    NotApplicable,
+    TimedOut,
+    Blocked,
+    Pending,
+}
+
+impl VerificationStatus {
+    pub fn is_passed(&self) -> bool {
+        matches!(self, Self::Passed)
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Passed => "passed",
+            Self::Failed => "failed",
+            Self::NotExecuted => "not_executed",
+            Self::NotApplicable => "not_applicable",
+            Self::TimedOut => "timed_out",
+            Self::Blocked => "blocked",
+            Self::Pending => "pending",
+        }
+    }
+}
+
+/// Strongly typed context provided by the authoritative durable scheduler to a task execution attempt.
+#[derive(Debug, Clone)]
+pub struct TaskExecutionContext {
+    pub workflow_id: String,
+    pub task_id: String,
+    pub worker_id: String,
+    pub attempt_id: u32,
+    pub lease_expires_at_epoch_ms: i64,
+    pub cancellation_token: tokio_util::sync::CancellationToken,
+    pub deadline_epoch_ms: Option<i64>,
+    pub workspace_root: PathBuf,
+    pub correlation_id: String,
+}
+
 /// Verifiable structured execution outcome for a task.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TaskExecutionResult {
@@ -375,11 +421,23 @@ pub struct TaskExecutionResult {
     pub status: WorkflowTaskStatus,
     pub modified_files: Vec<String>,
     pub patch_content: Option<String>,
+    #[serde(default)]
+    pub build_status: VerificationStatus,
+    #[serde(default)]
+    pub tests_status: VerificationStatus,
+    #[serde(default)]
+    pub safety_status: VerificationStatus,
+    #[serde(default)]
+    pub review_status: VerificationStatus,
     pub build_passed: bool,
     pub tests_passed: bool,
     pub safety_passed: bool,
     pub verification_details: Option<String>,
     pub failure_reason: Option<String>,
+    #[serde(default)]
+    pub verification_duration_ms: u64,
+    #[serde(default)]
+    pub exit_code: Option<i32>,
 }
 
 /// An individual verifiable task node in a workflow plan DAG.

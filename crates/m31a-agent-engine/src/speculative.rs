@@ -28,7 +28,7 @@ use tracing::{info, warn};
 use crate::turn_loop::AgentEngine;
 
 /// Versioned evaluation policy identifier for deterministic scoring.
-pub const SCORING_POLICY_VERSION: &str = "1.0.0";
+pub const SCORING_POLICY_VERSION: &str = "2.0.0";
 
 /// Explicit lifecycle and terminal states for speculative candidates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -253,6 +253,27 @@ pub trait CandidateExecutor: Send + Sync {
 }
 
 /// Production candidate executor backed by real AgentEngine multi-turn execution loop.
+/// Robust parser for git porcelain status lines.
+/// Handles XY prefix, whitespace in filenames, and rename arrows ('->').
+pub fn parse_porcelain_path(line: &str) -> Option<String> {
+    if line.len() < 3 {
+        return None;
+    }
+    let mut raw_path = line[3..].trim();
+    if let Some((_orig, renamed)) = raw_path.split_once(" -> ") {
+        raw_path = renamed.trim();
+    }
+    let unquoted = raw_path
+        .strip_prefix('"')
+        .and_then(|s| s.strip_suffix('"'))
+        .unwrap_or(raw_path);
+    if unquoted.is_empty() {
+        None
+    } else {
+        Some(unquoted.to_string())
+    }
+}
+
 pub struct AgentEngineCandidateExecutor {
     base_client: ProviderClient,
     tools: ToolRegistry,
@@ -375,12 +396,10 @@ impl CandidateExecutor for AgentEngineCandidateExecutor {
                 {
                     let stdout = String::from_utf8_lossy(&output.stdout);
                     for line in stdout.lines() {
-                        let parts: Vec<&str> = line.split_whitespace().collect();
-                        if parts.len() >= 2 {
-                            let path = parts[parts.len() - 1].to_string();
-                            if !path.is_empty() && !modified_files.contains(&path) {
-                                modified_files.push(path);
-                            }
+                        if let Some(path) = parse_porcelain_path(line)
+                            && !modified_files.contains(&path)
+                        {
+                            modified_files.push(path);
                         }
                     }
                 }
@@ -767,171 +786,78 @@ impl SpeculativeArena {
             winner.state = SpeculativeCandidateState::Selected;
 
             if options.auto_promote_winner {
-                if options.require_approval_for_promotion {
-                    winner.state = SpeculativeCandidateState::IntegrationPending;
-                    promotion_status = format!(
-                        "Winning candidate identified: '{}' (score: {:.1}). Pending required human approval for workspace integration.",
-                        winner.name, winner.composite_score
-                    );
-                } else if !winner.patch_content.is_empty() {
-                    // Two-phase preflight conflict verification and integration
-                    let mut int_report = SpeculativeIntegrationReport {
+                if !winner.patch_content.is_empty() {
+                    let svc = crate::integration::WorkflowIntegrationService::new();
+                    let req = crate::integration::IntegrationRequest {
+                        workspace_root: options.workspace_root.clone(),
+                        patch_content: winner.patch_content.clone(),
+                        source_label: format!("speculative-{}", winner.branch_id),
+                        commit_message: Some(format!(
+                            "feat(speculative): promote candidate '{}'",
+                            winner.name
+                        )),
+                        require_approval: options.require_approval_for_promotion,
+                        is_approved: !options.require_approval_for_promotion,
+                        author_role: Some("Speculative Candidate".into()),
+                        skip_dirty_check: false,
+                        skip_verification: false,
+                        verification_timeout: Some(Duration::from_secs(30)),
+                    };
+
+                    let outcome = svc.integrate(&req).await.unwrap_or_else(|e| {
+                        crate::integration::IntegrationOutcome {
+                            success: false,
+                            pre_check_clean: false,
+                            approval_granted: true,
+                            patch_applied: false,
+                            verification_passed: false,
+                            rollback_performed: false,
+                            commit_sha: None,
+                            modified_files: Vec::new(),
+                            error: Some(e.to_string()),
+                            summary: format!("Integration error: {e}"),
+                        }
+                    });
+
+                    let int_report = SpeculativeIntegrationReport {
                         winning_branch_id: winner.branch_id.clone(),
                         winning_branch_name: winner.name.clone(),
-                        patch_applied: false,
-                        files_integrated: Vec::new(),
-                        pre_integration_dirty_check_passed: true,
-                        post_integration_build_passed: false,
-                        post_integration_tests_passed: false,
-                        rollback_executed: false,
-                        outcome_summary: String::new(),
+                        patch_applied: outcome.patch_applied,
+                        files_integrated: outcome
+                            .modified_files
+                            .iter()
+                            .map(|p| p.to_string_lossy().to_string())
+                            .collect(),
+                        pre_integration_dirty_check_passed: outcome.pre_check_clean,
+                        post_integration_build_passed: outcome.verification_passed,
+                        post_integration_tests_passed: outcome.verification_passed,
+                        rollback_executed: outcome.rollback_performed,
+                        outcome_summary: outcome.summary.clone(),
                     };
 
-                    // 1. Preflight conflict verification: check if primary workspace is clean
-                    let settings = WorktreeSettings::new(&options.workspace_root);
-                    let mgr = WorktreeManager::new(settings);
-                    let is_dirty = match mgr.is_dirty(&options.workspace_root) {
-                        Ok(d) => d,
-                        Err(e) => {
-                            warn!(err = %e, "Failed inspecting primary workspace cleanliness; failing closed");
-                            true
-                        }
-                    };
-
-                    if is_dirty {
-                        int_report.pre_integration_dirty_check_passed = false;
+                    if outcome.success {
+                        winner.state = SpeculativeCandidateState::Integrated;
                         promotion_status = format!(
-                            "Integration of winner '{}' blocked: primary workspace contains uncommitted changes or cleanliness inspection failed. Clean workspace required.",
-                            winner.name
+                            "Promoted and verified winning candidate '{}' (applied patch to {} files)",
+                            winner.name,
+                            int_report.files_integrated.len()
                         );
-                        int_report.outcome_summary = promotion_status.clone();
+                        info!(status = %promotion_status, "Speculative winner successfully integrated and verified");
+                    } else if !outcome.approval_granted {
+                        winner.state = SpeculativeCandidateState::IntegrationPending;
+                        promotion_status = format!(
+                            "Winning candidate identified: '{}' (score: {:.1}). Pending required human approval for workspace integration.",
+                            winner.name, winner.composite_score
+                        );
                     } else {
-                        // 2. Strict patch parse and path containment verification
-                        let apply_res = if winner.patch_content.contains("*** Begin Patch") {
-                            match m31a_tools::patch::parse_patch(&winner.patch_content) {
-                                Ok(parsed) => {
-                                    match m31a_tools::patch::apply_patch_to_workspace(
-                                        &options.workspace_root,
-                                        &parsed,
-                                    ) {
-                                        Ok(res) => Ok(res
-                                            .files_modified
-                                            .iter()
-                                            .chain(&res.files_created)
-                                            .map(|p| p.to_string_lossy().to_string())
-                                            .collect()),
-                                        Err(e) => Err(anyhow!("Failed applying tool patch: {e}")),
-                                    }
-                                }
-                                Err(e) => Err(anyhow!("Patch parse error: {e}")),
-                            }
-                        } else {
-                            // Unified git diff format
-                            match WorktreeManager::validate_patch_paths(&winner.patch_content) {
-                                Ok(paths) => {
-                                    let child = Command::new("git")
-                                        .current_dir(&options.workspace_root)
-                                        .args(["apply", "--ignore-whitespace", "-"])
-                                        .stdin(std::process::Stdio::piped())
-                                        .stdout(std::process::Stdio::piped())
-                                        .stderr(std::process::Stdio::piped())
-                                        .spawn();
-                                    match child {
-                                        Ok(mut c) => {
-                                            if let Some(mut stdin) = c.stdin.take() {
-                                                use std::io::Write;
-                                                let _ = stdin
-                                                    .write_all(winner.patch_content.as_bytes());
-                                            }
-                                            match c.wait_with_output() {
-                                                Ok(out) if out.status.success() => Ok(paths
-                                                    .into_iter()
-                                                    .map(|p| p.to_string_lossy().to_string())
-                                                    .collect()),
-                                                Ok(out) => Err(anyhow!(
-                                                    "git apply failed: {}",
-                                                    String::from_utf8_lossy(&out.stderr)
-                                                )),
-                                                Err(e) => {
-                                                    Err(anyhow!("Failed waiting on git apply: {e}"))
-                                                }
-                                            }
-                                        }
-                                        Err(e) => Err(anyhow!("Failed to spawn git apply: {e}")),
-                                    }
-                                }
-                                Err(e) => Err(anyhow!("Patch path validation failed: {e}")),
-                            }
-                        };
-
-                        match apply_res {
-                            Ok(integrated_files) => {
-                                int_report.patch_applied = true;
-                                int_report.files_integrated = integrated_files;
-
-                                // 3. Post-integration verification gate
-                                let post_check = AutonomousVerifier::verify_check(
-                                    &options.workspace_root,
-                                    Duration::from_secs(30),
-                                )
-                                .await;
-                                let check_passed = post_check.map(|c| c.success).unwrap_or(false);
-                                int_report.post_integration_build_passed = check_passed;
-
-                                let post_tests = if check_passed {
-                                    AutonomousVerifier::verify_tests(
-                                        &options.workspace_root,
-                                        Duration::from_secs(45),
-                                    )
-                                    .await
-                                    .map(|t| t.success)
-                                    .unwrap_or(false)
-                                } else {
-                                    false
-                                };
-                                int_report.post_integration_tests_passed = post_tests;
-
-                                if check_passed && post_tests {
-                                    winner.state = SpeculativeCandidateState::Integrated;
-                                    promotion_status = format!(
-                                        "Promoted and verified winning candidate '{}' (applied patch to {} files)",
-                                        winner.name,
-                                        int_report.files_integrated.len()
-                                    );
-                                    int_report.outcome_summary = promotion_status.clone();
-                                    info!(status = %promotion_status, "Speculative winner successfully integrated and verified");
-                                } else {
-                                    // Post-integration verification failed! Rollback ONLY changes owned by this integration
-                                    int_report.rollback_executed = true;
-                                    for file_rel in &int_report.files_integrated {
-                                        let target = options.workspace_root.join(file_rel);
-                                        let checkout_res = Command::new("git")
-                                            .current_dir(&options.workspace_root)
-                                            .args(["checkout", "HEAD", "--", file_rel])
-                                            .output();
-                                        let was_reverted = checkout_res
-                                            .map(|o| o.status.success())
-                                            .unwrap_or(false);
-                                        if !was_reverted && target.is_file() {
-                                            let _ = fs::remove_file(&target);
-                                        }
-                                    }
-
-                                    promotion_status = format!(
-                                        "Promotion rolled back: post-integration verification failed for winner '{}' (build: {}, tests: {})",
-                                        winner.name, check_passed, post_tests
-                                    );
-                                    int_report.outcome_summary = promotion_status.clone();
-                                    warn!(status = %promotion_status, "Winner promotion rolled back safely without broad workspace wipe");
-                                }
-                            }
-                            Err(e) => {
-                                promotion_status = format!("Failed to apply winning patch: {e}");
-                                int_report.outcome_summary = promotion_status.clone();
-                                warn!(err = %e, "Patch promotion failed");
-                            }
-                        }
+                        let err_detail = outcome.error.unwrap_or(outcome.summary);
+                        promotion_status = format!(
+                            "Integration of winning candidate '{}' failed: {}",
+                            winner.name, err_detail
+                        );
+                        warn!(status = %promotion_status, "Winner promotion failed or rolled back safely");
                     }
+
                     integration_report = Some(int_report);
                 } else {
                     promotion_status = format!(
@@ -997,6 +923,7 @@ impl SpeculativeArena {
         // Stage 1: Candidate Execution
         // If an executor is provided, run real agent execution in the isolated workspace
         if let Some(ref exec) = executor {
+            let cancel_token = CancellationToken::new();
             let ctx = CandidateExecutionContext {
                 candidate_id: candidate.branch_id.clone(),
                 name: candidate.name.clone(),
@@ -1007,12 +934,13 @@ impl SpeculativeArena {
                     .unwrap_or_else(|| mission.to_string()),
                 workspace_root: sandbox.path.clone(),
                 model_override: candidate.model_override.clone(),
-                cancel_token: CancellationToken::new(),
+                cancel_token: cancel_token.clone(),
                 timeout,
             };
 
-            match exec.execute(&ctx).await {
-                Ok(res) => {
+            let exec_fut = exec.execute(&ctx);
+            match tokio::time::timeout(timeout, exec_fut).await {
+                Ok(Ok(res)) => {
                     if !res.success && res.error.is_some() {
                         failure_reason =
                             SpeculativeFailureReason::ExecutionError(res.error.unwrap_or_default());
@@ -1029,8 +957,15 @@ impl SpeculativeArena {
                         }
                     }
                 }
-                Err(e) => {
+                Ok(Err(e)) => {
                     failure_reason = SpeculativeFailureReason::ExecutionError(e.to_string());
+                }
+                Err(_) => {
+                    cancel_token.cancel();
+                    failure_reason = SpeculativeFailureReason::ExecutionError(format!(
+                        "Candidate execution timed out after {:?}",
+                        timeout
+                    ));
                 }
             }
         }
@@ -1099,12 +1034,10 @@ impl SpeculativeArena {
             {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 for line in stdout.lines() {
-                    let parts: Vec<&str> = line.split_whitespace().collect();
-                    if parts.len() >= 2 {
-                        let path = parts[parts.len() - 1].to_string();
-                        if !path.is_empty() && !modified_files.contains(&path) {
-                            modified_files.push(path);
-                        }
+                    if let Some(path) = parse_porcelain_path(line)
+                        && !modified_files.contains(&path)
+                    {
+                        modified_files.push(path);
                     }
                 }
             }
@@ -1372,7 +1305,7 @@ impl SpeculativeArena {
                     20.0
                 }
                 Some(SpeculativeBenchmarkStatus::Measured) => 10.0,
-                _ => 10.0, // Neutral standard score for NotMeasured
+                _ => 0.0, // Policy 2.0.0: unmeasured performance receives 0.0 points
             };
 
             // Maintainability & compactness: reward focused modifications over sprawling changes

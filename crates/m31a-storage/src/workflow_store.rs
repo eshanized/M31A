@@ -1,7 +1,7 @@
 //! Persistent SQLite storage engine for autonomous workflows, task queues, lease recovery,
 //! append-only audit events, and content-addressed artifacts (`m31a-storage::workflow_store`).
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use chrono::Utc;
 use m31a_core::workflow::{
     WorkflowArtifact, WorkflowEvent, WorkflowEventType, WorkflowPlan, WorkflowRun, WorkflowState,
@@ -9,6 +9,7 @@ use m31a_core::workflow::{
 };
 use rusqlite::{Connection, params};
 use sha2::{Digest, Sha256};
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -565,7 +566,11 @@ impl WorkflowStore {
                     execution_result_json = COALESCE(?3, execution_result_json),
                     started_at_epoch_ms = COALESCE(started_at_epoch_ms, ?4),
                     completed_at_epoch_ms = COALESCE(completed_at_epoch_ms, ?5)
-                WHERE workflow_id = ?6 AND id = ?7 AND attempt_id = ?8 AND worker_id = ?9
+                WHERE workflow_id = ?6
+                  AND id = ?7
+                  AND attempt_id = ?8
+                  AND worker_id = ?9
+                  AND (lease_expires_at_epoch_ms IS NULL OR lease_expires_at_epoch_ms > ?10)
                 "#,
                 params![
                     status.as_str(),
@@ -576,7 +581,8 @@ impl WorkflowStore {
                     workflow_id,
                     task_id,
                     att,
-                    worker
+                    worker,
+                    now
                 ],
             )?,
             (Some(att), None) => tx.execute(
@@ -651,48 +657,189 @@ impl WorkflowStore {
             ));
         }
 
+        // When a task completes, promote any pending tasks whose dependencies are now satisfied to 'ready'
+        if status == WorkflowTaskStatus::Completed {
+            tx.execute(
+                r#"
+                UPDATE workflow_tasks
+                SET status = 'ready'
+                WHERE workflow_id = ?1
+                  AND status = 'pending'
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM workflow_task_dependencies d
+                      JOIN workflow_tasks dep ON dep.workflow_id = d.workflow_id AND dep.id = d.depends_on_task_id
+                      WHERE d.workflow_id = ?1
+                        AND d.task_id = workflow_tasks.id
+                        AND dep.status != 'completed'
+                  )
+                "#,
+                params![workflow_id],
+            )?;
+        }
+
         tx.commit()?;
         Ok(())
     }
 
-    /// Atomically claims the next ready or retry_pending task with worker lease semantics and dependency validation.
+    /// Atomically claims the next ready or retry_pending task with worker lease semantics, dependency validation, and write-path conflict checks.
     pub fn claim_ready_task(
         &self,
         workflow_id: &str,
         worker_id: &str,
         lease_duration_ms: i64,
     ) -> Result<Option<WorkflowTask>> {
+        self.claim_task_internal(workflow_id, None, worker_id, lease_duration_ms)
+    }
+
+    /// Atomically claims a specific task (if ready/retry_pending and dependencies satisfied) for a worker.
+    pub fn claim_task(
+        &self,
+        workflow_id: &str,
+        task_id: &str,
+        worker_id: &str,
+        lease_duration_ms: i64,
+    ) -> Result<Option<WorkflowTask>> {
+        self.claim_task_internal(workflow_id, Some(task_id), worker_id, lease_duration_ms)
+    }
+
+    fn claim_task_internal(
+        &self,
+        workflow_id: &str,
+        target_task_id: Option<&str>,
+        worker_id: &str,
+        lease_duration_ms: i64,
+    ) -> Result<Option<WorkflowTask>> {
+        if worker_id.trim().is_empty() {
+            bail!("Worker ID must not be empty");
+        }
+        if lease_duration_ms <= 0 {
+            bail!("Lease duration must be positive (got {lease_duration_ms}ms)");
+        }
+
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction()?;
         let now = Utc::now().timestamp_millis();
         let lease_expires = now + lease_duration_ms;
 
-        // Find highest priority, lowest wave ready or retry_pending task whose dependencies are ALL completed
-        let candidate: Option<(String, u32)> = tx
-            .query_row(
+        // 1. Verify workflow exists and is active
+        let wf_state: String = match tx.query_row(
+            "SELECT state FROM workflows WHERE id = ?1",
+            params![workflow_id],
+            |row| row.get(0),
+        ) {
+            Ok(s) => s,
+            Err(rusqlite::Error::QueryReturnedNoRows) => {
+                bail!("Workflow '{workflow_id}' not found");
+            }
+            Err(e) => return Err(e.into()),
+        };
+
+        if matches!(wf_state.as_str(), "completed" | "failed" | "cancelled") {
+            return Ok(None);
+        }
+
+        // 2. Fetch declared write paths of currently active tasks to prevent write-path conflicts
+        let mut active_write_paths: HashSet<PathBuf> = HashSet::new();
+        {
+            let mut active_stmt = tx.prepare(
                 r#"
-                SELECT t.id, t.attempt_id
-                FROM workflow_tasks t
-                WHERE t.workflow_id = ?1
-                  AND t.status IN ('ready', 'retry_pending')
-                  AND NOT EXISTS (
-                      SELECT 1
-                      FROM workflow_task_dependencies d
-                      JOIN workflow_tasks dep ON dep.workflow_id = d.workflow_id AND dep.id = d.depends_on_task_id
-                      WHERE d.workflow_id = ?1
-                        AND d.task_id = t.id
-                        AND dep.status != 'completed'
-                  )
-                ORDER BY t.wave_index ASC, t.priority DESC, t.id ASC
-                LIMIT 1
+                SELECT declared_write_paths_json, workspace_isolation
+                FROM workflow_tasks
+                WHERE workflow_id = ?1
+                  AND status IN ('claimed', 'running', 'verifying')
                 "#,
-                params![workflow_id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .ok();
+            )?;
+            let active_rows = active_stmt.query_map(params![workflow_id], |row| {
+                let paths_json: String = row.get(0)?;
+                let isolation: String = row.get(1)?;
+                Ok((paths_json, isolation))
+            })?;
+            for r in active_rows {
+                let (paths_json, isolation) = r?;
+                if isolation != "worktree"
+                    && let Ok(paths) = serde_json::from_str::<Vec<PathBuf>>(&paths_json)
+                {
+                    for p in paths {
+                        active_write_paths.insert(p);
+                    }
+                }
+            }
+        }
+
+        // 3. Find candidates whose dependencies are all completed
+        let query_sql = if target_task_id.is_some() {
+            r#"
+            SELECT t.id, t.attempt_id, t.declared_write_paths_json, t.workspace_isolation
+            FROM workflow_tasks t
+            WHERE t.workflow_id = ?1
+              AND t.id = ?2
+              AND t.status IN ('ready', 'retry_pending', 'pending')
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM workflow_task_dependencies d
+                  JOIN workflow_tasks dep ON dep.workflow_id = d.workflow_id AND dep.id = d.depends_on_task_id
+                  WHERE d.workflow_id = ?1
+                    AND d.task_id = t.id
+                    AND dep.status != 'completed'
+              )
+            LIMIT 1
+            "#
+        } else {
+            r#"
+            SELECT t.id, t.attempt_id, t.declared_write_paths_json, t.workspace_isolation
+            FROM workflow_tasks t
+            WHERE t.workflow_id = ?1
+              AND t.status IN ('ready', 'retry_pending', 'pending')
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM workflow_task_dependencies d
+                  JOIN workflow_tasks dep ON dep.workflow_id = d.workflow_id AND dep.id = d.depends_on_task_id
+                  WHERE d.workflow_id = ?1
+                    AND d.task_id = t.id
+                    AND dep.status != 'completed'
+              )
+            ORDER BY t.wave_index ASC, t.priority DESC, t.id ASC
+            "#
+        };
+
+        let candidates: Vec<(String, u32, String, String)> = {
+            let mut candidate_stmt = tx.prepare(query_sql)?;
+            let parse_row = |row: &rusqlite::Row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, u32>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            };
+            if let Some(target_id) = target_task_id {
+                candidate_stmt
+                    .query_map(params![workflow_id, target_id], parse_row)?
+                    .collect::<Result<Vec<_>, _>>()?
+            } else {
+                candidate_stmt
+                    .query_map(params![workflow_id], parse_row)?
+                    .collect::<Result<Vec<_>, _>>()?
+            }
+        };
+
+        let mut selected = None;
+        for (id, attempt, write_paths_json, isolation) in candidates {
+            if isolation == "worktree" || active_write_paths.is_empty() {
+                selected = Some((id, attempt));
+                break;
+            }
+            let paths: Vec<PathBuf> = serde_json::from_str(&write_paths_json).unwrap_or_default();
+            let has_conflict = paths.iter().any(|p| active_write_paths.contains(p));
+            if !has_conflict {
+                selected = Some((id, attempt));
+                break;
+            }
+        }
 
         let mut claimed_task_id = None;
-        if let Some((ref id, current_attempt)) = candidate {
+        if let Some((ref id, current_attempt)) = selected {
             let next_attempt = current_attempt + 1;
             let rows_updated = tx.execute(
                 r#"
@@ -719,6 +866,22 @@ impl WorkflowStore {
             )?;
 
             if rows_updated > 0 {
+                let event_id = format!("evt-claim-{}", Uuid::new_v4().simple());
+                let payload = serde_json::json!({
+                    "worker_id": worker_id,
+                    "attempt_id": next_attempt,
+                    "lease_expires_at_epoch_ms": lease_expires,
+                })
+                .to_string();
+                tx.execute(
+                    r#"
+                    INSERT INTO workflow_events (
+                        id, workflow_id, task_id, agent_id, event_type,
+                        timestamp_epoch_ms, correlation_id, payload_json, schema_version
+                    ) VALUES (?1, ?2, ?3, NULL, 'task_claimed', ?4, NULL, ?5, 1)
+                    "#,
+                    params![event_id, workflow_id, id, now, payload],
+                )?;
                 claimed_task_id = Some(id.clone());
             }
         }
@@ -733,14 +896,19 @@ impl WorkflowStore {
         }
     }
 
-    /// Extends a worker's lease on an active task.
+    /// Extends a worker's lease on an active task attempt.
+    /// Fails closed if lease expired or attempt_id was fenced.
     pub fn renew_task_lease(
         &self,
         workflow_id: &str,
         task_id: &str,
         worker_id: &str,
+        expected_attempt_id: u32,
         lease_duration_ms: i64,
     ) -> Result<bool> {
+        if lease_duration_ms <= 0 {
+            bail!("Lease duration must be positive (got {lease_duration_ms}ms)");
+        }
         let conn = self.conn.lock().unwrap();
         let now = Utc::now().timestamp_millis();
         let lease_expires = now + lease_duration_ms;
@@ -752,9 +920,18 @@ impl WorkflowStore {
             WHERE workflow_id = ?2
               AND id = ?3
               AND worker_id = ?4
+              AND attempt_id = ?5
               AND status IN ('claimed', 'running', 'verifying')
+              AND lease_expires_at_epoch_ms > ?6
             "#,
-            params![lease_expires, workflow_id, task_id, worker_id],
+            params![
+                lease_expires,
+                workflow_id,
+                task_id,
+                worker_id,
+                expected_attempt_id,
+                now
+            ],
         )?;
 
         Ok(rows > 0)
@@ -1358,5 +1535,246 @@ mod tests {
             .unwrap();
         assert_eq!(claimed_b.id, "task-B");
         assert_eq!(claimed_b.worker_id.as_deref(), Some("worker-2"));
+    }
+
+    #[test]
+    fn test_renew_task_lease_and_fencing() {
+        let (store, _) = setup_test_db();
+        let wf_id = "wf-lease-test";
+        let run = WorkflowRun {
+            id: wf_id.to_string(),
+            thread_id: None,
+            workspace_root: PathBuf::from("/workspace"),
+            objective: "Lease test".into(),
+            workflow_type: "autonomous".into(),
+            state: WorkflowState::Running,
+            plan_revision: 1,
+            configuration_json: "{}".into(),
+            created_at_epoch_ms: 1000,
+            updated_at_epoch_ms: 1000,
+            started_at_epoch_ms: Some(1000),
+            completed_at_epoch_ms: None,
+            cancellation_reason: None,
+            overall_result_json: None,
+            resource_usage_json: None,
+        };
+        store.create_workflow(&run).unwrap();
+
+        let task = WorkflowTask {
+            id: "task-lease".into(),
+            workflow_id: wf_id.into(),
+            plan_revision: 1,
+            task_kind: m31a_core::workflow::WorkflowTaskKind::Implementation,
+            name: "Task Lease".into(),
+            description: "Test".into(),
+            assigned_role: "Dev".into(),
+            assigned_agent_id: None,
+            priority: 10,
+            wave_index: 0,
+            dependencies: vec![],
+            acceptance_criteria: vec![],
+            required_verification: vec![],
+            declared_read_paths: vec![],
+            declared_write_paths: vec![],
+            workspace_isolation: WorkspaceIsolationStrategy::Worktree,
+            status: WorkflowTaskStatus::Ready,
+            retry_count: 0,
+            max_retries: 2,
+            attempt_id: 0,
+            started_at_epoch_ms: None,
+            completed_at_epoch_ms: None,
+            worker_id: None,
+            lease_expires_at_epoch_ms: None,
+            error_details: None,
+            input_artifacts: vec![],
+            output_artifacts: vec![],
+            verification_result_json: None,
+            execution_result_json: None,
+        };
+
+        let plan = WorkflowPlan {
+            workflow_id: wf_id.into(),
+            revision: 1,
+            rationale: "Lease test".into(),
+            created_at_epoch_ms: 1000,
+            tasks: vec![task],
+        };
+        store.save_workflow_plan(&plan).unwrap();
+
+        let claimed = store
+            .claim_ready_task(wf_id, "worker-lease-1", 5_000)
+            .unwrap()
+            .unwrap();
+        assert_eq!(claimed.attempt_id, 1);
+
+        // Stale attempt renewal fails
+        let stale_renew = store
+            .renew_task_lease(wf_id, "task-lease", "worker-lease-1", 0, 5_000)
+            .unwrap();
+        assert!(!stale_renew);
+
+        // Wrong worker renewal fails
+        let wrong_worker_renew = store
+            .renew_task_lease(wf_id, "task-lease", "worker-other", 1, 5_000)
+            .unwrap();
+        assert!(!wrong_worker_renew);
+
+        // Non-positive lease renewal returns error
+        let non_pos_renew = store.renew_task_lease(wf_id, "task-lease", "worker-lease-1", 1, 0);
+        assert!(non_pos_renew.is_err());
+
+        // Valid renewal succeeds
+        let valid_renew = store
+            .renew_task_lease(wf_id, "task-lease", "worker-lease-1", 1, 10_000)
+            .unwrap();
+        assert!(valid_renew);
+    }
+
+    #[test]
+    fn test_shared_workspace_write_conflict_isolation() {
+        let (store, _) = setup_test_db();
+        let wf_id = "wf-conflict-test";
+        let run = WorkflowRun {
+            id: wf_id.to_string(),
+            thread_id: None,
+            workspace_root: PathBuf::from("/workspace"),
+            objective: "Conflict test".into(),
+            workflow_type: "autonomous".into(),
+            state: WorkflowState::Running,
+            plan_revision: 1,
+            configuration_json: "{}".into(),
+            created_at_epoch_ms: 1000,
+            updated_at_epoch_ms: 1000,
+            started_at_epoch_ms: Some(1000),
+            completed_at_epoch_ms: None,
+            cancellation_reason: None,
+            overall_result_json: None,
+            resource_usage_json: None,
+        };
+        store.create_workflow(&run).unwrap();
+
+        let task_shared_1 = WorkflowTask {
+            id: "task-s1".into(),
+            workflow_id: wf_id.into(),
+            plan_revision: 1,
+            task_kind: m31a_core::workflow::WorkflowTaskKind::Implementation,
+            name: "Task S1".into(),
+            description: "Test".into(),
+            assigned_role: "Dev".into(),
+            assigned_agent_id: None,
+            priority: 20,
+            wave_index: 0,
+            dependencies: vec![],
+            acceptance_criteria: vec![],
+            required_verification: vec![],
+            declared_read_paths: vec![],
+            declared_write_paths: vec![PathBuf::from("src/conflict.rs")],
+            workspace_isolation: WorkspaceIsolationStrategy::SharedWorkspace,
+            status: WorkflowTaskStatus::Ready,
+            retry_count: 0,
+            max_retries: 2,
+            attempt_id: 0,
+            started_at_epoch_ms: None,
+            completed_at_epoch_ms: None,
+            worker_id: None,
+            lease_expires_at_epoch_ms: None,
+            error_details: None,
+            input_artifacts: vec![],
+            output_artifacts: vec![],
+            verification_result_json: None,
+            execution_result_json: None,
+        };
+
+        let task_shared_2 = WorkflowTask {
+            id: "task-s2".into(),
+            workflow_id: wf_id.into(),
+            plan_revision: 1,
+            task_kind: m31a_core::workflow::WorkflowTaskKind::Implementation,
+            name: "Task S2".into(),
+            description: "Test".into(),
+            assigned_role: "Dev".into(),
+            assigned_agent_id: None,
+            priority: 15,
+            wave_index: 0,
+            dependencies: vec![],
+            acceptance_criteria: vec![],
+            required_verification: vec![],
+            declared_read_paths: vec![],
+            declared_write_paths: vec![PathBuf::from("src/conflict.rs")],
+            workspace_isolation: WorkspaceIsolationStrategy::SharedWorkspace,
+            status: WorkflowTaskStatus::Ready,
+            retry_count: 0,
+            max_retries: 2,
+            attempt_id: 0,
+            started_at_epoch_ms: None,
+            completed_at_epoch_ms: None,
+            worker_id: None,
+            lease_expires_at_epoch_ms: None,
+            error_details: None,
+            input_artifacts: vec![],
+            output_artifacts: vec![],
+            verification_result_json: None,
+            execution_result_json: None,
+        };
+
+        let task_worktree = WorkflowTask {
+            id: "task-wt".into(),
+            workflow_id: wf_id.into(),
+            plan_revision: 1,
+            task_kind: m31a_core::workflow::WorkflowTaskKind::Implementation,
+            name: "Task WT".into(),
+            description: "Test".into(),
+            assigned_role: "Dev".into(),
+            assigned_agent_id: None,
+            priority: 10,
+            wave_index: 0,
+            dependencies: vec![],
+            acceptance_criteria: vec![],
+            required_verification: vec![],
+            declared_read_paths: vec![],
+            declared_write_paths: vec![PathBuf::from("src/conflict.rs")],
+            workspace_isolation: WorkspaceIsolationStrategy::Worktree,
+            status: WorkflowTaskStatus::Ready,
+            retry_count: 0,
+            max_retries: 2,
+            attempt_id: 0,
+            started_at_epoch_ms: None,
+            completed_at_epoch_ms: None,
+            worker_id: None,
+            lease_expires_at_epoch_ms: None,
+            error_details: None,
+            input_artifacts: vec![],
+            output_artifacts: vec![],
+            verification_result_json: None,
+            execution_result_json: None,
+        };
+
+        let plan = WorkflowPlan {
+            workflow_id: wf_id.into(),
+            revision: 1,
+            rationale: "Conflict test".into(),
+            created_at_epoch_ms: 1000,
+            tasks: vec![task_shared_1, task_shared_2, task_worktree],
+        };
+        store.save_workflow_plan(&plan).unwrap();
+
+        // 1. Claim task-s1 (highest priority 20)
+        let claim1 = store
+            .claim_ready_task(wf_id, "worker-1", 10_000)
+            .unwrap()
+            .unwrap();
+        assert_eq!(claim1.id, "task-s1");
+
+        // 2. Next claim should skip task-s2 (which conflicts on src/conflict.rs in Shared mode)
+        // and instead claim task-wt which has Worktree isolation!
+        let claim2 = store
+            .claim_ready_task(wf_id, "worker-2", 10_000)
+            .unwrap()
+            .unwrap();
+        assert_eq!(claim2.id, "task-wt");
+
+        // 3. Third claim returns None because task-s2 is still in write conflict with task-s1
+        let claim3 = store.claim_ready_task(wf_id, "worker-3", 10_000).unwrap();
+        assert!(claim3.is_none());
     }
 }

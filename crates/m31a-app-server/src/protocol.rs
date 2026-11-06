@@ -1884,7 +1884,7 @@ impl AppServer {
                     .unwrap_or("Cancelled via App Server RPC request");
 
                 let orch = self.workflow_orchestrator(None);
-                orch.cancel_workflow(wf_id, reason)?;
+                orch.cancel_workflow(wf_id, reason).await?;
 
                 let store = self.storage.workflow_store();
                 let run = store
@@ -1976,14 +1976,37 @@ impl AppServer {
                         SpeculativeArena::generate_diverse_hypotheses(mission, 3)
                     };
 
-                let report = SpeculativeArena::compete(
-                    std::path::Path::new(ws_str),
-                    mission,
+                let orch = self.workflow_orchestrator(Some(std::path::Path::new(ws_str)));
+                let executor: Option<Arc<dyn m31a_agent_engine::speculative::CandidateExecutor>> =
+                    if let (Some(client), Some(tools)) =
+                        (orch.base_client().cloned(), orch.tools().cloned())
+                    {
+                        let hooks = Some(self.hooks.clone());
+                        Some(Arc::new(
+                            m31a_agent_engine::speculative::AgentEngineCandidateExecutor::new(
+                                client,
+                                tools,
+                                self.storage.clone(),
+                                orch.exec_policy().cloned().unwrap_or_default(),
+                                hooks,
+                            ),
+                        ))
+                    } else {
+                        None
+                    };
+
+                let options = m31a_agent_engine::speculative::SpeculateOptions {
+                    workspace_root: std::path::PathBuf::from(ws_str),
+                    mission: mission.to_string(),
                     candidates,
-                    std::time::Duration::from_secs(timeout_secs),
-                    auto_promote,
-                )
-                .await?;
+                    timeout_per_candidate: std::time::Duration::from_secs(timeout_secs),
+                    auto_promote_winner: auto_promote,
+                    require_approval_for_promotion: false,
+                    max_concurrency: 4,
+                    executor,
+                };
+
+                let report = SpeculativeArena::compete_with_options(options).await?;
 
                 Ok(serde_json::to_value(report)?)
             }

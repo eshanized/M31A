@@ -345,7 +345,7 @@ pub async fn run_workflow_mode(
             reason,
             json,
         } => {
-            orchestrator.cancel_workflow(&workflow_id, &reason)?;
+            orchestrator.cancel_workflow(&workflow_id, &reason).await?;
             if json {
                 println!(
                     "{}",
