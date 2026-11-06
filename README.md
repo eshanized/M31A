@@ -123,6 +123,22 @@
 
 ### 2. Build & Install
 
+#### Quick Install (Linux)
+
+Install M31A with a single command via the automated installer:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/eshanized/M31A/master/install.sh | bash
+```
+
+Or install a specific version or from a local binary:
+```bash
+./install.sh --version 0.1.13
+./install.sh --binary ./target/release/m31a
+```
+
+#### Build from Source
+
 ```bash
 # Clone the repository
 git clone https://github.com/eshanized/M31A.git
@@ -139,6 +155,19 @@ cp target/release/m31a ~/.local/bin/
 *Alternatively, build with Bazel 7*:
 ```bash
 bazel build //bazel:m31a
+```
+
+#### Uninstall & Data Cleanup
+
+To completely uninstall M31A and purge all local configuration, databases, sessions, caches, and PATH entries:
+
+```bash
+# Using the installed uninstaller command
+m31a-uninstall
+
+# Or using the uninstallation script directly
+curl -fsSL https://raw.githubusercontent.com/eshanized/M31A/master/uninstall.sh | bash
+# Or: ./uninstall.sh --force
 ```
 
 ### 3. Configure NVIDIA NIM Credentials
