@@ -33,16 +33,23 @@ else
 fi
 
 CARGO_CMD="${CARGO:-cargo}"
+export RUSTUP_TOOLCHAIN="${RUSTUP_TOOLCHAIN:-stable}"
+PKG="%s"
+BIN="%s"
 
-echo "Building M31A package '%s' (bin: '%s') with cargo..."
-"$CARGO_CMD" build --release -p "%s" --bin "%s" --manifest-path "${WORKSPACE_DIR}/Cargo.toml"
+echo "Building M31A package '$PKG' (bin: '$BIN') with cargo..."
+"$CARGO_CMD" build --release -p "$PKG" --bin "$BIN" --manifest-path "${WORKSPACE_DIR}/Cargo.toml"
 
 # Locate compiled binary
 CANDIDATE_PATHS=(
-    "${WORKSPACE_DIR}/target/release/%s"
-    "target/release/%s"
-    "${WORKSPACE_DIR}/target/debug/%s"
-    "target/debug/%s"
+    "${WORKSPACE_DIR}/target/release/${BIN}"
+    "${WORKSPACE_DIR}/target/release/${BIN}.exe"
+    "target/release/${BIN}"
+    "target/release/${BIN}.exe"
+    "${WORKSPACE_DIR}/target/debug/${BIN}"
+    "${WORKSPACE_DIR}/target/debug/${BIN}.exe"
+    "target/debug/${BIN}"
+    "target/debug/${BIN}.exe"
 )
 
 FOUND_BIN=""
@@ -54,14 +61,14 @@ for path in "${CANDIDATE_PATHS[@]}"; do
 done
 
 if [ -z "$FOUND_BIN" ]; then
-    echo "ERROR: Compiled cargo binary not found for package %s (bin: %s)" >&2
+    echo "ERROR: Compiled cargo binary not found for package $PKG (bin: $BIN)" >&2
     exit 1
 fi
 
 cp "$FOUND_BIN" "%s"
 chmod +x "%s"
 echo "M31A binary ready at %s"
-""" % (package, bin_name, package, bin_name, bin_name, bin_name, bin_name, bin_name, package, bin_name, out.path, out.path, out.path),
+""" % (package, bin_name, out.path, out.path, out.path),
         execution_requirements = {
             "no-sandbox": "1",
             "local": "1",
@@ -303,7 +310,7 @@ def _m31a_test_impl(ctx):
             cmd = "cargo test -p %s" % package
         else:
             cmd = "cargo test --workspace"
-        content = "@echo off\r\n" + cmd + "\r\nif %%ERRORLEVEL%% NEQ 0 exit /b %%ERRORLEVEL%%\r\nexit /b 0\r\n"
+        content = "@echo off\r\nset RUSTUP_TOOLCHAIN=stable\r\n" + cmd + "\r\nif %%ERRORLEVEL%% NEQ 0 exit /b %%ERRORLEVEL%%\r\nexit /b 0\r\n"
     else:
         if package:
             cmd = 'cargo test -p "%s"' % package
@@ -348,6 +355,7 @@ if [ -z "$WORKSPACE_DIR" ]; then
     exit 1
 fi
 
+export RUSTUP_TOOLCHAIN="${RUSTUP_TOOLCHAIN:-stable}"
 export HOME="${HOME:-/tmp}"
 export GIT_AUTHOR_NAME="${GIT_AUTHOR_NAME:-M31A Test}"
 export GIT_AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL:-test@m31a.local}"

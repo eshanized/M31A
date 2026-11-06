@@ -48,6 +48,9 @@ jobs:
         with:
           targets: ${{ matrix.platform == 'linux_x86_64_musl' && 'x86_64-unknown-linux-musl' || '' }}
 
+      - name: Set default Rust toolchain
+        run: rustup default stable
+
       - name: Install Protoc
         uses: arduino/setup-protoc@v3
         with:
@@ -79,7 +82,7 @@ jobs:
 
       - name: Run tests
         run: |
-          bazel test --platforms=${{ matrix.bazel_platform }} //... --test_output=all
+          bazel test --test_env=PATH --test_env=HOME --test_env=CARGO_HOME --test_env=RUSTUP_HOME --test_env=RUSTUP_TOOLCHAIN=stable --platforms=${{ matrix.bazel_platform }} //... --test_output=all
 
       - name: Build release archives
         if: matrix.platform == 'linux_x86_64_gnu' || matrix.platform == 'linux_x86_64_musl' || matrix.platform == 'macos_x86_64' || matrix.platform == 'macos_arm64' || matrix.platform == 'windows_x86_64_msvc'

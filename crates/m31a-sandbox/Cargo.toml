@@ -17,8 +17,10 @@ tempfile.workspace = true
 chrono.workspace = true
 libc.workspace = true
 which = "7.0"
-seccompiler = "0.5"
 sha2.workspace = true
 uuid.workspace = true
 futures.workspace = true
 shlex.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+seccompiler = "0.5"

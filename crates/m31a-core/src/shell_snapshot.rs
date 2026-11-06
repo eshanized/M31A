@@ -135,6 +135,11 @@ impl ShellSnapshot {
             environment.insert("PATH".to_string(), current_path);
         }
 
+        // Guarantee active toolchain defaults for sandboxed Rust runners
+        if !environment.contains_key("RUSTUP_TOOLCHAIN") {
+            environment.insert("RUSTUP_TOOLCHAIN".to_string(), "stable".to_string());
+        }
+
         // 4. Extract active toolchain paths
         let toolchain_paths = environment
             .get("PATH")

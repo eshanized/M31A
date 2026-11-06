@@ -10,6 +10,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  RUSTUP_TOOLCHAIN: stable
 
 jobs:
   lint-and-format:
@@ -23,6 +24,9 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+
+      - name: Set default Rust toolchain
+        run: rustup default stable
 
       - name: Install system dependencies
         run: |
@@ -56,6 +60,9 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Set default Rust toolchain
+        run: rustup default stable
 
       - name: Install system dependencies
         run: |
@@ -100,6 +107,9 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Set default Rust toolchain
+        run: rustup default stable
 
       - name: Install system dependencies
         run: |

@@ -201,11 +201,18 @@ impl SeccompFilterPlan {
 }
 
 /// Sets `PR_SET_NO_NEW_PRIVS` on the current thread so seccomp cannot be bypassed.
+#[cfg(target_os = "linux")]
 pub fn set_no_new_privs() -> io::Result<()> {
     let result = unsafe { libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) };
     if result != 0 {
         return Err(io::Error::last_os_error());
     }
+    Ok(())
+}
+
+/// No-op on non-Linux platforms where seccomp is unavailable.
+#[cfg(not(target_os = "linux"))]
+pub fn set_no_new_privs() -> io::Result<()> {
     Ok(())
 }
 
@@ -242,10 +249,12 @@ pub fn seccomp_mode_for_policy(policy: m31a_core::SandboxPolicy) -> Option<Netwo
     }
 }
 
+#[cfg(target_os = "linux")]
 fn seccomp_io_error(stage: &str, e: impl std::fmt::Display) -> io::Error {
     io::Error::other(format!("seccomp {stage}: {e}"))
 }
 
+#[cfg(target_os = "linux")]
 fn condition_to_seccompiler(c: &SeccompRuleCondition) -> io::Result<seccompiler::SeccompCondition> {
     let arg_index = u8::try_from(c.arg_index).map_err(|_| {
         io::Error::other(format!("seccomp arg index out of range: {}", c.arg_index))
@@ -271,6 +280,7 @@ fn condition_to_seccompiler(c: &SeccompRuleCondition) -> io::Result<seccompiler:
 /// seccompiler as: conditions within a rule are ANDed (deny unless arg is in
 /// the allowed set), rules for one syscall are OR'd, every rule must carry the
 /// plan's `denied_action`, and the global default is the plan's `default_action`.
+#[cfg(target_os = "linux")]
 pub fn compile_plan_to_bpf(plan: &SeccompFilterPlan) -> io::Result<seccompiler::BpfProgram> {
     if plan.default_action != SeccompAction::Allow {
         return Err(io::Error::other(
@@ -340,6 +350,7 @@ pub fn compile_plan_to_bpf(plan: &SeccompFilterPlan) -> io::Result<seccompiler::
 /// errors before any process is created. The closure first re-asserts
 /// `no_new_privs` (the Landlock hook may already have set it; harmless to
 /// repeat), then installs the filter with `SYS_seccomp`.
+#[cfg(target_os = "linux")]
 pub fn pre_exec_seccomp_hook(
     plan: &SeccompFilterPlan,
 ) -> io::Result<impl FnMut() -> io::Result<()> + Send + 'static> {
@@ -351,7 +362,15 @@ pub fn pre_exec_seccomp_hook(
     })
 }
 
-#[cfg(test)]
+/// Non-Linux fallback for pre-exec seccomp hook.
+#[cfg(not(target_os = "linux"))]
+pub fn pre_exec_seccomp_hook(
+    _plan: &SeccompFilterPlan,
+) -> io::Result<impl FnMut() -> io::Result<()> + Send + 'static> {
+    Ok(|| Ok(()))
+}
+
+#[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::*;
     use std::os::unix::process::CommandExt;

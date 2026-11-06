@@ -127,7 +127,8 @@ impl ProcessManager {
             // `let` binding above keeps its existing shape).
         };
 
-        // §3.3: Landlock fallback — applied to the non-bwrap command only.
+        // §3.3: Landlock and seccomp fallback — applied to the non-bwrap command only on Linux.
+        #[cfg(target_os = "linux")]
         if !use_bwrap {
             if let Some(ruleset) = crate::landlock::build_landlock_rules(&policy, cwd) {
                 unsafe {
