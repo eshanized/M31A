@@ -41,6 +41,7 @@ mod gsd;
 mod setup;
 mod speculate;
 mod vibe;
+mod workflow;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -716,6 +717,14 @@ enum Commands {
             help = "Automatically promote and apply the winning candidate's patch"
         )]
         promote: bool,
+    },
+    #[command(
+        name = "workflow",
+        about = "Autonomous workflow planning, wave scheduling, and delivery orchestration"
+    )]
+    Workflow {
+        #[command(subcommand)]
+        cmd: workflow::WorkflowCommands,
     },
 }
 
@@ -3034,6 +3043,11 @@ async fn main() -> Result<()> {
                 auto_promote: promote,
             })
             .await
+        }
+
+        Some(Commands::Workflow { cmd }) => {
+            let storage = Storage::open_default()?;
+            workflow::run_workflow_mode(cwd.clone(), storage, cmd).await
         }
 
         None => {

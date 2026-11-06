@@ -51,13 +51,13 @@ This directory contains the 39 modular domain crates comprising the **M31A** arc
 ### 1. Application Binary & Daemon
 | Crate | Purpose | Key Dependencies |
 | :--- | :--- | :--- |
-| [`m31a-cli`](file:///home/snigdha/Desktop/org.m31a/crates/m31a-cli) | Main application entrypoint exposing 54 subcommands, argument parsing, shell completions, and system diagnostics (`m31a doctor`). | `clap`, `tokio`, all subsystem crates |
-| [`m31a-app-server`](file:///home/snigdha/Desktop/org.m31a/crates/m31a-app-server) | JSON-RPC 2.0 daemon facilitating IPC over stdio, Unix Domain Socket (`app-server-control.sock`), and HTTP/SSE. | `tokio`, `serde_json`, `m31a-storage` |
+| [`m31a-cli`](file:///home/snigdha/Desktop/M31A/crates/m31a-cli) | Main application entrypoint exposing 55 subcommands including autonomous workflow commands (`m31a workflow run/status/inspect/resume/cancel/events/artifacts`), argument parsing, shell completions, and system diagnostics (`m31a doctor`). | `clap`, `tokio`, all subsystem crates |
+| [`m31a-app-server`](file:///home/snigdha/Desktop/M31A/crates/m31a-app-server) | JSON-RPC 2.0 daemon facilitating IPC over stdio, Unix Domain Socket (`app-server-control.sock`), and HTTP/SSE with autonomous workflow and speculative evaluation endpoints. | `tokio`, `serde_json`, `m31a-storage`, `m31a-agent-engine` |
 
 ### 2. User Interface & Terminal Experience
 | Crate | Purpose | Key Dependencies |
 | :--- | :--- | :--- |
-| [`m31a-tui`](file:///home/snigdha/Desktop/org.m31a/crates/m31a-tui) | Rich terminal UI featuring streaming transcript rendering, modals, model switcher, diff viewer, and slash commands. | `ratatui`, `crossterm`, `m31a-composer` |
+| [`m31a-tui`](file:///home/snigdha/Desktop/M31A/crates/m31a-tui) | Rich terminal UI featuring streaming transcript rendering, modals, model switcher, diff viewer, slash commands, workflow DAG monitoring, and speculative candidate matrices on Screen 5. | `ratatui`, `crossterm`, `m31a-composer`, `m31a-agent-engine` |
 | [`m31a-composer`](file:///home/snigdha/Desktop/org.m31a/crates/m31a-composer) | Multiline prompt composer with syntax highlighting, slash-command autocompletion, and prompt history navigation. | `m31a-fuzzy`, `ratatui` |
 | [`m31a-term`](file:///home/snigdha/Desktop/org.m31a/crates/m31a-term) | Terminal raw mode handling, escape sequences, color palettes, and alternate screen buffer management. | `crossterm`, `colored` |
 | [`m31a-fuzzy`](file:///home/snigdha/Desktop/org.m31a/crates/m31a-fuzzy) | High-performance fuzzy matching algorithms used for command palettes, file searches, and prompt matching. | `unicode-segmentation` |
@@ -67,7 +67,7 @@ This directory contains the 39 modular domain crates comprising the **M31A** arc
 ### 3. Agent Execution & Intelligence
 | Crate | Purpose | Key Dependencies |
 | :--- | :--- | :--- |
-| [`m31a-agent-engine`](file:///home/snigdha/Desktop/org.m31a/crates/m31a-agent-engine) | Multi-turn agent loop, background vibe coding auto-healing loop, speculative parallel reality arena, and multi-agent swarm orchestration. | `m31a-provider`, `m31a-tools`, `m31a-sandbox` |
+| [`m31a-agent-engine`](file:///home/snigdha/Desktop/M31A/crates/m31a-agent-engine) | Autonomous workflow orchestrator, multi-turn agent loop, background vibe coding auto-healing loop, genuine speculative parallel reality arena, and wave scheduler. | `m31a-provider`, `m31a-tools`, `m31a-sandbox`, `m31a-verify`, `m31a-ast` |
 | [`m31a-provider`](file:///home/snigdha/Desktop/org.m31a/crates/m31a-provider) | NVIDIA NIM HTTP/SSE streaming integration, dynamic `/v1/models` catalog discovery, and DeepSeek R1 reasoning stream parsing. | `reqwest`, `eventsource`, `serde_json` |
 | [`m31a-elicitation`](file:///home/snigdha/Desktop/org.m31a/crates/m31a-elicitation) | Interactive clarification questions engine for user preference elicitation. | `serde`, `m31a-core` |
 | [`m31a-review`](file:///home/snigdha/Desktop/org.m31a/crates/m31a-review) | Automated Git diff reviewer synthesizing prioritized code improvements and security alerts. | `m31a-diff`, `m31a-provider` |
@@ -102,8 +102,8 @@ This directory contains the 39 modular domain crates comprising the **M31A** arc
 ### 7. Core Foundations, Storage & Extensibility
 | Crate | Purpose | Key Dependencies |
 | :--- | :--- | :--- |
-| [`m31a-core`](file:///home/snigdha/Desktop/org.m31a/crates/m31a-core) | Foundational data structures, session configuration, thread state, and skills frontmatter loader. | `serde`, `toml`, `dirs` |
-| [`m31a-storage`](file:///home/snigdha/Desktop/org.m31a/crates/m31a-storage) | Embedded SQLite persistence layer for threads, turns, items, checkpoints, pub-sub board, and path locks. | `rusqlite`, `tokio` |
+| [`m31a-core`](file:///home/snigdha/Desktop/M31A/crates/m31a-core) | Foundational data structures, workflow domain models (DAG validation, wave partitioning, events, artifacts), session configuration, thread state, and skills frontmatter loader. | `serde`, `toml`, `dirs` |
+| [`m31a-storage`](file:///home/snigdha/Desktop/M31A/crates/m31a-storage) | Embedded SQLite persistence layer (Migration 15) for workflows, plans, tasks with worker leases, append-only events, content-addressed artifacts, threads, checkpoints, and path locks. | `rusqlite`, `tokio`, `sha2` |
 | [`m31a-features`](file:///home/snigdha/Desktop/org.m31a/crates/m31a-features) | Runtime feature flag registry and experimental capability toggles. | `serde`, `clap` |
 | [`m31a-compaction`](file:///home/snigdha/Desktop/org.m31a/crates/m31a-compaction) | Context window management, conversation summarization, and turn pruning. | `m31a-core` |
 | [`m31a-telemetry`](file:///home/snigdha/Desktop/org.m31a/crates/m31a-telemetry) | System and session telemetry collection, audit trails, and performance profiling. | `tracing`, `serde` |

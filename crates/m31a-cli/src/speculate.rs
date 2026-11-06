@@ -42,18 +42,22 @@ pub async fn run_speculate_mode(opts: SpeculateCliOptions) -> Result<()> {
     );
     println!();
 
-    let candidates: Vec<SpeculativeBranchConfig> = opts
-        .hypotheses
-        .iter()
-        .enumerate()
-        .map(|(idx, hyp)| SpeculativeBranchConfig {
-            branch_id: format!("branch-{}", idx + 1),
-            name: format!("Hypothesis {}", idx + 1),
-            hypothesis_prompt: hyp.clone(),
-            model_override: None,
-            patch_content: None,
-        })
-        .collect();
+    let candidates: Vec<SpeculativeBranchConfig> = if opts.hypotheses.is_empty() {
+        SpeculativeArena::generate_diverse_hypotheses(&opts.mission, 3)
+    } else {
+        opts.hypotheses
+            .iter()
+            .enumerate()
+            .map(|(idx, hyp)| SpeculativeBranchConfig {
+                branch_id: format!("branch-{}", idx + 1),
+                name: format!("Hypothesis {}", idx + 1),
+                hypothesis_prompt: hyp.clone(),
+                objective: Some(opts.mission.clone()),
+                model_override: None,
+                patch_content: None,
+            })
+            .collect()
+    };
 
     for (idx, c) in candidates.iter().enumerate() {
         println!(
@@ -82,15 +86,25 @@ pub async fn run_speculate_mode(opts: SpeculateCliOptions) -> Result<()> {
         "═══ SPECULATIVE EVALUATION MATRIX ═══".bright_cyan().bold()
     );
     println!(
-        "{:<15} {:<10} {:<10} {:<12} {:<15} {:<10}",
-        "BRANCH", "BUILD", "TESTS", "SAFETY", "BLAST RADIUS", "SCORE"
+        "{:<15} {:<10} {:<8} {:<8} {:<10} {:<12} {:<8}",
+        "BRANCH", "STATE", "BUILD", "TESTS", "SAFETY", "BLAST RADIUS", "SCORE"
     );
     println!(
         "{}",
-        "─────────────────────────────────────────────────────────────────────────".dimmed()
+        "─────────────────────────────────────────────────────────────────────────────".dimmed()
     );
 
     for eval in &report.evaluations {
+        let state_str = match eval.state {
+            m31a_agent_engine::speculative::SpeculativeCandidateState::Eligible => {
+                "ELIGIBLE".green()
+            }
+            m31a_agent_engine::speculative::SpeculativeCandidateState::Rejected => {
+                "REJECTED".yellow()
+            }
+            m31a_agent_engine::speculative::SpeculativeCandidateState::Failed => "FAILED".red(),
+            s => s.as_str().normal(),
+        };
         let build_str = if eval.build_passed {
             "PASS".green()
         } else {
@@ -106,8 +120,9 @@ pub async fn run_speculate_mode(opts: SpeculateCliOptions) -> Result<()> {
             .bold();
 
         println!(
-            "{:<15} {:<10} {:<10} {:<12} {:<15} {:<10}",
+            "{:<15} {:<10} {:<8} {:<8} {:<10} {:<12} {:<8}",
             eval.name.bold(),
+            state_str,
             build_str,
             test_str,
             eval.safety_verdict.cyan(),

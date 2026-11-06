@@ -380,6 +380,107 @@ pub const BUILTIN_MIGRATIONS: &[Migration] = &[
         CREATE INDEX IF NOT EXISTS idx_session_todos_thread ON session_todos(thread_id, position);
         "#,
     ),
+    Migration::new(
+        15,
+        "workflow_orchestration_and_artifacts",
+        r#"
+        CREATE TABLE IF NOT EXISTS workflows (
+            id TEXT PRIMARY KEY,
+            thread_id TEXT,
+            workspace_root TEXT NOT NULL,
+            objective TEXT NOT NULL,
+            workflow_type TEXT NOT NULL,
+            state TEXT NOT NULL CHECK(state IN ('created', 'analyzing', 'planning', 'plan_ready', 'awaiting_approval', 'ready', 'running', 'verifying', 'integration_pending', 'completed', 'failed', 'blocked', 'cancelled')),
+            plan_revision INTEGER NOT NULL DEFAULT 1,
+            configuration_json TEXT NOT NULL DEFAULT '{}',
+            created_at_epoch_ms INTEGER NOT NULL,
+            updated_at_epoch_ms INTEGER NOT NULL,
+            started_at_epoch_ms INTEGER,
+            completed_at_epoch_ms INTEGER,
+            cancellation_reason TEXT,
+            overall_result_json TEXT,
+            resource_usage_json TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS workflow_plans (
+            workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+            revision INTEGER NOT NULL,
+            rationale TEXT NOT NULL,
+            created_at_epoch_ms INTEGER NOT NULL,
+            PRIMARY KEY (workflow_id, revision)
+        );
+
+        CREATE TABLE IF NOT EXISTS workflow_tasks (
+            id TEXT NOT NULL,
+            workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+            plan_revision INTEGER NOT NULL DEFAULT 1,
+            name TEXT NOT NULL,
+            description TEXT NOT NULL,
+            assigned_role TEXT NOT NULL,
+            assigned_agent_id TEXT,
+            priority INTEGER NOT NULL DEFAULT 0,
+            wave_index INTEGER NOT NULL DEFAULT 1,
+            dependencies_json TEXT NOT NULL DEFAULT '[]',
+            acceptance_criteria_json TEXT NOT NULL DEFAULT '[]',
+            required_verification_json TEXT NOT NULL DEFAULT '[]',
+            declared_read_paths_json TEXT NOT NULL DEFAULT '[]',
+            declared_write_paths_json TEXT NOT NULL DEFAULT '[]',
+            workspace_isolation TEXT NOT NULL DEFAULT 'worktree',
+            status TEXT NOT NULL CHECK(status IN ('pending', 'ready', 'claimed', 'running', 'verifying', 'completed', 'retry_pending', 'failed', 'blocked', 'cancelled', 'needs_approval')),
+            retry_count INTEGER NOT NULL DEFAULT 0,
+            max_retries INTEGER NOT NULL DEFAULT 3,
+            started_at_epoch_ms INTEGER,
+            completed_at_epoch_ms INTEGER,
+            worker_id TEXT,
+            lease_expires_at_epoch_ms INTEGER,
+            error_details TEXT,
+            input_artifacts_json TEXT NOT NULL DEFAULT '[]',
+            output_artifacts_json TEXT NOT NULL DEFAULT '[]',
+            verification_result_json TEXT,
+            PRIMARY KEY (workflow_id, id)
+        );
+
+        CREATE TABLE IF NOT EXISTS workflow_task_dependencies (
+            workflow_id TEXT NOT NULL,
+            task_id TEXT NOT NULL,
+            depends_on_task_id TEXT NOT NULL,
+            PRIMARY KEY (workflow_id, task_id, depends_on_task_id),
+            FOREIGN KEY (workflow_id, task_id) REFERENCES workflow_tasks(workflow_id, id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS workflow_events (
+            id TEXT PRIMARY KEY,
+            workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+            task_id TEXT,
+            agent_id TEXT,
+            event_type TEXT NOT NULL,
+            timestamp_epoch_ms INTEGER NOT NULL,
+            correlation_id TEXT,
+            payload_json TEXT NOT NULL,
+            schema_version INTEGER NOT NULL DEFAULT 1
+        );
+
+        CREATE TABLE IF NOT EXISTS workflow_artifacts (
+            id TEXT PRIMARY KEY,
+            workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+            task_id TEXT,
+            name TEXT NOT NULL,
+            artifact_type TEXT NOT NULL,
+            file_path TEXT NOT NULL,
+            content_sha256 TEXT NOT NULL,
+            size_bytes INTEGER NOT NULL,
+            mime_type TEXT NOT NULL,
+            created_at_epoch_ms INTEGER NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_workflows_state ON workflows(state);
+        CREATE INDEX IF NOT EXISTS idx_workflows_updated ON workflows(updated_at_epoch_ms);
+        CREATE INDEX IF NOT EXISTS idx_workflow_tasks_wf_status ON workflow_tasks(workflow_id, status);
+        CREATE INDEX IF NOT EXISTS idx_workflow_tasks_lease ON workflow_tasks(status, lease_expires_at_epoch_ms);
+        CREATE INDEX IF NOT EXISTS idx_workflow_events_wf_ts ON workflow_events(workflow_id, timestamp_epoch_ms ASC);
+        CREATE INDEX IF NOT EXISTS idx_workflow_artifacts_wf_name ON workflow_artifacts(workflow_id, name);
+        "#,
+    ),
 ];
 
 /// Migration engine responsible for running and validating SQLite migrations.

@@ -85,6 +85,7 @@ pub mod uds;
 pub mod user_verification;
 pub mod watcher;
 pub mod websocket_auth;
+pub mod workflow;
 pub mod worktree;
 pub mod world_state;
 
@@ -336,4 +337,8 @@ pub use user_verification::{
 };
 pub use watcher::{FileWatcherEvent, WatchPath, WorkspaceWatcher};
 pub use websocket_auth::{WebsocketAuthCliMode, WebsocketAuthPolicy, constant_time_eq_32};
+pub use workflow::{
+    WorkflowArtifact, WorkflowEvent, WorkflowEventType, WorkflowPlan, WorkflowRun, WorkflowState,
+    WorkflowTask, WorkflowTaskStatus, WorkspaceIsolationStrategy,
+};
 pub use worktree::{ManagedWorktree, WorktreeManager};

@@ -3,6 +3,9 @@
 //! Defines RPC request/response schemas, error codes, notification types, and session parameters.
 
 use anyhow::{Context, Result, anyhow, bail};
+use m31a_agent_engine::agents::EngineAgentRuntime;
+use m31a_agent_engine::speculative::{SpeculativeArena, SpeculativeBranchConfig};
+use m31a_agent_engine::workflow::{WorkflowExecutionConfig, WorkflowOrchestrator};
 use m31a_agent_engine::{AgentEngine, EngineEvent};
 use m31a_core::types::ChatMessage;
 use m31a_core::{ApprovalPolicy, CollaborationMode, Config, SkillLoader, SystemPromptBuilder};
@@ -618,6 +621,64 @@ impl AppServer {
                 params: Some(params),
             },
         );
+    }
+
+    pub fn workflow_orchestrator(
+        &self,
+        workspace_root: Option<&std::path::Path>,
+    ) -> WorkflowOrchestrator {
+        let provider = if let Some(ref api_key) = self.config.api_key {
+            let pt = ProviderType::resolve(
+                self.config.model_provider.as_deref(),
+                &self.config.model,
+                Some(&self.config.api_base),
+            )
+            .unwrap_or(ProviderType::Nim);
+
+            let provider_config = ProviderConfig {
+                provider_type: pt,
+                api_base: Some(self.config.api_base.clone()),
+                api_key: Some(api_key.clone()),
+                model: self.config.model.clone(),
+                extra: std::collections::HashMap::new(),
+            };
+            ProviderBuilder::build_client(provider_config).ok()
+        } else {
+            None
+        };
+
+        let exec_policy = ExecPolicy::default();
+        let runtime = if let (Some(client), Some(ws)) = (provider.as_ref(), workspace_root) {
+            Some(Arc::new(EngineAgentRuntime::new(
+                client.clone(),
+                self.tools.as_ref().clone(),
+                self.storage.clone(),
+                exec_policy.clone(),
+                ws.to_path_buf(),
+                Some(self.hooks.clone()),
+                self.config.model_context_window,
+                3,
+            )))
+        } else {
+            None
+        };
+
+        let mut orch = WorkflowOrchestrator::new(
+            self.storage.clone(),
+            runtime,
+            provider,
+            Some(self.tools.as_ref().clone()),
+            Some(exec_policy),
+        );
+
+        if let Some(ws) = workspace_root {
+            let settings = m31a_storage::worktree::WorktreeSettings::new(ws.to_path_buf());
+            orch = orch.with_worktree_manager(Arc::new(
+                m31a_storage::worktree::WorktreeManager::new(settings),
+            ));
+        }
+
+        orch
     }
 
     pub async fn handle_request(&self, req: JsonRpcRequest) -> JsonRpcResponse {
@@ -1715,6 +1776,218 @@ impl AppServer {
                 Ok(serde_json::to_value(recovered)?)
             }
 
+            // Autonomous Workflow & Speculative Execution RPC endpoints
+            "workflow/create" => {
+                let ws_str = params
+                    .get("workspace_root")
+                    .and_then(|v| v.as_str())
+                    .context("Missing 'workspace_root'")?;
+                let objective = params
+                    .get("objective")
+                    .and_then(|v| v.as_str())
+                    .context("Missing 'objective'")?;
+                let workflow_type = params
+                    .get("workflow_type")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("autonomous");
+                let thread_id = params.get("thread_id").and_then(|v| v.as_str());
+                let cfg: Option<WorkflowExecutionConfig> = params
+                    .get("config")
+                    .and_then(|v| serde_json::from_value(v.clone()).ok());
+
+                let ws_path = PathBuf::from(ws_str);
+                let orch = self.workflow_orchestrator(Some(&ws_path));
+                let run =
+                    orch.create_workflow(&ws_path, objective, workflow_type, thread_id, cfg)?;
+
+                let auto_plan = params
+                    .get("auto_plan")
+                    .or_else(|| params.get("plan_now"))
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+
+                if auto_plan {
+                    let _plan = orch.generate_plan(&run.id).await?;
+                    let auto_execute = params
+                        .get("auto_execute")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    if auto_execute {
+                        let completed = orch.execute_workflow(&run.id).await?;
+                        return Ok(serde_json::to_value(completed)?);
+                    }
+                }
+
+                Ok(serde_json::to_value(run)?)
+            }
+
+            "workflow/status" => {
+                let wf_id = params
+                    .get("workflow_id")
+                    .or_else(|| params.get("id"))
+                    .and_then(|v| v.as_str())
+                    .context("Missing 'workflow_id'")?;
+                let store = self.storage.workflow_store();
+                let run = store
+                    .get_workflow(wf_id)?
+                    .context(format!("Workflow '{}' not found", wf_id))?;
+                Ok(serde_json::to_value(run)?)
+            }
+
+            "workflow/inspect" => {
+                let wf_id = params
+                    .get("workflow_id")
+                    .or_else(|| params.get("id"))
+                    .and_then(|v| v.as_str())
+                    .context("Missing 'workflow_id'")?;
+                let store = self.storage.workflow_store();
+                let run = store
+                    .get_workflow(wf_id)?
+                    .context(format!("Workflow '{}' not found", wf_id))?;
+                let plan = store.get_workflow_plan(wf_id, None)?;
+                let tasks = store.list_tasks(wf_id)?;
+                let artifacts = store.list_artifacts(wf_id)?;
+
+                Ok(serde_json::json!({
+                    "workflow": run,
+                    "plan": plan,
+                    "tasks": tasks,
+                    "artifacts": artifacts,
+                }))
+            }
+
+            "workflow/resume" => {
+                let wf_id = params
+                    .get("workflow_id")
+                    .or_else(|| params.get("id"))
+                    .and_then(|v| v.as_str())
+                    .context("Missing 'workflow_id'")?;
+                let store = self.storage.workflow_store();
+                let run = store
+                    .get_workflow(wf_id)?
+                    .context(format!("Workflow '{}' not found", wf_id))?;
+
+                let orch = self.workflow_orchestrator(Some(&run.workspace_root));
+                let resumed = orch.resume_workflow(wf_id).await?;
+                Ok(serde_json::to_value(resumed)?)
+            }
+
+            "workflow/cancel" => {
+                let wf_id = params
+                    .get("workflow_id")
+                    .or_else(|| params.get("id"))
+                    .and_then(|v| v.as_str())
+                    .context("Missing 'workflow_id'")?;
+                let reason = params
+                    .get("reason")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Cancelled via App Server RPC request");
+
+                let orch = self.workflow_orchestrator(None);
+                orch.cancel_workflow(wf_id, reason)?;
+
+                let store = self.storage.workflow_store();
+                let run = store
+                    .get_workflow(wf_id)?
+                    .context(format!("Workflow '{}' not found", wf_id))?;
+                Ok(serde_json::to_value(run)?)
+            }
+
+            "workflow/events" => {
+                let wf_id = params
+                    .get("workflow_id")
+                    .or_else(|| params.get("id"))
+                    .and_then(|v| v.as_str())
+                    .context("Missing 'workflow_id'")?;
+                let since = params
+                    .get("since_epoch_ms")
+                    .or_else(|| params.get("since"))
+                    .and_then(|v| v.as_i64());
+
+                let store = self.storage.workflow_store();
+                let events = store.list_events(wf_id, since)?;
+                Ok(serde_json::to_value(events)?)
+            }
+
+            "workflow/artifacts" => {
+                let wf_id = params
+                    .get("workflow_id")
+                    .or_else(|| params.get("id"))
+                    .and_then(|v| v.as_str())
+                    .context("Missing 'workflow_id'")?;
+                let store = self.storage.workflow_store();
+                let artifacts = store.list_artifacts(wf_id)?;
+                Ok(serde_json::to_value(artifacts)?)
+            }
+
+            "workflow/task" => {
+                let wf_id = params
+                    .get("workflow_id")
+                    .and_then(|v| v.as_str())
+                    .context("Missing 'workflow_id'")?;
+                let task_id = params
+                    .get("task_id")
+                    .or_else(|| params.get("id"))
+                    .and_then(|v| v.as_str())
+                    .context("Missing 'task_id'")?;
+                let store = self.storage.workflow_store();
+                let task = store.get_task(wf_id, task_id)?.context(format!(
+                    "Task '{}' in workflow '{}' not found",
+                    task_id, wf_id
+                ))?;
+                Ok(serde_json::to_value(task)?)
+            }
+
+            "speculative/evaluations" => {
+                if let Some(wf_id) = params.get("workflow_id").and_then(|v| v.as_str()) {
+                    let store = self.storage.workflow_store();
+                    let artifacts = store.list_artifacts(wf_id)?;
+                    let spec_artifacts: Vec<_> = artifacts
+                        .into_iter()
+                        .filter(|a| a.artifact_type == "speculative_report")
+                        .collect();
+                    return Ok(serde_json::to_value(spec_artifacts)?);
+                }
+
+                let ws_str = params
+                    .get("workspace_root")
+                    .and_then(|v| v.as_str())
+                    .context("Missing 'workspace_root' or 'workflow_id'")?;
+                let mission = params
+                    .get("mission")
+                    .or_else(|| params.get("objective"))
+                    .and_then(|v| v.as_str())
+                    .context("Missing 'mission'")?;
+                let timeout_secs = params
+                    .get("timeout_seconds")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(300);
+                let auto_promote = params
+                    .get("auto_promote")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+
+                let candidates: Vec<SpeculativeBranchConfig> =
+                    if let Some(cands_val) = params.get("candidates") {
+                        serde_json::from_value(cands_val.clone()).unwrap_or_else(|_| {
+                            SpeculativeArena::generate_diverse_hypotheses(mission, 3)
+                        })
+                    } else {
+                        SpeculativeArena::generate_diverse_hypotheses(mission, 3)
+                    };
+
+                let report = SpeculativeArena::compete(
+                    std::path::Path::new(ws_str),
+                    mission,
+                    candidates,
+                    std::time::Duration::from_secs(timeout_secs),
+                    auto_promote,
+                )
+                .await?;
+
+                Ok(serde_json::to_value(report)?)
+            }
+
             _ => Err(anyhow!("Method not found: {}", method)),
         }
     }
@@ -2116,6 +2389,118 @@ mod tests {
         assert_eq!(
             res_deq.result.unwrap().get("payload").unwrap(),
             "Deferred user message"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_workflow_rpc_endpoints() {
+        let config = Arc::new(Config {
+            model: "nvidia/nemotron-3.5-lightning-30b-a3b".to_string(),
+            model_provider: Some("nim".to_string()),
+            ..Default::default()
+        });
+        let storage = Storage::open_in_memory().unwrap();
+        let tools = Arc::new(ToolRegistry::new());
+        let server = AppServer::new(config, storage.clone(), tools).unwrap();
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let ws_path = temp_dir.path().to_str().unwrap().to_string();
+
+        // 1. workflow/create
+        let req_create = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Some(serde_json::json!(1)),
+            method: "workflow/create".to_string(),
+            params: Some(serde_json::json!({
+                "workspace_root": ws_path,
+                "objective": "Build high throughput cache",
+                "workflow_type": "autonomous",
+            })),
+        };
+        let res_create = server.handle_request(req_create).await;
+        assert!(
+            res_create.error.is_none(),
+            "workflow/create should succeed: {:?}",
+            res_create.error
+        );
+        let run_val = res_create.result.unwrap();
+        let wf_id = run_val.get("id").unwrap().as_str().unwrap().to_string();
+        assert_eq!(run_val.get("state").unwrap(), "created");
+
+        // 2. workflow/status
+        let req_status = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Some(serde_json::json!(2)),
+            method: "workflow/status".to_string(),
+            params: Some(serde_json::json!({ "workflow_id": wf_id })),
+        };
+        let res_status = server.handle_request(req_status).await;
+        assert!(res_status.error.is_none());
+        assert_eq!(res_status.result.unwrap().get("id").unwrap(), &wf_id);
+
+        // 3. workflow/inspect
+        let req_inspect = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Some(serde_json::json!(3)),
+            method: "workflow/inspect".to_string(),
+            params: Some(serde_json::json!({ "workflow_id": wf_id })),
+        };
+        let res_inspect = server.handle_request(req_inspect).await;
+        assert!(res_inspect.error.is_none());
+        let inspect_val = res_inspect.result.unwrap();
+        assert!(inspect_val.get("workflow").is_some());
+        assert!(inspect_val.get("tasks").is_some());
+
+        // 4. workflow/events
+        let req_events = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Some(serde_json::json!(4)),
+            method: "workflow/events".to_string(),
+            params: Some(serde_json::json!({ "workflow_id": wf_id })),
+        };
+        let res_events = server.handle_request(req_events).await;
+        assert!(res_events.error.is_none());
+        let events = res_events.result.unwrap().as_array().unwrap().clone();
+        assert!(
+            !events.is_empty(),
+            "Should record initial workflow created event"
+        );
+
+        // 5. workflow/artifacts
+        let req_artifacts = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Some(serde_json::json!(5)),
+            method: "workflow/artifacts".to_string(),
+            params: Some(serde_json::json!({ "workflow_id": wf_id })),
+        };
+        let res_artifacts = server.handle_request(req_artifacts).await;
+        assert!(res_artifacts.error.is_none());
+
+        // 6. speculative/evaluations with workflow_id
+        let req_spec = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Some(serde_json::json!(6)),
+            method: "speculative/evaluations".to_string(),
+            params: Some(serde_json::json!({ "workflow_id": wf_id })),
+        };
+        let res_spec = server.handle_request(req_spec).await;
+        assert!(res_spec.error.is_none());
+
+        // 7. workflow/cancel
+        let req_cancel = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Some(serde_json::json!(7)),
+            method: "workflow/cancel".to_string(),
+            params: Some(serde_json::json!({
+                "workflow_id": wf_id,
+                "reason": "Integration test shutdown",
+            })),
+        };
+        let res_cancel = server.handle_request(req_cancel).await;
+        assert!(res_cancel.error.is_none());
+        assert_eq!(
+            res_cancel.result.unwrap().get("state").unwrap(),
+            "cancelled"
         );
     }
 }

@@ -50,6 +50,34 @@ pub struct PhaseWaveResult {
     pub wave_summaries: Vec<WaveExecutionSummary>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkflowTaskExecutionOutcome {
+    pub task_id: String,
+    pub success: bool,
+    pub agent_id: Option<String>,
+    pub modified_files: Vec<String>,
+    pub patch_content: Option<String>,
+    pub duration_ms: u64,
+    pub verification_passed: bool,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkflowWaveSummary {
+    pub wave_index: usize,
+    pub outcomes: Vec<WorkflowTaskExecutionOutcome>,
+    pub success: bool,
+    pub verification_passed: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkflowWaveResult {
+    pub total_waves: usize,
+    pub completed_waves: usize,
+    pub all_passed: bool,
+    pub wave_summaries: Vec<WorkflowWaveSummary>,
+}
+
 pub struct WaveScheduler;
 
 impl WaveScheduler {
@@ -287,6 +315,124 @@ impl WaveScheduler {
 
         Ok(PhaseWaveResult {
             phase: phase.to_string(),
+            total_waves,
+            completed_waves,
+            all_passed,
+            wave_summaries,
+        })
+    }
+
+    /// Executes all workflow waves in sequence, dispatching tasks within each wave concurrently.
+    pub async fn execute_workflow_waves<F>(
+        repo_root: &Path,
+        waves: Vec<Vec<m31a_core::workflow::WorkflowTask>>,
+        executor_fn: Arc<F>,
+        verify_post_wave: bool,
+    ) -> Result<WorkflowWaveResult>
+    where
+        F: Fn(
+                m31a_core::workflow::WorkflowTask,
+            ) -> BoxFuture<'static, Result<WorkflowTaskExecutionOutcome>>
+            + Send
+            + Sync
+            + 'static,
+    {
+        let total_waves = waves.len();
+        let mut completed_waves = 0;
+        let mut wave_summaries = Vec::new();
+        let mut all_passed = true;
+
+        for (idx, wave) in waves.into_iter().enumerate() {
+            let wave_num = idx + 1;
+            tracing::info!(
+                wave = wave_num,
+                total_waves,
+                tasks_in_wave = wave.len(),
+                "Dispatching workflow wave"
+            );
+
+            let mut join_set = JoinSet::new();
+            for task in wave {
+                let exec = executor_fn.clone();
+                join_set.spawn(async move { exec(task).await });
+            }
+
+            let mut outcomes = Vec::new();
+            let mut wave_failed = false;
+
+            while let Some(res) = join_set.join_next().await {
+                match res {
+                    Ok(Ok(outcome)) => {
+                        if !outcome.success || !outcome.verification_passed {
+                            wave_failed = true;
+                        }
+                        outcomes.push(outcome);
+                    }
+                    Ok(Err(e)) => {
+                        wave_failed = true;
+                        outcomes.push(WorkflowTaskExecutionOutcome {
+                            task_id: "unknown".into(),
+                            success: false,
+                            agent_id: None,
+                            modified_files: Vec::new(),
+                            patch_content: None,
+                            duration_ms: 0,
+                            verification_passed: false,
+                            error: Some(e.to_string()),
+                        });
+                    }
+                    Err(join_err) => {
+                        wave_failed = true;
+                        outcomes.push(WorkflowTaskExecutionOutcome {
+                            task_id: "panicked".into(),
+                            success: false,
+                            agent_id: None,
+                            modified_files: Vec::new(),
+                            patch_content: None,
+                            duration_ms: 0,
+                            verification_passed: false,
+                            error: Some(join_err.to_string()),
+                        });
+                    }
+                }
+            }
+
+            // Post-wave verification check
+            let mut verification_passed = true;
+            if !wave_failed && verify_post_wave {
+                tracing::info!(wave = wave_num, "Running post-wave verification check");
+                if let Ok(report) =
+                    AutonomousVerifier::verify_check(repo_root, Duration::from_secs(30)).await
+                    && !report.success
+                {
+                    verification_passed = false;
+                    wave_failed = true;
+                    tracing::error!(wave = wave_num, "Post-wave verification check failed");
+                }
+            }
+
+            let summary = WorkflowWaveSummary {
+                wave_index: wave_num,
+                outcomes,
+                success: !wave_failed,
+                verification_passed,
+            };
+
+            wave_summaries.push(summary);
+
+            if wave_failed {
+                all_passed = false;
+                tracing::error!(
+                    wave = wave_num,
+                    "Workflow wave failed; halting wave sequence"
+                );
+                break;
+            }
+
+            completed_waves += 1;
+        }
+
+        Ok(WorkflowWaveResult {
             total_waves,
             completed_waves,
             all_passed,

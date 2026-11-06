@@ -364,6 +364,13 @@ impl CanonicalSandboxPlan {
             ];
             for sub in sensitive_subdirs {
                 let subpath = cwd.join(sub);
+                // In git worktrees or submodules, .git is a pointer file rather than a directory.
+                // Creating a directory inside a file parent causes bwrap to fail with "Not a directory".
+                if let Some(parent) = subpath.parent()
+                    && parent.is_file()
+                {
+                    continue;
+                }
                 if !subpath.exists() {
                     let s = subpath.to_string_lossy().to_string();
                     bwrap_args.push("--dir".to_string());

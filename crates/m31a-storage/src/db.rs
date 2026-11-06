@@ -267,6 +267,10 @@ impl Storage {
         crate::queue_store::QueueStore::new(Arc::clone(&self.conn))
     }
 
+    pub fn workflow_store(&self) -> crate::workflow_store::WorkflowStore {
+        crate::workflow_store::WorkflowStore::new(Arc::clone(&self.conn))
+    }
+
     pub fn log_db(&self) -> crate::log_db::LogDatabase {
         // §6.2: dedicated logs pool (separate file beside the main DB) so log
         // writes contend with the primary connection as little as possible.

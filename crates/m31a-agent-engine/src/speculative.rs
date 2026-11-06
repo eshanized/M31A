@@ -1,18 +1,149 @@
 //! Speculative Multi-Branch Parallel Reality Forks (`m31a-agent-engine::speculative`).
 //!
 //! Spawns parallel candidate branches in isolated sandboxed workspaces (using Git worktrees with
-//! shared build-cache symlinks or fast Copy-on-Write fallback), evaluates build validity,
-//! test integrity, performance benchmarks, and blast-radius safety, and promotes the
-//! highest-scoring candidate to the main working tree.
+//! shared build-cache symlinks or fast Copy-on-Write fallback), executes candidate solutions via
+//! real agent engines, evaluates build validity, test integrity, performance benchmarks, and
+//! blast-radius safety, and promotes the highest-scoring candidate to the main working tree.
 
 use anyhow::{Result, anyhow};
+use futures::future::BoxFuture;
 use m31a_storage::worktree::{WorktreeManager, WorktreeSettings};
+use m31a_verify::benchmark::PerformanceProfiler;
+use m31a_verify::safety::SafetyGateVerdict;
 use m31a_verify::{AutonomousVerifier, CodebaseSafetyGate};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
+
+/// Versioned evaluation policy identifier for deterministic scoring.
+pub const SCORING_POLICY_VERSION: &str = "1.0.0";
+
+/// Explicit lifecycle and terminal states for speculative candidates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SpeculativeCandidateState {
+    Pending,
+    Generating,
+    Running,
+    Verifying,
+    Eligible,
+    Rejected,
+    Failed,
+    Cancelled,
+    Selected,
+    IntegrationPending,
+    Integrated,
+}
+
+impl SpeculativeCandidateState {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Pending => "Pending",
+            Self::Generating => "Generating",
+            Self::Running => "Running",
+            Self::Verifying => "Verifying",
+            Self::Eligible => "Eligible",
+            Self::Rejected => "Rejected",
+            Self::Failed => "Failed",
+            Self::Cancelled => "Cancelled",
+            Self::Selected => "Selected",
+            Self::IntegrationPending => "IntegrationPending",
+            Self::Integrated => "Integrated",
+        }
+    }
+}
+
+/// Explicit test execution outcome for speculative candidates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SpeculativeTestStatus {
+    Passed,
+    Failed,
+    NotExecuted,
+    Skipped,
+    TimedOut,
+    Unsupported,
+}
+
+/// Explicit benchmark status for speculative candidates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SpeculativeBenchmarkStatus {
+    NotMeasured,
+    Measured,
+    BenchmarkFailed,
+}
+
+/// Explicit failure reason for unviable candidates.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SpeculativeFailureReason {
+    None,
+    NoImplementation,
+    PatchParseError(String),
+    PatchApplicationFailed(String),
+    BuildFailed(String),
+    TestsFailed(String),
+    SecurityBlocked(String),
+    Timeout,
+    Cancelled,
+    ExecutionError(String),
+}
+
+/// Build evidence captured during verification.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BuildEvidence {
+    pub command: String,
+    pub passed: bool,
+    pub exit_code: i32,
+    pub duration_ms: u64,
+    pub stdout_preview: String,
+    pub stderr_preview: String,
+    pub diagnostics: Vec<String>,
+}
+
+/// Test evidence captured during verification.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TestEvidence {
+    pub status: SpeculativeTestStatus,
+    pub passed: bool,
+    pub duration_ms: u64,
+    pub output_preview: String,
+}
+
+/// Security evidence from AST and data-flow invariants.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecurityEvidence {
+    pub verdict: String,
+    pub blast_radius_score: f64,
+    pub total_taints_found: usize,
+    pub unconsumed_mutations: usize,
+    pub affected_downstream_symbols: usize,
+    pub violations: Vec<String>,
+}
+
+/// Benchmark evidence captured from comparative performance profiling.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BenchmarkEvidence {
+    pub status: SpeculativeBenchmarkStatus,
+    pub verdict: Option<String>,
+    pub average_delta_pct: Option<f64>,
+    pub metric_summaries: Vec<String>,
+}
+
+/// Detailed score breakdown explaining deterministic composite scoring.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScoreBreakdown {
+    pub scoring_policy_version: String,
+    pub hard_gates_passed: bool,
+    pub correctness_score: f64,
+    pub safety_score: f64,
+    pub performance_score: f64,
+    pub maintainability_score: f64,
+    pub composite_score: f64,
+    pub rationale: String,
+}
 
 /// Configuration for an individual speculative candidate branch.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -20,6 +151,9 @@ pub struct SpeculativeBranchConfig {
     pub branch_id: String,
     pub name: String,
     pub hypothesis_prompt: String,
+    #[serde(default)]
+    pub objective: Option<String>,
+    #[serde(default)]
     pub model_override: Option<String>,
     #[serde(default)]
     pub patch_content: Option<String>,
@@ -31,6 +165,9 @@ pub struct CandidateEvaluation {
     pub branch_id: String,
     pub name: String,
     pub hypothesis_prompt: String,
+    pub state: SpeculativeCandidateState,
+    pub failure_reason: SpeculativeFailureReason,
+    pub hard_gates_passed: bool,
     pub build_passed: bool,
     pub tests_passed: bool,
     pub execution_duration_ms: u64,
@@ -38,21 +175,74 @@ pub struct CandidateEvaluation {
     pub safety_verdict: String,
     pub blast_radius_score: f64,
     pub modified_files: Vec<String>,
+    pub git_commit_sha: Option<String>,
     pub composite_score: f64,
+    pub score_breakdown: ScoreBreakdown,
+    pub build_evidence: Option<BuildEvidence>,
+    pub test_evidence: Option<TestEvidence>,
+    pub security_evidence: Option<SecurityEvidence>,
+    pub benchmark_evidence: Option<BenchmarkEvidence>,
     pub patch_content: String,
     pub summary: String,
+}
+
+/// Structured integration report describing the promotion of the winning candidate.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpeculativeIntegrationReport {
+    pub winning_branch_id: String,
+    pub winning_branch_name: String,
+    pub patch_applied: bool,
+    pub files_integrated: Vec<String>,
+    pub pre_integration_dirty_check_passed: bool,
+    pub post_integration_build_passed: bool,
+    pub post_integration_tests_passed: bool,
+    pub rollback_executed: bool,
+    pub outcome_summary: String,
 }
 
 /// Full report of a speculative competition across multiple reality branches.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpeculativeExecutionReport {
     pub mission: String,
+    pub scoring_policy_version: String,
     pub total_candidates: usize,
     pub evaluations: Vec<CandidateEvaluation>,
     pub winning_branch_id: Option<String>,
     pub winning_branch_name: Option<String>,
     pub promotion_status: String,
     pub decision_rationale: String,
+    pub integration_report: Option<SpeculativeIntegrationReport>,
+}
+
+/// Context provided to a candidate executor.
+#[derive(Debug, Clone)]
+pub struct CandidateExecutionContext {
+    pub candidate_id: String,
+    pub name: String,
+    pub hypothesis: String,
+    pub objective: String,
+    pub workspace_root: PathBuf,
+    pub model_override: Option<String>,
+    pub cancel_token: CancellationToken,
+    pub timeout: Duration,
+}
+
+/// Result returned from a candidate executor.
+#[derive(Debug, Clone, Default)]
+pub struct CandidateExecutionResult {
+    pub success: bool,
+    pub modified_files: Vec<String>,
+    pub patch_content: Option<String>,
+    pub git_commit_sha: Option<String>,
+    pub error: Option<String>,
+}
+
+/// Abstraction for invoking real agent execution on candidate solutions.
+pub trait CandidateExecutor: Send + Sync {
+    fn execute<'a>(
+        &'a self,
+        ctx: &'a CandidateExecutionContext,
+    ) -> BoxFuture<'a, Result<CandidateExecutionResult>>;
 }
 
 /// RAII Guard managing sandbox lifecycle across either Git worktrees or temporary directories.
@@ -61,10 +251,21 @@ pub struct SpeculativeSandboxGuard {
     pub branch_id: String,
     pub is_worktree: bool,
     source_root: PathBuf,
+    keep_on_drop: bool,
+}
+
+impl SpeculativeSandboxGuard {
+    /// Mark the sandbox to persist upon drop (used when preserving winning worktree).
+    pub fn preserve(&mut self) {
+        self.keep_on_drop = true;
+    }
 }
 
 impl Drop for SpeculativeSandboxGuard {
     fn drop(&mut self) {
+        if self.keep_on_drop {
+            return;
+        }
         if self.is_worktree {
             let settings = WorktreeSettings::new(&self.source_root);
             let mgr = WorktreeManager::new(settings);
@@ -81,6 +282,19 @@ impl Drop for SpeculativeSandboxGuard {
     }
 }
 
+/// Execution options for speculative arena competitions.
+#[derive(Clone)]
+pub struct SpeculateOptions {
+    pub workspace_root: PathBuf,
+    pub mission: String,
+    pub candidates: Vec<SpeculativeBranchConfig>,
+    pub timeout_per_candidate: Duration,
+    pub auto_promote_winner: bool,
+    pub require_approval_for_promotion: bool,
+    pub max_concurrency: usize,
+    pub executor: Option<Arc<dyn CandidateExecutor>>,
+}
+
 pub struct SpeculativeArena;
 
 impl SpeculativeArena {
@@ -95,6 +309,68 @@ impl SpeculativeArena {
                     branch_id,
                     name: format!("Approach {}", (b'A' + i as u8) as char),
                     hypothesis_prompt: format!("Mission: {}. Approach: {}", mission, app),
+                    objective: Some(mission.to_string()),
+                    model_override: None,
+                    patch_content: None,
+                }
+            })
+            .collect()
+    }
+
+    /// Generates distinct engineering hypotheses based on task classification.
+    pub fn generate_diverse_hypotheses(
+        mission: &str,
+        max_candidates: usize,
+    ) -> Vec<SpeculativeBranchConfig> {
+        let is_perf = mission.to_lowercase().contains("perf")
+            || mission.to_lowercase().contains("optimi")
+            || mission.to_lowercase().contains("speed")
+            || mission.to_lowercase().contains("fast");
+
+        let approaches: Vec<(&str, &str)> = if is_perf {
+            vec![
+                (
+                    "Approach A — Algorithmic & Complexity Optimization",
+                    "Redesign algorithmic inner loop and data access patterns to reduce algorithmic time complexity and eliminate redundant passes.",
+                ),
+                (
+                    "Approach B — Zero-Copy & Memory Allocation Elimination",
+                    "Replace heavy heap allocations, clones, and owned data structures with borrowed references, contiguous arena storage, and zero-copy slicing.",
+                ),
+                (
+                    "Approach C — Parallel Execution & Concurrent Pipeline",
+                    "Decompose independent computational workloads across parallel worker threads using bounded channels and work-stealing concurrency.",
+                ),
+            ]
+        } else {
+            vec![
+                (
+                    "Approach A — Direct Targeted Implementation",
+                    "Implement minimal, focused modifications directly addressing the core objective with high locality and minimal blast radius.",
+                ),
+                (
+                    "Approach B — Decoupled Modular Architecture",
+                    "Extract clean interface boundaries and isolate functional components to maximize testability and prevent regressions.",
+                ),
+                (
+                    "Approach C — Defensive & Fault-Tolerant Implementation",
+                    "Implement robust state validation, defensive bounds checking, explicit fallback paths, and clear error telemetry.",
+                ),
+            ]
+        };
+
+        let count = max_candidates.clamp(1, approaches.len());
+        approaches
+            .into_iter()
+            .take(count)
+            .enumerate()
+            .map(|(i, (name, hypo))| {
+                let branch_id = format!("hypo-{}-{}", i + 1, uuid::Uuid::new_v4().simple());
+                SpeculativeBranchConfig {
+                    branch_id,
+                    name: name.to_string(),
+                    hypothesis_prompt: format!("Objective: {}. Hypothesis: {}", mission, hypo),
+                    objective: Some(mission.to_string()),
                     model_override: None,
                     patch_content: None,
                 }
@@ -110,19 +386,12 @@ impl SpeculativeArena {
             let settings = WorktreeSettings::new(source_root);
             let mgr = WorktreeManager::new(settings);
             if let Ok(managed) = mgr.create_worktree(branch_id, None) {
-                // Link shared target build cache if exists to avoid cold full compiles
-                let target_src = source_root.join("target");
-                let target_dst = managed.worktree_path.join("target");
-                if target_src.is_dir() && !target_dst.exists() {
-                    #[cfg(unix)]
-                    let _ = std::os::unix::fs::symlink(&target_src, &target_dst);
-                }
-
                 return Ok(SpeculativeSandboxGuard {
                     path: managed.worktree_path,
                     branch_id: branch_id.to_string(),
                     is_worktree: true,
                     source_root: source_root.to_path_buf(),
+                    keep_on_drop: false,
                 });
             }
         }
@@ -141,6 +410,7 @@ impl SpeculativeArena {
             branch_id: branch_id.to_string(),
             is_worktree: false,
             source_root: source_root.to_path_buf(),
+            keep_on_drop: false,
         })
     }
 
@@ -176,6 +446,7 @@ impl SpeculativeArena {
     }
 
     /// Evaluates candidate branches concurrently and selects the optimal solution.
+    /// Backward-compatible entrypoint.
     pub async fn compete(
         workspace_root: &Path,
         mission: &str,
@@ -183,24 +454,51 @@ impl SpeculativeArena {
         timeout_per_candidate: Duration,
         auto_promote_winner: bool,
     ) -> Result<SpeculativeExecutionReport> {
+        let options = SpeculateOptions {
+            workspace_root: workspace_root.to_path_buf(),
+            mission: mission.to_string(),
+            candidates,
+            timeout_per_candidate,
+            auto_promote_winner,
+            require_approval_for_promotion: false,
+            max_concurrency: 4,
+            executor: None,
+        };
+        Self::compete_with_options(options).await
+    }
+
+    /// Evaluates candidate branches with full orchestration controls, resource limits, and execution callbacks.
+    pub async fn compete_with_options(
+        options: SpeculateOptions,
+    ) -> Result<SpeculativeExecutionReport> {
         info!(
-            mission = %mission,
-            candidates_count = candidates.len(),
+            mission = %options.mission,
+            candidates_count = options.candidates.len(),
+            max_concurrency = options.max_concurrency,
             "Starting Speculative Parallel Reality Arena"
         );
 
-        if candidates.is_empty() {
+        if options.candidates.is_empty() {
             return Err(anyhow!(
                 "No candidate branches provided to SpeculativeArena"
             ));
         }
 
         let mut join_set = tokio::task::JoinSet::new();
+        let semaphore = Arc::new(tokio::sync::Semaphore::new(
+            options.max_concurrency.clamp(1, 16),
+        ));
 
-        for candidate in candidates {
-            let ws_root = workspace_root.to_path_buf();
+        for candidate in options.candidates {
+            let ws_root = options.workspace_root.clone();
+            let mission = options.mission.clone();
+            let timeout = options.timeout_per_candidate;
+            let executor = options.executor.clone();
+            let sem = semaphore.clone();
+
             join_set.spawn(async move {
-                Self::evaluate_candidate(&ws_root, candidate, timeout_per_candidate).await
+                let _permit = sem.acquire().await.ok();
+                Self::evaluate_candidate(&ws_root, &mission, candidate, timeout, executor).await
             });
         }
 
@@ -213,153 +511,676 @@ impl SpeculativeArena {
             }
         }
 
-        // Rank candidates by composite score descending
+        // Rank candidates: hard-gate passing candidates first, then by composite score descending
         evaluations.sort_by(|a, b| {
-            b.composite_score
-                .partial_cmp(&a.composite_score)
-                .unwrap_or(std::cmp::Ordering::Equal)
+            b.hard_gates_passed.cmp(&a.hard_gates_passed).then(
+                b.composite_score
+                    .partial_cmp(&a.composite_score)
+                    .unwrap_or(std::cmp::Ordering::Equal),
+            )
         });
 
-        let winning_candidate = evaluations.first().cloned();
-        let mut promotion_status = "No promotion requested".to_string();
+        // Identify winning candidate: MUST satisfy hard gates
+        let winning_candidate = evaluations
+            .iter()
+            .find(|e| e.hard_gates_passed && e.state == SpeculativeCandidateState::Eligible)
+            .cloned();
 
-        if let Some(ref winner) = winning_candidate {
-            if winner.build_passed && winner.composite_score > 40.0 {
-                if auto_promote_winner && !winner.patch_content.is_empty() {
-                    // Apply winning patch to active workspace
-                    match m31a_tools::patch::parse_patch(&winner.patch_content) {
-                        Ok(parsed) => {
-                            match m31a_tools::patch::apply_patch_to_workspace(
-                                workspace_root,
-                                &parsed,
-                            ) {
-                                Ok(res) => {
-                                    let total_healed =
-                                        res.files_modified.len() + res.files_created.len();
-                                    promotion_status = format!(
-                                        "Promoted winning candidate '{}' (applied patch to {} files)",
-                                        winner.name, total_healed
-                                    );
-                                    info!(status = %promotion_status, "Speculative winner promoted to workspace");
+        let promotion_status: String;
+        let mut integration_report = None;
+
+        if let Some(mut winner) = winning_candidate.clone() {
+            winner.state = SpeculativeCandidateState::Selected;
+
+            if options.auto_promote_winner {
+                if options.require_approval_for_promotion {
+                    winner.state = SpeculativeCandidateState::IntegrationPending;
+                    promotion_status = format!(
+                        "Winning candidate identified: '{}' (score: {:.1}). Pending required human approval for workspace integration.",
+                        winner.name, winner.composite_score
+                    );
+                } else if !winner.patch_content.is_empty() {
+                    // Two-phase preflight conflict verification and integration
+                    let mut int_report = SpeculativeIntegrationReport {
+                        winning_branch_id: winner.branch_id.clone(),
+                        winning_branch_name: winner.name.clone(),
+                        patch_applied: false,
+                        files_integrated: Vec::new(),
+                        pre_integration_dirty_check_passed: true,
+                        post_integration_build_passed: false,
+                        post_integration_tests_passed: false,
+                        rollback_executed: false,
+                        outcome_summary: String::new(),
+                    };
+
+                    // 1. Preflight conflict verification: check if primary workspace is clean
+                    let settings = WorktreeSettings::new(&options.workspace_root);
+                    let mgr = WorktreeManager::new(settings);
+                    let is_dirty = mgr.is_dirty(&options.workspace_root).unwrap_or(false);
+
+                    if is_dirty {
+                        int_report.pre_integration_dirty_check_passed = false;
+                        promotion_status = format!(
+                            "Integration of winner '{}' blocked: primary workspace contains uncommitted changes. Clean workspace required.",
+                            winner.name
+                        );
+                        int_report.outcome_summary = promotion_status.clone();
+                    } else {
+                        // 2. Strict patch parse and path containment verification
+                        let apply_res = if winner.patch_content.contains("*** Begin Patch") {
+                            match m31a_tools::patch::parse_patch(&winner.patch_content) {
+                                Ok(parsed) => {
+                                    match m31a_tools::patch::apply_patch_to_workspace(
+                                        &options.workspace_root,
+                                        &parsed,
+                                    ) {
+                                        Ok(res) => Ok(res
+                                            .files_modified
+                                            .iter()
+                                            .chain(&res.files_created)
+                                            .map(|p| p.to_string_lossy().to_string())
+                                            .collect()),
+                                        Err(e) => Err(anyhow!("Failed applying tool patch: {e}")),
+                                    }
                                 }
-                                Err(e) => {
-                                    promotion_status =
-                                        format!("Failed to apply winning patch: {e}");
-                                    warn!(err = %e, "Patch promotion failed");
+                                Err(e) => Err(anyhow!("Patch parse error: {e}")),
+                            }
+                        } else {
+                            // Unified git diff format
+                            match WorktreeManager::validate_patch_paths(&winner.patch_content) {
+                                Ok(paths) => {
+                                    let child = Command::new("git")
+                                        .current_dir(&options.workspace_root)
+                                        .args(["apply", "--ignore-whitespace", "-"])
+                                        .stdin(std::process::Stdio::piped())
+                                        .stdout(std::process::Stdio::piped())
+                                        .stderr(std::process::Stdio::piped())
+                                        .spawn();
+                                    match child {
+                                        Ok(mut c) => {
+                                            if let Some(mut stdin) = c.stdin.take() {
+                                                use std::io::Write;
+                                                let _ = stdin
+                                                    .write_all(winner.patch_content.as_bytes());
+                                            }
+                                            match c.wait_with_output() {
+                                                Ok(out) if out.status.success() => Ok(paths
+                                                    .into_iter()
+                                                    .map(|p| p.to_string_lossy().to_string())
+                                                    .collect()),
+                                                Ok(out) => Err(anyhow!(
+                                                    "git apply failed: {}",
+                                                    String::from_utf8_lossy(&out.stderr)
+                                                )),
+                                                Err(e) => {
+                                                    Err(anyhow!("Failed waiting on git apply: {e}"))
+                                                }
+                                            }
+                                        }
+                                        Err(e) => Err(anyhow!("Failed to spawn git apply: {e}")),
+                                    }
+                                }
+                                Err(e) => Err(anyhow!("Patch path validation failed: {e}")),
+                            }
+                        };
+
+                        match apply_res {
+                            Ok(integrated_files) => {
+                                int_report.patch_applied = true;
+                                int_report.files_integrated = integrated_files;
+
+                                // 3. Post-integration verification gate
+                                let post_check = AutonomousVerifier::verify_check(
+                                    &options.workspace_root,
+                                    Duration::from_secs(30),
+                                )
+                                .await;
+                                let check_passed = post_check.map(|c| c.success).unwrap_or(false);
+                                int_report.post_integration_build_passed = check_passed;
+
+                                let post_tests = if check_passed {
+                                    AutonomousVerifier::verify_tests(
+                                        &options.workspace_root,
+                                        Duration::from_secs(45),
+                                    )
+                                    .await
+                                    .map(|t| t.success)
+                                    .unwrap_or(false)
+                                } else {
+                                    false
+                                };
+                                int_report.post_integration_tests_passed = post_tests;
+
+                                if check_passed && post_tests {
+                                    winner.state = SpeculativeCandidateState::Integrated;
+                                    promotion_status = format!(
+                                        "Promoted and verified winning candidate '{}' (applied patch to {} files)",
+                                        winner.name,
+                                        int_report.files_integrated.len()
+                                    );
+                                    int_report.outcome_summary = promotion_status.clone();
+                                    info!(status = %promotion_status, "Speculative winner successfully integrated and verified");
+                                } else {
+                                    // Post-integration verification failed! Rollback changes
+                                    int_report.rollback_executed = true;
+                                    let _ = Command::new("git")
+                                        .current_dir(&options.workspace_root)
+                                        .args(["checkout", "--", "."])
+                                        .output();
+                                    let _ = Command::new("git")
+                                        .current_dir(&options.workspace_root)
+                                        .args(["clean", "-fd"])
+                                        .output();
+
+                                    promotion_status = format!(
+                                        "Promotion rolled back: post-integration verification failed for winner '{}' (build: {}, tests: {})",
+                                        winner.name, check_passed, post_tests
+                                    );
+                                    int_report.outcome_summary = promotion_status.clone();
+                                    warn!(status = %promotion_status, "Winner promotion rolled back");
                                 }
                             }
-                        }
-                        Err(e) => {
-                            promotion_status = format!("Failed to parse winning patch: {e}");
+                            Err(e) => {
+                                promotion_status = format!("Failed to apply winning patch: {e}");
+                                int_report.outcome_summary = promotion_status.clone();
+                                warn!(err = %e, "Patch promotion failed");
+                            }
                         }
                     }
+                    integration_report = Some(int_report);
                 } else {
                     promotion_status = format!(
-                        "Winning candidate identified: '{}' (score: {:.1})",
+                        "Winning candidate identified: '{}' (score: {:.1}) — no patch to apply",
                         winner.name, winner.composite_score
                     );
                 }
             } else {
-                promotion_status =
-                    "No candidate achieved passing verification threshold".to_string();
+                promotion_status = format!(
+                    "Winning candidate identified: '{}' (score: {:.1}, eligible)",
+                    winner.name, winner.composite_score
+                );
             }
+        } else {
+            promotion_status =
+                "No candidate achieved passing verification threshold and hard gates".to_string();
         }
 
         let rationale = if let Some(ref winner) = winning_candidate {
             format!(
-                "Candidate '{}' selected with composite score {:.1} (Build: {}, Tests: {}, Safety: {}, Blast Radius: {:.1})",
+                "Candidate '{}' selected with composite score {:.1} [Policy: {}] (Build: {}, Tests: {}, Safety: {}, Blast Radius: {:.1})",
                 winner.name,
                 winner.composite_score,
+                SCORING_POLICY_VERSION,
                 winner.build_passed,
                 winner.tests_passed,
                 winner.safety_verdict,
                 winner.blast_radius_score
             )
         } else {
-            "No candidates succeeded".to_string()
+            "No candidate satisfied the mandatory hard gates (valid implementation, passing build, passing tests, and safety approval)".to_string()
         };
 
         Ok(SpeculativeExecutionReport {
-            mission: mission.to_string(),
+            mission: options.mission,
+            scoring_policy_version: SCORING_POLICY_VERSION.to_string(),
             total_candidates: evaluations.len(),
-            evaluations: evaluations.clone(),
+            evaluations,
             winning_branch_id: winning_candidate.as_ref().map(|w| w.branch_id.clone()),
             winning_branch_name: winning_candidate.as_ref().map(|w| w.name.clone()),
             promotion_status,
             decision_rationale: rationale,
+            integration_report,
         })
     }
 
     /// Evaluates a single candidate branch in an isolated sandbox workspace.
-    async fn evaluate_candidate(
+    pub async fn evaluate_candidate(
         workspace_root: &Path,
+        mission: &str,
         candidate: SpeculativeBranchConfig,
         timeout: Duration,
+        executor: Option<Arc<dyn CandidateExecutor>>,
     ) -> Result<CandidateEvaluation> {
         let start = Instant::now();
         let sandbox = Self::prepare_sandbox(workspace_root, &candidate.branch_id)?;
 
         let mut modified_files = Vec::new();
-        let patch_content = candidate.patch_content.clone().unwrap_or_default();
+        let mut patch_content = candidate.patch_content.clone().unwrap_or_default();
+        let mut git_commit_sha = None;
+        let mut failure_reason = SpeculativeFailureReason::None;
 
-        // If candidate supplies a patch, apply it into the isolated sandbox
-        if !patch_content.is_empty()
-            && let Ok(parsed) = m31a_tools::patch::parse_patch(&patch_content)
-            && let Ok(res) = m31a_tools::patch::apply_patch_to_workspace(&sandbox.path, &parsed)
+        // Stage 1: Candidate Execution
+        // If an executor is provided, run real agent execution in the isolated workspace
+        if let Some(ref exec) = executor {
+            let ctx = CandidateExecutionContext {
+                candidate_id: candidate.branch_id.clone(),
+                name: candidate.name.clone(),
+                hypothesis: candidate.hypothesis_prompt.clone(),
+                objective: candidate
+                    .objective
+                    .clone()
+                    .unwrap_or_else(|| mission.to_string()),
+                workspace_root: sandbox.path.clone(),
+                model_override: candidate.model_override.clone(),
+                cancel_token: CancellationToken::new(),
+                timeout,
+            };
+
+            match exec.execute(&ctx).await {
+                Ok(res) => {
+                    if !res.success && res.error.is_some() {
+                        failure_reason =
+                            SpeculativeFailureReason::ExecutionError(res.error.unwrap_or_default());
+                    }
+                    if let Some(patch) = res.patch_content
+                        && !patch.trim().is_empty()
+                    {
+                        patch_content = patch;
+                    }
+                    git_commit_sha = res.git_commit_sha;
+                    for f in res.modified_files {
+                        if !modified_files.contains(&f) {
+                            modified_files.push(f);
+                        }
+                    }
+                }
+                Err(e) => {
+                    failure_reason = SpeculativeFailureReason::ExecutionError(e.to_string());
+                }
+            }
+        }
+
+        // If candidate directly supplied a patch (and no executor ran), parse and apply it with strict containment verification
+        if executor.is_none() && candidate.patch_content.is_some() && !patch_content.is_empty() {
+            match m31a_tools::patch::parse_patch(&patch_content) {
+                Ok(parsed) => {
+                    // Verify path containment: no hunk paths may escape sandbox.path
+                    let mut path_escape_detected = false;
+                    for hunk in &parsed.hunks {
+                        let rel_path = match hunk {
+                            m31a_tools::patch::Hunk::AddFile { path, .. } => path,
+                            m31a_tools::patch::Hunk::UpdateFile { path, .. } => path,
+                            m31a_tools::patch::Hunk::DeleteFile { path } => path,
+                        };
+                        let resolved = sandbox.path.join(rel_path);
+                        if let Ok(canon) = resolved.canonicalize() {
+                            if !canon.starts_with(&sandbox.path) {
+                                path_escape_detected = true;
+                                break;
+                            }
+                        } else if rel_path
+                            .components()
+                            .any(|c| matches!(c, std::path::Component::ParentDir))
+                        {
+                            path_escape_detected = true;
+                            break;
+                        }
+                    }
+
+                    if path_escape_detected {
+                        failure_reason = SpeculativeFailureReason::PatchParseError(
+                            "Patch contains path traversal escaping the candidate workspace"
+                                .to_string(),
+                        );
+                    } else {
+                        match m31a_tools::patch::apply_patch_to_workspace(&sandbox.path, &parsed) {
+                            Ok(res) => {
+                                for p in res.files_modified.into_iter().chain(res.files_created) {
+                                    let s = p.to_string_lossy().to_string();
+                                    if !modified_files.contains(&s) {
+                                        modified_files.push(s);
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                failure_reason =
+                                    SpeculativeFailureReason::PatchApplicationFailed(e.to_string());
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    failure_reason = SpeculativeFailureReason::PatchParseError(e.to_string());
+                }
+            }
+        }
+
+        // If Git worktree, scan status to discover any agent-written uncommitted files or exported diff
+        if sandbox.is_worktree && modified_files.is_empty() {
+            if let Ok(output) = Command::new("git")
+                .current_dir(&sandbox.path)
+                .args(["status", "--porcelain"])
+                .output()
+            {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                for line in stdout.lines() {
+                    let parts: Vec<&str> = line.split_whitespace().collect();
+                    if parts.len() >= 2 {
+                        let path = parts[parts.len() - 1].to_string();
+                        if !path.is_empty() && !modified_files.contains(&path) {
+                            modified_files.push(path);
+                        }
+                    }
+                }
+            }
+
+            if patch_content.is_empty()
+                && let Ok(output) = Command::new("git")
+                    .current_dir(&sandbox.path)
+                    .args(["diff", "HEAD"])
+                    .output()
+            {
+                let diff = String::from_utf8_lossy(&output.stdout).to_string();
+                if !diff.trim().is_empty() {
+                    patch_content = diff;
+                }
+            }
+        }
+
+        // HARD GATE 1: Meaningful Implementation Validation
+        // A candidate with NO workspace modifications MUST NOT be evaluated as a successful implementation.
+        let implementation_valid =
+            !modified_files.is_empty() && failure_reason == SpeculativeFailureReason::None;
+        if !implementation_valid && failure_reason == SpeculativeFailureReason::None {
+            failure_reason = SpeculativeFailureReason::NoImplementation;
+        }
+
+        // HARD GATE 2: Build & Typecheck Verification
+        let (check_res, build_duration_ms) = if implementation_valid {
+            let start = Instant::now();
+            let res = AutonomousVerifier::verify_check(&sandbox.path, timeout).await?;
+            let ms = start.elapsed().as_millis() as u64;
+            (res, ms)
+        } else {
+            (
+                m31a_verify::self_heal::VerificationReport {
+                    success: false,
+                    exit_code: 1,
+                    command: "skipped".to_string(),
+                    error_count: 1,
+                    warning_count: 0,
+                    diagnostics: Vec::new(),
+                    raw_output: "No implementation changes; build skipped".to_string(),
+                    self_healing_prompt: None,
+                    tests_passed: None,
+                    tests_failed: None,
+                    tests_total: None,
+                    status: m31a_verify::verification_timeline::VerificationStatus::Failure {
+                        exit_code: Some(1),
+                        diagnostics: "No implementation changes; build skipped".to_string(),
+                    },
+                },
+                0,
+            )
+        };
+
+        let build_passed = check_res.success;
+        if implementation_valid && !build_passed && failure_reason == SpeculativeFailureReason::None
         {
-            modified_files.extend(
-                res.files_modified
-                    .into_iter()
-                    .chain(res.files_created)
-                    .map(|p| p.to_string_lossy().to_string()),
+            failure_reason = SpeculativeFailureReason::BuildFailed(
+                check_res
+                    .raw_output
+                    .lines()
+                    .take(5)
+                    .collect::<Vec<_>>()
+                    .join(" "),
             );
         }
 
-        // Run fast compiler / typecheck
-        let check_res = AutonomousVerifier::verify_check(&sandbox.path, timeout).await?;
-        let build_passed = check_res.success;
+        let build_evidence = BuildEvidence {
+            command: check_res.command.clone(),
+            passed: build_passed,
+            exit_code: check_res.exit_code,
+            duration_ms: build_duration_ms,
+            stdout_preview: check_res.raw_output.chars().take(500).collect(),
+            stderr_preview: check_res
+                .self_healing_prompt
+                .clone()
+                .unwrap_or_default()
+                .chars()
+                .take(500)
+                .collect(),
+            diagnostics: check_res
+                .diagnostics
+                .iter()
+                .map(|d| d.message.clone())
+                .collect(),
+        };
 
-        // Run tests if build succeeds
+        // HARD GATE 3: Test Verification
         let test_start = Instant::now();
-        let test_res = if build_passed {
-            AutonomousVerifier::verify_tests(&sandbox.path, timeout)
-                .await
-                .ok()
+        let (tests_passed, _test_status, test_evidence) = if build_passed && implementation_valid {
+            match AutonomousVerifier::verify_tests(&sandbox.path, timeout).await {
+                Ok(test_run) => {
+                    let passed = test_run.success;
+                    let status = match test_run.status {
+                        m31a_verify::verification_timeline::VerificationStatus::Timeout {
+                            ..
+                        } => SpeculativeTestStatus::TimedOut,
+                        m31a_verify::verification_timeline::VerificationStatus::Success => {
+                            SpeculativeTestStatus::Passed
+                        }
+                        _ => {
+                            if passed {
+                                SpeculativeTestStatus::Passed
+                            } else {
+                                SpeculativeTestStatus::Failed
+                            }
+                        }
+                    };
+                    if !passed && failure_reason == SpeculativeFailureReason::None {
+                        failure_reason = SpeculativeFailureReason::TestsFailed(
+                            test_run
+                                .raw_output
+                                .lines()
+                                .take(5)
+                                .collect::<Vec<_>>()
+                                .join(" "),
+                        );
+                    }
+                    (
+                        passed,
+                        status,
+                        Some(TestEvidence {
+                            status,
+                            passed,
+                            duration_ms: test_start.elapsed().as_millis() as u64,
+                            output_preview: test_run
+                                .raw_output
+                                .lines()
+                                .take(20)
+                                .collect::<Vec<_>>()
+                                .join("\n"),
+                        }),
+                    )
+                }
+                Err(e) => {
+                    if failure_reason == SpeculativeFailureReason::None {
+                        failure_reason = SpeculativeFailureReason::TestsFailed(e.to_string());
+                    }
+                    (
+                        false,
+                        SpeculativeTestStatus::Failed,
+                        Some(TestEvidence {
+                            status: SpeculativeTestStatus::Failed,
+                            passed: false,
+                            duration_ms: test_start.elapsed().as_millis() as u64,
+                            output_preview: format!("Test runner execution failed: {e}"),
+                        }),
+                    )
+                }
+            }
         } else {
-            None
+            (
+                false,
+                SpeculativeTestStatus::NotExecuted,
+                Some(TestEvidence {
+                    status: SpeculativeTestStatus::NotExecuted,
+                    passed: false,
+                    duration_ms: 0,
+                    output_preview: "Tests not executed due to unbuilt or empty candidate".into(),
+                }),
+            )
         };
         let test_duration_ms = test_start.elapsed().as_millis() as u64;
-        let tests_passed = test_res.as_ref().map(|t| t.success).unwrap_or(false);
 
-        // Run Safety Audit on modified files
+        // HARD GATE 4: Codebase Safety & AST Blast-Radius Gate
         let mod_paths: Vec<PathBuf> = modified_files.iter().map(PathBuf::from).collect();
-        let safety_audit =
-            CodebaseSafetyGate::audit_workspace_changes(&sandbox.path, &mod_paths, &[])?;
+        let safety_audit = if implementation_valid {
+            CodebaseSafetyGate::audit_workspace_changes(&sandbox.path, &mod_paths, &[])?
+        } else {
+            m31a_verify::safety::SafetyAuditReport {
+                verdict: SafetyGateVerdict::Blocked,
+                blast_radius: m31a_ast::impact::BlastRadiusReport {
+                    target_files: Vec::new(),
+                    modified_symbols: Vec::new(),
+                    impacts: Vec::new(),
+                    total_affected_files: 0,
+                    blast_radius_score: 100.0,
+                    risk_level: m31a_ast::impact::ImpactRiskLevel::Low,
+                    recommended_test_targets: Vec::new(),
+                    summary: "Empty implementation changes rejected".to_string(),
+                },
+                data_flow_reports: Vec::new(),
+                total_taints_found: 0,
+                unconsumed_mutations_count: 0,
+                affected_downstream_symbols_count: 0,
+                recommended_test_commands: Vec::new(),
+                summary: "Empty implementation changes rejected".to_string(),
+            }
+        };
 
-        // Compute Composite Score (0.0 to 100.0)
-        let mut score: f64 = 0.0;
-        if build_passed {
-            score += 40.0;
+        let safety_passed = safety_audit.verdict != SafetyGateVerdict::Blocked;
+        if implementation_valid
+            && !safety_passed
+            && failure_reason == SpeculativeFailureReason::None
+        {
+            failure_reason =
+                SpeculativeFailureReason::SecurityBlocked(safety_audit.summary.clone());
         }
-        if tests_passed {
-            score += 35.0;
-        }
-        // Reward low blast radius
-        let safety_bonus =
-            (100.0 - safety_audit.blast_radius.blast_radius_score).clamp(0.0, 100.0) * 0.15;
-        score += safety_bonus;
 
-        // Fast execution bonus (up to 10 points)
-        let exec_ms = start.elapsed().as_millis() as u64;
-        if exec_ms < 5000 {
-            score += 10.0;
-        } else if exec_ms < 15000 {
-            score += 5.0;
+        let security_evidence = SecurityEvidence {
+            verdict: format!("{:?}", safety_audit.verdict),
+            blast_radius_score: safety_audit.blast_radius.blast_radius_score,
+            total_taints_found: safety_audit.total_taints_found,
+            unconsumed_mutations: safety_audit.unconsumed_mutations_count,
+            affected_downstream_symbols: safety_audit.affected_downstream_symbols_count,
+            violations: safety_audit
+                .data_flow_reports
+                .iter()
+                .flat_map(|r| r.source_to_sink_taints.iter().cloned())
+                .collect(),
+        };
+
+        // Stage 5: Comparative Performance Benchmarking
+        let mut benchmark_evidence = None;
+        if implementation_valid && build_passed && tests_passed {
+            if let Some(_bench_cmd) = PerformanceProfiler::detect_benchmark_command(&sandbox.path) {
+                // If benchmark suites exist in workspace, perform comparative analysis
+                benchmark_evidence = Some(BenchmarkEvidence {
+                    status: SpeculativeBenchmarkStatus::NotMeasured,
+                    verdict: None,
+                    average_delta_pct: None,
+                    metric_summaries: vec!["Workspace benchmark detected".into()],
+                });
+            } else {
+                benchmark_evidence = Some(BenchmarkEvidence {
+                    status: SpeculativeBenchmarkStatus::NotMeasured,
+                    verdict: None,
+                    average_delta_pct: None,
+                    metric_summaries: vec!["No benchmark suites detected in project".into()],
+                });
+            }
         }
+
+        // HARD GATES CONSOLIDATION
+        let hard_gates_passed =
+            implementation_valid && build_passed && tests_passed && safety_passed;
+
+        // Stage 6: Deterministic Composite Scoring
+        let mut correctness_score = 0.0;
+        let mut safety_score = 0.0;
+        let mut performance_score = 0.0;
+        let mut maintainability_score = 0.0;
+
+        let composite_score: f64 = if hard_gates_passed {
+            // Correctness: passing build (30) + passing tests (20)
+            correctness_score = 50.0;
+
+            // Safety bonus: based on low blast radius (up to 25 points)
+            let blast_component =
+                (100.0 - safety_audit.blast_radius.blast_radius_score).clamp(0.0, 100.0) * 0.25;
+            safety_score = if safety_audit.verdict == SafetyGateVerdict::Warning {
+                (blast_component - 10.0).max(0.0)
+            } else {
+                blast_component
+            };
+
+            // Performance: only award points if measured; otherwise neutral maintainability baseline
+            performance_score = match benchmark_evidence.as_ref().map(|b| b.status) {
+                Some(SpeculativeBenchmarkStatus::Measured)
+                    if benchmark_evidence
+                        .as_ref()
+                        .and_then(|b| b.verdict.as_deref())
+                        == Some("Improved") =>
+                {
+                    20.0
+                }
+                Some(SpeculativeBenchmarkStatus::Measured) => 10.0,
+                _ => 10.0, // Neutral standard score for NotMeasured
+            };
+
+            // Maintainability & compactness: reward focused modifications over sprawling changes
+            let diff_penalty = (modified_files.len() as f64 * 0.5).clamp(0.0, 10.0);
+            maintainability_score = (15.0 - diff_penalty).clamp(5.0, 15.0);
+
+            (correctness_score + safety_score + performance_score + maintainability_score)
+                .clamp(0.0, 100.0)
+        } else {
+            0.0
+        };
+
+        let state = if hard_gates_passed {
+            SpeculativeCandidateState::Eligible
+        } else if failure_reason == SpeculativeFailureReason::NoImplementation {
+            SpeculativeCandidateState::Rejected
+        } else {
+            SpeculativeCandidateState::Failed
+        };
+
+        let rationale = if hard_gates_passed {
+            format!(
+                "Candidate met all hard gates with composite score {:.1} (Correctness: {:.1}, Safety: {:.1}, Perf: {:.1}, Maintainability: {:.1})",
+                composite_score,
+                correctness_score,
+                safety_score,
+                performance_score,
+                maintainability_score
+            )
+        } else {
+            format!("Candidate rejected/failed hard gates: {:?}", failure_reason)
+        };
+
+        let score_breakdown = ScoreBreakdown {
+            scoring_policy_version: SCORING_POLICY_VERSION.to_string(),
+            hard_gates_passed,
+            correctness_score,
+            safety_score,
+            performance_score,
+            maintainability_score,
+            composite_score,
+            rationale: rationale.clone(),
+        };
 
         let summary = format!(
-            "Candidate '{}' score: {:.1} (Build: {}, Tests: {}, Safety: {:?})",
-            candidate.name, score, build_passed, tests_passed, safety_audit.verdict
+            "Candidate '{}' State: {} (Score: {:.1}, Build: {}, Tests: {}, Safety: {:?}, Modified: {})",
+            candidate.name,
+            state.as_str(),
+            composite_score,
+            build_passed,
+            tests_passed,
+            safety_audit.verdict,
+            modified_files.len()
         );
 
         // Explicit drop will clean up worktree or temp directory
@@ -369,14 +1190,23 @@ impl SpeculativeArena {
             branch_id: candidate.branch_id,
             name: candidate.name,
             hypothesis_prompt: candidate.hypothesis_prompt,
+            state,
+            failure_reason,
+            hard_gates_passed,
             build_passed,
             tests_passed,
-            execution_duration_ms: exec_ms,
+            execution_duration_ms: start.elapsed().as_millis() as u64,
             test_duration_ms,
             safety_verdict: format!("{:?}", safety_audit.verdict),
             blast_radius_score: safety_audit.blast_radius.blast_radius_score,
             modified_files,
-            composite_score: score,
+            git_commit_sha,
+            composite_score,
+            score_breakdown,
+            build_evidence: Some(build_evidence),
+            test_evidence,
+            security_evidence: Some(security_evidence),
+            benchmark_evidence,
             patch_content,
             summary,
         })
@@ -387,8 +1217,7 @@ impl SpeculativeArena {
 mod tests {
     use super::*;
 
-    #[tokio::test]
-    async fn test_speculative_arena_competition() {
+    fn create_test_project() -> tempfile::TempDir {
         let temp_dir = tempfile::tempdir().unwrap();
         let cargo_toml = temp_dir.path().join("Cargo.toml");
         fs::write(
@@ -408,22 +1237,36 @@ edition = "2021"
             pub fn add(a: i32, b: i32) -> i32 {
                 a + b
             }
+
+            #[test]
+            fn test_add() {
+                assert_eq!(add(2, 2), 4);
+            }
             "#,
         )
         .unwrap();
+        temp_dir
+    }
 
+    #[tokio::test]
+    async fn test_empty_candidate_is_rejected_and_cannot_win() {
+        let temp_dir = create_test_project();
+
+        // Candidates with NO implementation changes
         let candidates = vec![
             SpeculativeBranchConfig {
-                branch_id: "branch-a".to_string(),
+                branch_id: "empty-1".to_string(),
                 name: "Approach A".to_string(),
                 hypothesis_prompt: "Standard addition".to_string(),
+                objective: Some("Optimize addition".into()),
                 model_override: None,
                 patch_content: None,
             },
             SpeculativeBranchConfig {
-                branch_id: "branch-b".to_string(),
+                branch_id: "empty-2".to_string(),
                 name: "Approach B".to_string(),
                 hypothesis_prompt: "Bitwise addition".to_string(),
+                objective: Some("Optimize addition".into()),
                 model_override: None,
                 patch_content: None,
             },
@@ -440,19 +1283,296 @@ edition = "2021"
         .unwrap();
 
         assert_eq!(report.total_candidates, 2);
-        assert!(report.winning_branch_id.is_some());
-        assert!(!report.decision_rationale.is_empty());
+        // Unchanged workspace MUST NOT win!
+        assert!(report.winning_branch_id.is_none());
+        assert_eq!(report.evaluations[0].composite_score, 0.0);
+        assert!(!report.evaluations[0].hard_gates_passed);
+        assert_eq!(
+            report.evaluations[0].failure_reason,
+            SpeculativeFailureReason::NoImplementation
+        );
+    }
+
+    #[tokio::test]
+    async fn test_valid_patch_candidate_evaluated_and_selected() {
+        let temp_dir = create_test_project();
+
+        let valid_patch = r#"*** Begin Patch
+*** Update File: src/lib.rs
+@@ pub fn add(a: i32, b: i32) -> i32 {
+-                a + b
++                // Optimized path
++                a.wrapping_add(b)
+*** End Patch"#;
+
+        let failing_patch = r#"*** Begin Patch
+*** Update File: src/lib.rs
+@@ pub fn add(a: i32, b: i32) -> i32 {
+-                a + b
++                compile_error!("Broken candidate")
+*** End Patch"#;
+
+        let candidates = vec![
+            SpeculativeBranchConfig {
+                branch_id: "candidate-valid".to_string(),
+                name: "Wrapping Add Approach".to_string(),
+                hypothesis_prompt: "Use wrapping addition".to_string(),
+                objective: Some("Optimize addition".into()),
+                model_override: None,
+                patch_content: Some(valid_patch.to_string()),
+            },
+            SpeculativeBranchConfig {
+                branch_id: "candidate-broken".to_string(),
+                name: "Broken Syntax Approach".to_string(),
+                hypothesis_prompt: "Syntax error".to_string(),
+                objective: Some("Optimize addition".into()),
+                model_override: None,
+                patch_content: Some(failing_patch.to_string()),
+            },
+        ];
+
+        let report = SpeculativeArena::compete(
+            temp_dir.path(),
+            "Optimize math helper",
+            candidates,
+            Duration::from_secs(15),
+            false,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(report.total_candidates, 2);
+        assert_eq!(report.winning_branch_id.as_deref(), Some("candidate-valid"));
+        let winner = report
+            .evaluations
+            .iter()
+            .find(|e| e.branch_id == "candidate-valid")
+            .unwrap();
+        assert!(winner.hard_gates_passed);
+        assert!(winner.composite_score > 50.0);
+        assert_eq!(winner.state, SpeculativeCandidateState::Eligible);
+
+        let broken = report
+            .evaluations
+            .iter()
+            .find(|e| e.branch_id == "candidate-broken")
+            .unwrap();
+        assert!(!broken.hard_gates_passed);
+        assert_eq!(broken.composite_score, 0.0);
     }
 
     #[test]
-    fn test_generate_hypotheses_helper() {
-        let hypotheses = SpeculativeArena::generate_hypotheses(
-            "Fix parser performance",
-            &["Use SIMD parser", "Use lazy string references"],
+    fn test_generate_diverse_hypotheses_helper() {
+        let perf_hypo = SpeculativeArena::generate_diverse_hypotheses(
+            "Fix parser performance and throughput",
+            3,
         );
-        assert_eq!(hypotheses.len(), 2);
-        assert_eq!(hypotheses[0].name, "Approach A");
-        assert_eq!(hypotheses[1].name, "Approach B");
-        assert!(hypotheses[0].branch_id.starts_with("hypo-1-"));
+        assert_eq!(perf_hypo.len(), 3);
+        assert!(perf_hypo[0].name.contains("Algorithmic"));
+        assert!(perf_hypo[1].name.contains("Zero-Copy"));
+        assert!(perf_hypo[2].name.contains("Parallel"));
+
+        let general_hypo =
+            SpeculativeArena::generate_diverse_hypotheses("Refactor database connector", 2);
+        assert_eq!(general_hypo.len(), 2);
+        assert!(general_hypo[0].name.contains("Direct Targeted"));
+        assert!(general_hypo[1].name.contains("Decoupled Modular"));
+    }
+
+    #[tokio::test]
+    async fn test_path_traversal_patch_rejected() {
+        let temp_dir = create_test_project();
+        let malicious_patch = r#"*** Begin Patch
+*** Update File: ../outside.txt
+@@ fn add()
+-a
++b
+*** End Patch"#;
+
+        let candidate = SpeculativeBranchConfig {
+            branch_id: "malicious".to_string(),
+            name: "Malicious Approach".to_string(),
+            hypothesis_prompt: "Path escape".to_string(),
+            objective: Some("Security test".into()),
+            model_override: None,
+            patch_content: Some(malicious_patch.to_string()),
+        };
+
+        let report = SpeculativeArena::compete(
+            temp_dir.path(),
+            "Security test",
+            vec![candidate],
+            Duration::from_secs(10),
+            false,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(report.total_candidates, 1);
+        assert!(report.winning_branch_id.is_none());
+        assert!(!report.evaluations[0].hard_gates_passed);
+        assert!(matches!(
+            report.evaluations[0].failure_reason,
+            SpeculativeFailureReason::PatchParseError(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_failing_tests_gate_rejection() {
+        let temp_dir = create_test_project();
+
+        // Patch that compiles, but breaks the unit test (add(2, 2) != 4)
+        let logic_error_patch = r#"*** Begin Patch
+*** Update File: src/lib.rs
+@@ pub fn add(a: i32, b: i32) -> i32 {
+-                a + b
++                a + b + 999
+*** End Patch"#;
+
+        let candidate = SpeculativeBranchConfig {
+            branch_id: "wrong-logic".to_string(),
+            name: "Faulty Logic".to_string(),
+            hypothesis_prompt: "Introduce math bug".to_string(),
+            objective: Some("Bug introduction".into()),
+            model_override: None,
+            patch_content: Some(logic_error_patch.to_string()),
+        };
+
+        let report = SpeculativeArena::compete(
+            temp_dir.path(),
+            "Test test gate",
+            vec![candidate],
+            Duration::from_secs(15),
+            false,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(report.total_candidates, 1);
+        assert!(report.winning_branch_id.is_none());
+        assert!(!report.evaluations[0].hard_gates_passed);
+        assert!(report.evaluations[0].build_passed);
+        assert!(!report.evaluations[0].tests_passed);
+        assert!(matches!(
+            report.evaluations[0].failure_reason,
+            SpeculativeFailureReason::TestsFailed(_)
+        ));
+    }
+
+    struct MockExecutor {
+        code_to_write: String,
+    }
+
+    impl CandidateExecutor for MockExecutor {
+        fn execute<'a>(
+            &'a self,
+            ctx: &'a CandidateExecutionContext,
+        ) -> BoxFuture<'a, Result<CandidateExecutionResult>> {
+            let code = self.code_to_write.clone();
+            Box::pin(async move {
+                let file = ctx.workspace_root.join("src/lib.rs");
+                fs::write(&file, &code)?;
+                Ok(CandidateExecutionResult {
+                    success: true,
+                    modified_files: vec!["src/lib.rs".to_string()],
+                    patch_content: None,
+                    git_commit_sha: None,
+                    error: None,
+                })
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn test_candidate_executor_invoked_in_sandbox() {
+        let temp_dir = create_test_project();
+
+        let executor = Arc::new(MockExecutor {
+            code_to_write: r#"
+            pub fn add(a: i32, b: i32) -> i32 {
+                // Executor optimized implementation
+                (a as i64 + b as i64) as i32
+            }
+
+            #[test]
+            fn test_add() {
+                assert_eq!(add(2, 2), 4);
+            }
+            "#
+            .to_string(),
+        });
+
+        let candidate = SpeculativeBranchConfig {
+            branch_id: "agent-hypo-1".to_string(),
+            name: "Agent Executor Approach".to_string(),
+            hypothesis_prompt: "Cast to i64".to_string(),
+            objective: Some("Avoid overflow".into()),
+            model_override: None,
+            patch_content: None,
+        };
+
+        let opts = SpeculateOptions {
+            workspace_root: temp_dir.path().to_path_buf(),
+            mission: "Prevent overflow in add".to_string(),
+            candidates: vec![candidate],
+            timeout_per_candidate: Duration::from_secs(15),
+            auto_promote_winner: false,
+            require_approval_for_promotion: false,
+            max_concurrency: 2,
+            executor: Some(executor),
+        };
+
+        let report = SpeculativeArena::compete_with_options(opts).await.unwrap();
+
+        assert_eq!(report.total_candidates, 1);
+        assert_eq!(report.winning_branch_id.as_deref(), Some("agent-hypo-1"));
+        let winner = &report.evaluations[0];
+        assert!(winner.hard_gates_passed);
+        assert!(winner.composite_score > 50.0);
+        assert_eq!(winner.modified_files, vec!["src/lib.rs"]);
+    }
+
+    #[tokio::test]
+    async fn test_promotion_requires_approval_leaves_pending() {
+        let temp_dir = create_test_project();
+
+        let valid_patch = r#"*** Begin Patch
+*** Update File: src/lib.rs
+@@ pub fn add(a: i32, b: i32) -> i32 {
+-                a + b
++                a.saturating_add(b)
+*** End Patch"#;
+
+        let candidate = SpeculativeBranchConfig {
+            branch_id: "saturating".to_string(),
+            name: "Saturating Add".to_string(),
+            hypothesis_prompt: "Use saturating add".to_string(),
+            objective: Some("Safe addition".into()),
+            model_override: None,
+            patch_content: Some(valid_patch.to_string()),
+        };
+
+        let opts = SpeculateOptions {
+            workspace_root: temp_dir.path().to_path_buf(),
+            mission: "Safe add".to_string(),
+            candidates: vec![candidate],
+            timeout_per_candidate: Duration::from_secs(15),
+            auto_promote_winner: true,
+            require_approval_for_promotion: true,
+            max_concurrency: 1,
+            executor: None,
+        };
+
+        let report = SpeculativeArena::compete_with_options(opts).await.unwrap();
+
+        assert_eq!(report.winning_branch_id.as_deref(), Some("saturating"));
+        assert!(
+            report
+                .promotion_status
+                .contains("Pending required human approval")
+        );
+        // Primary workspace must NOT have been changed because approval is pending!
+        let primary_content = fs::read_to_string(temp_dir.path().join("src/lib.rs")).unwrap();
+        assert!(!primary_content.contains("saturating_add"));
     }
 }

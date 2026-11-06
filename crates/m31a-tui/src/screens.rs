@@ -23,6 +23,8 @@ use ratatui::{
 
 use crate::app::App;
 use crate::theme::{ColorRole, Theme};
+use m31a_agent_engine::SpeculativeExecutionReport;
+use m31a_core::workflow::{WorkflowState, WorkflowTaskStatus};
 
 /// The 10 primary screens of the M31A developer environment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -538,15 +540,151 @@ fn render_agents_screen(f: &mut Frame, app: &App, area: Rect, t: &Theme) {
         .list_spawn_descendants("current", None)
         .unwrap_or_default();
 
+    let wf_store = app.storage.workflow_store();
+    let workflows = wf_store.list_workflows(10).unwrap_or_default();
+
+    // Find any speculative evaluation reports from workflows
+    let mut spec_reports: Vec<SpeculativeExecutionReport> = Vec::new();
+    for wf in &workflows {
+        if let Ok(artifacts) = wf_store.list_artifacts(&wf.id) {
+            for art in artifacts
+                .into_iter()
+                .filter(|a| a.artifact_type == "speculative_report")
+            {
+                let parsed = std::fs::read_to_string(&art.file_path)
+                    .ok()
+                    .and_then(|c| serde_json::from_str::<SpeculativeExecutionReport>(&c).ok());
+                if let Some(report) = parsed {
+                    spec_reports.push(report);
+                }
+            }
+        }
+    }
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(6), Constraint::Length(6)])
+        .constraints([
+            Constraint::Length(8),
+            Constraint::Min(8),
+            Constraint::Length(5),
+        ])
         .split(area);
 
+    // 1. Autonomous Workflows Table (top)
+    let wf_header = Row::new(vec![
+        Cell::from("Workflow ID").style(t.style_secondary().add_modifier(Modifier::BOLD)),
+        Cell::from("Type").style(t.style_secondary().add_modifier(Modifier::BOLD)),
+        Cell::from("Objective").style(t.style_secondary().add_modifier(Modifier::BOLD)),
+        Cell::from("State").style(t.style_secondary().add_modifier(Modifier::BOLD)),
+        Cell::from("Tasks / Wave").style(t.style_secondary().add_modifier(Modifier::BOLD)),
+        Cell::from("Rev").style(t.style_secondary().add_modifier(Modifier::BOLD)),
+    ])
+    .style(t.style_surface1())
+    .bottom_margin(1);
+
+    let mut wf_rows = Vec::new();
+    if workflows.is_empty() {
+        wf_rows.push(Row::new(vec![
+            Cell::from("No workflows").style(t.style_muted()),
+            Cell::from("-").style(t.style_muted()),
+            Cell::from("Launch workflows via `m31a workflow run \"<objective>\"`")
+                .style(t.style_muted()),
+            Cell::from("-").style(t.style_muted()),
+            Cell::from("-").style(t.style_muted()),
+            Cell::from("-").style(t.style_muted()),
+        ]));
+    } else {
+        for wf in &workflows {
+            let tasks = wf_store.list_tasks(&wf.id).unwrap_or_default();
+            let completed = tasks
+                .iter()
+                .filter(|tk| tk.status == WorkflowTaskStatus::Completed)
+                .count();
+            let total = tasks.len();
+            let active_wave = tasks
+                .iter()
+                .filter(|tk| tk.status == WorkflowTaskStatus::Running)
+                .map(|tk| tk.wave_index)
+                .next()
+                .unwrap_or(0);
+
+            let (state_label, state_color) = match wf.state {
+                WorkflowState::Created => ("CREATED", ColorRole::Accent),
+                WorkflowState::Planning | WorkflowState::PlanReady | WorkflowState::Analyzing => {
+                    ("PLANNING", ColorRole::AccentMuted)
+                }
+                WorkflowState::Running
+                | WorkflowState::Ready
+                | WorkflowState::Verifying
+                | WorkflowState::IntegrationPending => ("RUNNING", ColorRole::Warning),
+                WorkflowState::Completed => ("COMPLETED", ColorRole::Success),
+                WorkflowState::Failed | WorkflowState::Blocked => ("FAILED", ColorRole::Error),
+                WorkflowState::Cancelled => ("CANCELLED", ColorRole::TextMuted),
+                WorkflowState::AwaitingApproval => ("APPROVAL", ColorRole::Warning),
+            };
+
+            let wave_str = if total > 0 {
+                format!("{completed}/{total} (Wave {active_wave})")
+            } else {
+                "-".to_string()
+            };
+
+            wf_rows.push(Row::new(vec![
+                Cell::from(wf.id.clone()).style(t.style_secondary().add_modifier(Modifier::BOLD)),
+                Cell::from(wf.workflow_type.clone()),
+                Cell::from(wf.objective.clone()),
+                Cell::from(Span::styled(
+                    state_label,
+                    Style::default()
+                        .fg(t.color(state_color))
+                        .add_modifier(Modifier::BOLD),
+                )),
+                Cell::from(wave_str),
+                Cell::from(format!("v{}", wf.plan_revision)),
+            ]));
+        }
+    }
+
+    let wf_table = Table::new(
+        wf_rows,
+        [
+            Constraint::Length(16),
+            Constraint::Length(14),
+            Constraint::Percentage(45),
+            Constraint::Length(14),
+            Constraint::Length(18),
+            Constraint::Length(8),
+        ],
+    )
+    .header(wf_header)
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(t.border_subtle())
+            .title(format!(
+                " ⚡ Autonomous Workflows & Wave Progress ({} registered) ",
+                workflows.len()
+            )),
+    );
+    f.render_widget(wf_table, chunks[0]);
+
+    // 2. Middle section: Subagent Hierarchy + Speculative Parallel Reality Arena
+    let middle_chunks = if area.width >= 120 {
+        Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
+            .split(chunks[1])
+    } else {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+            .split(chunks[1])
+    };
+
+    // 2a. Subagent Hierarchy
     let header_row = Row::new(vec![
         Cell::from("Agent ID").style(t.style_secondary().add_modifier(Modifier::BOLD)),
         Cell::from("Role").style(t.style_secondary().add_modifier(Modifier::BOLD)),
-        Cell::from("Task Name").style(t.style_secondary().add_modifier(Modifier::BOLD)),
         Cell::from("Status").style(t.style_secondary().add_modifier(Modifier::BOLD)),
         Cell::from("Depth").style(t.style_secondary().add_modifier(Modifier::BOLD)),
     ])
@@ -558,31 +696,16 @@ fn render_agents_screen(f: &mut Frame, app: &App, area: Rect, t: &Theme) {
 
     for tab in &app.bottom_pane.subagent_tabs {
         all_agent_ids.push(tab.thread_id.clone());
-        let is_selected = rows.len() == app.screen_selected_index;
-        let row_style = if is_selected {
-            Style::default()
-                .bg(t.color(ColorRole::Surface2))
-                .fg(t.color(ColorRole::TextPrimary))
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(t.color(ColorRole::TextPrimary))
-        };
-
         let status_str = tab.status.badge().1;
-
-        rows.push(
-            Row::new(vec![
-                Cell::from(tab.thread_id.clone()),
-                Cell::from(tab.role.clone()),
-                Cell::from("Subagent Task"),
-                Cell::from(Span::styled(
-                    status_str,
-                    Style::default().fg(t.color(ColorRole::Success)),
-                )),
-                Cell::from("Active"),
-            ])
-            .style(row_style),
-        );
+        rows.push(Row::new(vec![
+            Cell::from(tab.thread_id.clone()),
+            Cell::from(tab.role.clone()),
+            Cell::from(Span::styled(
+                status_str,
+                Style::default().fg(t.color(ColorRole::Success)),
+            )),
+            Cell::from("Active"),
+        ]));
     }
 
     for e in &descendants {
@@ -590,36 +713,30 @@ fn render_agents_screen(f: &mut Frame, app: &App, area: Rect, t: &Theme) {
             continue;
         }
         all_agent_ids.push(e.child_thread_id.clone());
-        let is_selected = rows.len() == app.screen_selected_index;
-        let row_style = if is_selected {
-            Style::default()
-                .bg(t.color(ColorRole::Surface2))
-                .fg(t.color(ColorRole::TextPrimary))
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(t.color(ColorRole::TextPrimary))
-        };
-
-        rows.push(
-            Row::new(vec![
-                Cell::from(e.child_thread_id.clone()),
-                Cell::from(e.agent_role.clone()),
-                Cell::from("Completed/Persisted"),
-                Cell::from(Span::styled(&e.status, t.style_muted())),
-                Cell::from(format!("{}", e.depth)),
-            ])
-            .style(row_style),
-        );
+        rows.push(Row::new(vec![
+            Cell::from(e.child_thread_id.clone()),
+            Cell::from(e.agent_role.clone()),
+            Cell::from(Span::styled(&e.status, t.style_muted())),
+            Cell::from(format!("{}", e.depth)),
+        ]));
     }
 
-    let table = Table::new(
+    if rows.is_empty() {
+        rows.push(Row::new(vec![
+            Cell::from("No subagents").style(t.style_muted()),
+            Cell::from("-").style(t.style_muted()),
+            Cell::from("Idle").style(t.style_muted()),
+            Cell::from("-").style(t.style_muted()),
+        ]));
+    }
+
+    let subagents_table = Table::new(
         rows,
         [
-            Constraint::Length(28),
+            Constraint::Length(24),
             Constraint::Length(16),
-            Constraint::Percentage(40),
-            Constraint::Length(18),
-            Constraint::Length(10),
+            Constraint::Length(14),
+            Constraint::Length(8),
         ],
     )
     .header(header_row)
@@ -628,30 +745,124 @@ fn render_agents_screen(f: &mut Frame, app: &App, area: Rect, t: &Theme) {
             .borders(Borders::ALL)
             .border_style(t.border_subtle())
             .title(format!(
-                " Subagent Hierarchy ({} live / {} total) — [c] Close [t] Terminate Tree [i] Integrate [Enter] Transcript ",
+                " Subagent Hierarchy ({} live / {} total) ",
                 app.bottom_pane.subagent_tabs.len(),
                 descendants.len()
             )),
     );
+    f.render_widget(subagents_table, middle_chunks[0]);
 
-    f.render_widget(table, chunks[0]);
+    // 2b. Speculative Arena Candidates Matrix
+    let spec_header = Row::new(vec![
+        Cell::from("Branch").style(t.style_secondary().add_modifier(Modifier::BOLD)),
+        Cell::from("Build").style(t.style_secondary().add_modifier(Modifier::BOLD)),
+        Cell::from("Tests").style(t.style_secondary().add_modifier(Modifier::BOLD)),
+        Cell::from("Safety").style(t.style_secondary().add_modifier(Modifier::BOLD)),
+        Cell::from("Score").style(t.style_secondary().add_modifier(Modifier::BOLD)),
+    ])
+    .style(t.style_surface1())
+    .bottom_margin(1);
 
-    // Inspector / Action bar
+    let mut spec_rows = Vec::new();
+    if let Some(latest_report) = spec_reports.first() {
+        for eval in &latest_report.evaluations {
+            let is_winner = latest_report
+                .winning_branch_id
+                .as_ref()
+                .map(|w| w == &eval.branch_id || w == &eval.name)
+                .unwrap_or(false);
+
+            let branch_name = if is_winner {
+                format!("★ {}", eval.name)
+            } else {
+                eval.name.clone()
+            };
+
+            let build_span = if eval.build_passed {
+                Span::styled("PASS", Style::default().fg(t.color(ColorRole::Success)))
+            } else {
+                Span::styled("FAIL", Style::default().fg(t.color(ColorRole::Error)))
+            };
+
+            let test_span = if eval.tests_passed {
+                Span::styled("PASS", Style::default().fg(t.color(ColorRole::Success)))
+            } else {
+                Span::styled("FAIL", Style::default().fg(t.color(ColorRole::Error)))
+            };
+
+            let safety_passed =
+                eval.safety_verdict.contains("Allow") || eval.safety_verdict.contains("Pass");
+            let safety_span = if safety_passed {
+                Span::styled("PASS", Style::default().fg(t.color(ColorRole::Success)))
+            } else {
+                Span::styled("FAIL", Style::default().fg(t.color(ColorRole::Error)))
+            };
+
+            let score_str = format!("{:.1}", eval.composite_score);
+            let branch_style = if is_winner {
+                Style::default()
+                    .fg(t.color(ColorRole::Success))
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(t.color(ColorRole::TextPrimary))
+            };
+
+            spec_rows.push(Row::new(vec![
+                Cell::from(branch_name).style(branch_style),
+                Cell::from(build_span),
+                Cell::from(test_span),
+                Cell::from(safety_span),
+                Cell::from(Span::styled(
+                    score_str,
+                    Style::default().fg(t.color(ColorRole::Warning)),
+                )),
+            ]));
+        }
+    } else {
+        spec_rows.push(Row::new(vec![
+            Cell::from("Speculative Arena Standby").style(t.style_muted()),
+            Cell::from("-").style(t.style_muted()),
+            Cell::from("-").style(t.style_muted()),
+            Cell::from("-").style(t.style_muted()),
+            Cell::from("Launch with `m31a speculate`").style(t.style_muted()),
+        ]));
+    }
+
+    let spec_table = Table::new(
+        spec_rows,
+        [
+            Constraint::Length(18),
+            Constraint::Length(8),
+            Constraint::Length(8),
+            Constraint::Length(8),
+            Constraint::Length(12),
+        ],
+    )
+    .header(spec_header)
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(t.border_subtle())
+            .title(" 🔀 Speculative Arena Candidates Matrix "),
+    );
+    f.render_widget(spec_table, middle_chunks[1]);
+
+    // 3. Action bar
     let action_text = vec![
         Line::from(vec![
             Span::styled(
-                "Actions: ",
+                "Supervision Actions: ",
                 t.style_secondary().add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                "[c] Close agent  |  [t] Terminate whole tree  |  [i] Integrate worktree changes  |  [Enter] Inspect transcript",
+                "[c] Close agent  |  [t] Terminate Tree  |  [i] Integrate Changes  |  [Enter] Inspect  |  [Esc] Chat",
                 t.style_muted(),
             ),
         ]),
         Line::from(vec![
-            Span::styled("Notice: ", t.style_secondary()),
+            Span::styled("Engine Notice: ", t.style_secondary()),
             Span::styled(
-                "Subagent operations are strictly authenticated and enforce max_depth and isolated worktree policies.",
+                "Autonomous workflows partition tasks into conflict-free waves with lease recovery and multi-stage verification.",
                 t.style_muted(),
             ),
         ]),
@@ -659,8 +870,8 @@ fn render_agents_screen(f: &mut Frame, app: &App, area: Rect, t: &Theme) {
     let action_block = Block::default()
         .borders(Borders::ALL)
         .border_style(t.border_subtle())
-        .title(" Agent Supervision Operations ");
-    f.render_widget(Paragraph::new(action_text).block(action_block), chunks[1]);
+        .title(" Supervision & Autonomous Orchestration Operations ");
+    f.render_widget(Paragraph::new(action_text).block(action_block), chunks[2]);
 }
 
 // -------------------------------------------------------------------------------------------------

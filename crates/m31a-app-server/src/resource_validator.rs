@@ -216,6 +216,31 @@ pub fn get_method_metadata(method: &str) -> Option<MethodMetadata> {
             is_public: false,
         }),
 
+        // Autonomous Workflows & Speculative Execution
+        "workflow/create" => Some(MethodMetadata {
+            requires_target_resource: false,
+            mutates_workspace: true,
+            external_side_effects: true,
+            is_public: false,
+        }),
+        "workflow/status"
+        | "workflow/inspect"
+        | "workflow/events"
+        | "workflow/artifacts"
+        | "workflow/task"
+        | "speculative/evaluations" => Some(MethodMetadata {
+            requires_target_resource: false,
+            mutates_workspace: false,
+            external_side_effects: false,
+            is_public: false,
+        }),
+        "workflow/resume" | "workflow/cancel" => Some(MethodMetadata {
+            requires_target_resource: false,
+            mutates_workspace: true,
+            external_side_effects: true,
+            is_public: false,
+        }),
+
         _ => None,
     }
 }

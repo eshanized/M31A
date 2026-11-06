@@ -14,6 +14,7 @@ pub mod queue_store;
 pub mod rollout;
 pub mod state_file;
 pub mod transcript_export;
+pub mod workflow_store;
 pub mod worktree;
 
 pub use state_file::{FieldPreservationPolicy, StateDocument, StateFileLock, StateTransaction};
@@ -45,3 +46,4 @@ pub use notes::{
 };
 pub use queue_store::{QueueStore, QueueTaskRecord, TaskStatus};
 pub use transcript_export::{TranscriptExporter, TranscriptItemRecord, TranscriptTurnGroup};
+pub use workflow_store::WorkflowStore;
