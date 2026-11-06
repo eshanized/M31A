@@ -441,3 +441,145 @@ async fn test_unknown_rpc_method_fails_closed() {
     assert_eq!(err.code, -32003);
     assert!(err.message.contains("Unknown or unclassified RPC method"));
 }
+
+#[tokio::test]
+async fn test_app_server_workflow_approval_rpc() {
+    let (server, storage, _thread_a_id, _thread_b_id) = setup_app_server().await;
+    let store = storage.workflow_store();
+
+    // 1. Create a workflow run
+    let wf_id = "wf-app-test";
+    let run = m31a_core::workflow::WorkflowRun {
+        id: wf_id.to_string(),
+        thread_id: None,
+        workspace_root: std::path::PathBuf::from("."),
+        objective: "Approval RPC test".into(),
+        workflow_type: "autonomous".into(),
+        state: m31a_core::workflow::WorkflowState::Running,
+        plan_revision: 1,
+        configuration_json: "{}".into(),
+        created_at_epoch_ms: chrono::Utc::now().timestamp_millis(),
+        updated_at_epoch_ms: chrono::Utc::now().timestamp_millis(),
+        started_at_epoch_ms: Some(chrono::Utc::now().timestamp_millis()),
+        completed_at_epoch_ms: None,
+        cancellation_reason: None,
+        overall_result_json: None,
+        resource_usage_json: None,
+    };
+    store.create_workflow(&run).unwrap();
+
+    // 2. Create pending approval request 1
+    let req1 = m31a_core::workflow::WorkflowApprovalRequest {
+        id: "app-test-1".to_string(),
+        workflow_id: wf_id.to_string(),
+        task_id: "t-impl-1".to_string(),
+        attempt_id: 1,
+        change_set_hash: "hash-abc-123".to_string(),
+        patch_preview: Some("Modify src/lib.rs".to_string()),
+        status: m31a_core::workflow::WorkflowApprovalStatus::Pending,
+        decision_actor: None,
+        decision_reason: None,
+        requested_at_epoch_ms: chrono::Utc::now().timestamp_millis(),
+        decided_at_epoch_ms: None,
+    };
+    store.create_approval_request(&req1).unwrap();
+
+    // 3. Query workflow/approvals
+    let list_req = JsonRpcRequest {
+        jsonrpc: "2.0".to_string(),
+        id: Some(serde_json::json!(50)),
+        method: "workflow/approvals".to_string(),
+        params: Some(serde_json::json!({ "workflow_id": wf_id })),
+    };
+    let list_res = server.handle_request(list_req).await;
+    assert!(list_res.error.is_none());
+    let approvals = list_res.result.unwrap();
+    let app_array = approvals.as_array().expect("array of approvals");
+    assert_eq!(app_array.len(), 1);
+    assert_eq!(app_array[0]["id"], "app-test-1");
+    assert_eq!(app_array[0]["status"], "pending");
+
+    // 4. Call workflow/approve
+    let approve_req = JsonRpcRequest {
+        jsonrpc: "2.0".to_string(),
+        id: Some(serde_json::json!(51)),
+        method: "workflow/approve".to_string(),
+        params: Some(serde_json::json!({
+            "workflow_id": wf_id,
+            "task_id": "app-test-1",
+            "actor": "security-lead",
+            "reason": "Change verified manually",
+        })),
+    };
+    let approve_res = server.handle_request(approve_req).await;
+    assert!(
+        approve_res.error.is_none(),
+        "Approve RPC must succeed: {:?}",
+        approve_res.error
+    );
+    let app_record = store.get_approval_request("app-test-1").unwrap().unwrap();
+    assert_eq!(
+        app_record.status,
+        m31a_core::workflow::WorkflowApprovalStatus::Approved
+    );
+    assert_eq!(app_record.decision_actor.as_deref(), Some("security-lead"));
+
+    // 5. Create pending approval request 2 and reject it
+    let req2 = m31a_core::workflow::WorkflowApprovalRequest {
+        id: "app-test-2".to_string(),
+        workflow_id: wf_id.to_string(),
+        task_id: "t-impl-2".to_string(),
+        attempt_id: 1,
+        change_set_hash: "hash-def-456".to_string(),
+        patch_preview: Some("Modify src/main.rs".to_string()),
+        status: m31a_core::workflow::WorkflowApprovalStatus::Pending,
+        decision_actor: None,
+        decision_reason: None,
+        requested_at_epoch_ms: chrono::Utc::now().timestamp_millis(),
+        decided_at_epoch_ms: None,
+    };
+    store.create_approval_request(&req2).unwrap();
+
+    let reject_req = JsonRpcRequest {
+        jsonrpc: "2.0".to_string(),
+        id: Some(serde_json::json!(52)),
+        method: "workflow/reject".to_string(),
+        params: Some(serde_json::json!({
+            "workflow_id": wf_id,
+            "task_id": "app-test-2",
+            "actor": "auditor",
+            "reason": "Failed security criteria",
+        })),
+    };
+    let reject_res = server.handle_request(reject_req).await;
+    assert!(
+        reject_res.error.is_none(),
+        "Reject RPC must succeed: {:?}",
+        reject_res.error
+    );
+    let app2_record = store.get_approval_request("app-test-2").unwrap().unwrap();
+    assert_eq!(
+        app2_record.status,
+        m31a_core::workflow::WorkflowApprovalStatus::Rejected
+    );
+    assert_eq!(
+        app2_record.decision_reason.as_deref(),
+        Some("Failed security criteria")
+    );
+
+    // 6. Non-existent approval fails closed
+    let bad_req = JsonRpcRequest {
+        jsonrpc: "2.0".to_string(),
+        id: Some(serde_json::json!(53)),
+        method: "workflow/approve".to_string(),
+        params: Some(serde_json::json!({
+            "workflow_id": wf_id,
+            "task_id": "nonexistent-approval",
+        })),
+    };
+    let bad_res = server.handle_request(bad_req).await;
+    assert!(
+        bad_res.error.is_some(),
+        "Approving non-existent request must fail"
+    );
+}

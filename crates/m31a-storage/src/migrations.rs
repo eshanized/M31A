@@ -491,6 +491,28 @@ pub const BUILTIN_MIGRATIONS: &[Migration] = &[
         CREATE INDEX IF NOT EXISTS idx_workflow_tasks_kind ON workflow_tasks(workflow_id, task_kind);
         "#,
     ),
+    Migration::new(
+        17,
+        "workflow_approvals_and_lock_leases",
+        r#"
+        CREATE TABLE IF NOT EXISTS workflow_approvals (
+            id TEXT PRIMARY KEY,
+            workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+            task_id TEXT NOT NULL,
+            attempt_id INTEGER NOT NULL,
+            change_set_hash TEXT NOT NULL,
+            patch_preview TEXT,
+            status TEXT NOT NULL CHECK(status IN ('pending', 'approved', 'rejected', 'cancelled')),
+            requested_at_epoch_ms INTEGER NOT NULL,
+            decided_at_epoch_ms INTEGER,
+            decision_actor TEXT,
+            decision_reason TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_workflow_approvals_wf_task ON workflow_approvals(workflow_id, task_id, attempt_id);
+        CREATE INDEX IF NOT EXISTS idx_workflow_approvals_wf_status ON workflow_approvals(workflow_id, status);
+        "#,
+    ),
 ];
 
 /// Migration engine responsible for running and validating SQLite migrations.

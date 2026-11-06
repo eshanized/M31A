@@ -174,3 +174,56 @@ fn test_cli_features_enable_disable_and_list() {
     assert!(stdout.contains("web_search"));
     assert!(stdout.contains("enabled"));
 }
+
+#[test]
+fn test_cli_workflow_approve_reject() {
+    let tmp = tempdir().unwrap();
+
+    // 1. Help message for approve and reject subcommands
+    let out_app_help = m31a_bin()
+        .args(["workflow", "approve", "--help"])
+        .output()
+        .unwrap();
+    assert!(out_app_help.status.success());
+    let txt = String::from_utf8_lossy(&out_app_help.stdout);
+    assert!(
+        txt.contains("workflow-id") || txt.contains("WORKFLOW_ID") || txt.contains("<WORKFLOW_ID>")
+    );
+    assert!(
+        txt.contains("approval-id") || txt.contains("APPROVAL_ID") || txt.contains("<APPROVAL_ID>")
+    );
+
+    let out_rej_help = m31a_bin()
+        .args(["workflow", "reject", "--help"])
+        .output()
+        .unwrap();
+    assert!(out_rej_help.status.success());
+    let txt2 = String::from_utf8_lossy(&out_rej_help.stdout);
+    assert!(
+        txt2.contains("workflow-id")
+            || txt2.contains("WORKFLOW_ID")
+            || txt2.contains("<WORKFLOW_ID>")
+    );
+    assert!(txt2.contains("reason"));
+
+    // 2. Non-existent approval fails closed
+    let out_bad = m31a_bin()
+        .env("HOME", tmp.path())
+        .args(["workflow", "approve", "non-existent-wf", "non-existent-app"])
+        .output()
+        .unwrap();
+    assert!(
+        !out_bad.status.success(),
+        "Approving non-existent workflow must fail closed"
+    );
+
+    let out_bad_rej = m31a_bin()
+        .env("HOME", tmp.path())
+        .args(["workflow", "reject", "non-existent-wf", "non-existent-app"])
+        .output()
+        .unwrap();
+    assert!(
+        !out_bad_rej.status.success(),
+        "Rejecting non-existent workflow must fail closed"
+    );
+}

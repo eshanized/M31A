@@ -1947,6 +1947,109 @@ impl AppServer {
                 Ok(serde_json::to_value(task)?)
             }
 
+            "workflow/approve" => {
+                let wf_id = params
+                    .get("workflow_id")
+                    .or_else(|| params.get("id"))
+                    .and_then(|v| v.as_str())
+                    .context("Missing 'workflow_id'")?;
+                let approval_id = params
+                    .get("approval_id")
+                    .or_else(|| params.get("task_id"))
+                    .and_then(|v| v.as_str())
+                    .context("Missing 'approval_id'")?;
+                let actor = params
+                    .get("actor")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("app-server-rpc");
+                let reason = params.get("reason").and_then(|v| v.as_str());
+
+                let store = self.storage.workflow_store();
+                let run = store
+                    .get_workflow(wf_id)?
+                    .context(format!("Workflow '{}' not found", wf_id))?;
+
+                let orch = self.workflow_orchestrator(Some(&run.workspace_root));
+                orch.approve_integration(wf_id, approval_id, actor, reason)
+                    .await?;
+
+                self.notify(
+                    "notification/workflow_state_changed",
+                    Some(serde_json::json!({
+                        "workflow_id": wf_id,
+                        "approval_id": approval_id,
+                        "action": "approved",
+                        "actor": actor,
+                    })),
+                );
+
+                Ok(serde_json::json!({
+                    "success": true,
+                    "workflow_id": wf_id,
+                    "approval_id": approval_id,
+                    "status": "approved",
+                }))
+            }
+
+            "workflow/reject" => {
+                let wf_id = params
+                    .get("workflow_id")
+                    .or_else(|| params.get("id"))
+                    .and_then(|v| v.as_str())
+                    .context("Missing 'workflow_id'")?;
+                let approval_id = params
+                    .get("approval_id")
+                    .or_else(|| params.get("task_id"))
+                    .and_then(|v| v.as_str())
+                    .context("Missing 'approval_id'")?;
+                let actor = params
+                    .get("actor")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("app-server-rpc");
+                let reason = params
+                    .get("reason")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Rejected via App Server RPC");
+
+                let store = self.storage.workflow_store();
+                let run = store
+                    .get_workflow(wf_id)?
+                    .context(format!("Workflow '{}' not found", wf_id))?;
+
+                let orch = self.workflow_orchestrator(Some(&run.workspace_root));
+                orch.reject_integration(wf_id, approval_id, actor, Some(reason))
+                    .await?;
+
+                self.notify(
+                    "notification/workflow_state_changed",
+                    Some(serde_json::json!({
+                        "workflow_id": wf_id,
+                        "approval_id": approval_id,
+                        "action": "rejected",
+                        "actor": actor,
+                        "reason": reason,
+                    })),
+                );
+
+                Ok(serde_json::json!({
+                    "success": true,
+                    "workflow_id": wf_id,
+                    "approval_id": approval_id,
+                    "status": "rejected",
+                }))
+            }
+
+            "workflow/approvals" => {
+                let wf_id = params
+                    .get("workflow_id")
+                    .or_else(|| params.get("id"))
+                    .and_then(|v| v.as_str())
+                    .context("Missing 'workflow_id'")?;
+                let store = self.storage.workflow_store();
+                let approvals = store.list_approvals(wf_id)?;
+                Ok(serde_json::to_value(approvals)?)
+            }
+
             "speculative/evaluations" => {
                 if let Some(wf_id) = params.get("workflow_id").and_then(|v| v.as_str()) {
                     let store = self.storage.workflow_store();
@@ -1987,22 +2090,14 @@ impl AppServer {
 
                 let orch = self.workflow_orchestrator(Some(std::path::Path::new(ws_str)));
                 let executor: Option<Arc<dyn m31a_agent_engine::speculative::CandidateExecutor>> =
-                    if let (Some(client), Some(tools)) =
-                        (orch.base_client().cloned(), orch.tools().cloned())
-                    {
-                        let hooks = Some(self.hooks.clone());
-                        Some(Arc::new(
-                            m31a_agent_engine::speculative::AgentEngineCandidateExecutor::new(
-                                client,
-                                tools,
-                                self.storage.clone(),
-                                orch.exec_policy().cloned().unwrap_or_default(),
-                                hooks,
-                            ),
-                        ))
-                    } else {
-                        None
-                    };
+                    m31a_agent_engine::speculative::create_candidate_executor(
+                        orch.base_client().cloned(),
+                        orch.tools().cloned(),
+                        Some(self.storage.clone()),
+                        orch.exec_policy().cloned(),
+                        Some(self.hooks.clone()),
+                    )
+                    .ok();
 
                 let options = m31a_agent_engine::speculative::SpeculateOptions {
                     workspace_root: std::path::PathBuf::from(ws_str),

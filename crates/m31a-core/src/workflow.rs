@@ -401,9 +401,12 @@ pub struct TaskExecutionContext {
     pub worker_id: String,
     pub attempt_id: u32,
     pub lease_expires_at_epoch_ms: i64,
+    pub workflow_cancellation_token: tokio_util::sync::CancellationToken,
+    pub task_cancellation_token: tokio_util::sync::CancellationToken,
     pub cancellation_token: tokio_util::sync::CancellationToken,
     pub deadline_epoch_ms: Option<i64>,
     pub workspace_root: PathBuf,
+    pub isolation_strategy: WorkspaceIsolationStrategy,
     pub correlation_id: String,
 }
 
@@ -786,6 +789,54 @@ pub struct WorkflowArtifact {
     pub size_bytes: u64,
     pub mime_type: String,
     pub created_at_epoch_ms: i64,
+}
+
+/// Durable approval status for an integration request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkflowApprovalStatus {
+    Pending,
+    Approved,
+    Rejected,
+    Cancelled,
+}
+
+impl WorkflowApprovalStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Approved => "approved",
+            Self::Rejected => "rejected",
+            Self::Cancelled => "cancelled",
+        }
+    }
+
+    #[allow(clippy::should_implement_trait)]
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "pending" => Some(Self::Pending),
+            "approved" => Some(Self::Approved),
+            "rejected" => Some(Self::Rejected),
+            "cancelled" => Some(Self::Cancelled),
+            _ => None,
+        }
+    }
+}
+
+/// Durable human approval record for workflow integration.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkflowApprovalRequest {
+    pub id: String,
+    pub workflow_id: String,
+    pub task_id: String,
+    pub attempt_id: u32,
+    pub change_set_hash: String,
+    pub patch_preview: Option<String>,
+    pub status: WorkflowApprovalStatus,
+    pub requested_at_epoch_ms: i64,
+    pub decided_at_epoch_ms: Option<i64>,
+    pub decision_actor: Option<String>,
+    pub decision_reason: Option<String>,
 }
 
 #[cfg(test)]

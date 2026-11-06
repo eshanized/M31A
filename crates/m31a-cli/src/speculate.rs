@@ -6,8 +6,8 @@
 use anyhow::Result;
 use colored::Colorize;
 use m31a_agent_engine::speculative::{
-    AgentEngineCandidateExecutor, CandidateExecutor, SpeculateOptions, SpeculativeArena,
-    SpeculativeBranchConfig,
+    CandidateExecutor, SpeculateOptions, SpeculativeArena, SpeculativeBranchConfig,
+    create_candidate_executor,
 };
 use m31a_core::Config;
 use m31a_execpolicy::ExecPolicy;
@@ -118,15 +118,14 @@ pub async fn run_speculate_mode(opts: SpeculateCliOptions) -> Result<()> {
 
     let executor: Option<Arc<dyn CandidateExecutor>> =
         if let (Some(client), Some(storage)) = (provider_client, opts.storage.as_ref()) {
-            let tools = ToolRegistry::new();
-            let exec_policy = ExecPolicy::standard();
-            Some(Arc::new(AgentEngineCandidateExecutor::new(
-                client,
-                tools,
-                storage.clone(),
-                exec_policy,
+            create_candidate_executor(
+                Some(client),
+                Some(ToolRegistry::new()),
+                Some(storage.clone()),
+                Some(ExecPolicy::standard()),
                 None,
-            )))
+            )
+            .ok()
         } else {
             println!(
                 "  {}",

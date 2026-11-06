@@ -228,18 +228,21 @@ pub fn get_method_metadata(method: &str) -> Option<MethodMetadata> {
         | "workflow/events"
         | "workflow/artifacts"
         | "workflow/task"
+        | "workflow/approvals"
         | "speculative/evaluations" => Some(MethodMetadata {
             requires_target_resource: false,
             mutates_workspace: false,
             external_side_effects: false,
             is_public: false,
         }),
-        "workflow/resume" | "workflow/cancel" => Some(MethodMetadata {
-            requires_target_resource: false,
-            mutates_workspace: true,
-            external_side_effects: true,
-            is_public: false,
-        }),
+        "workflow/resume" | "workflow/cancel" | "workflow/approve" | "workflow/reject" => {
+            Some(MethodMetadata {
+                requires_target_resource: false,
+                mutates_workspace: true,
+                external_side_effects: true,
+                is_public: false,
+            })
+        }
 
         _ => None,
     }

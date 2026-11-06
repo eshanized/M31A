@@ -338,7 +338,8 @@ pub use user_verification::{
 pub use watcher::{FileWatcherEvent, WatchPath, WorkspaceWatcher};
 pub use websocket_auth::{WebsocketAuthCliMode, WebsocketAuthPolicy, constant_time_eq_32};
 pub use workflow::{
-    WorkflowArtifact, WorkflowEvent, WorkflowEventType, WorkflowPlan, WorkflowRun, WorkflowState,
-    WorkflowTask, WorkflowTaskStatus, WorkspaceIsolationStrategy,
+    WorkflowApprovalRequest, WorkflowApprovalStatus, WorkflowArtifact, WorkflowEvent,
+    WorkflowEventType, WorkflowPlan, WorkflowRun, WorkflowState, WorkflowTask, WorkflowTaskStatus,
+    WorkspaceIsolationStrategy,
 };
 pub use worktree::{ManagedWorktree, WorktreeManager};

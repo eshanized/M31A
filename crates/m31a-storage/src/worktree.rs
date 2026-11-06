@@ -334,7 +334,8 @@ impl WorktreeManager {
         Ok(modified)
     }
 
-    /// Checks if a git repository directory has uncommitted tracked or untracked changes.
+    /// Checks if a git repository directory has uncommitted tracked or untracked changes,
+    /// ignoring internal `.m31a` metadata/worktree directories.
     pub fn is_dirty(&self, repo_path: &Path) -> Result<bool> {
         let output = Command::new("git")
             .current_dir(repo_path)
@@ -345,7 +346,15 @@ impl WorktreeManager {
             return Err(anyhow!("git status failed"));
         }
         let stdout = String::from_utf8_lossy(&output.stdout);
-        Ok(!stdout.trim().is_empty())
+        let has_dirty = stdout.lines().any(|line| {
+            let path_part = line.get(3..).unwrap_or("").trim();
+            !path_part.is_empty()
+                && !path_part.starts_with(".m31a")
+                && !path_part.starts_with(".git")
+                && !path_part.starts_with("artifacts")
+                && !path_part.starts_with("target")
+        });
+        Ok(has_dirty)
     }
 
     /// Evaluates whether a patch diff from a child worktree can be cleanly applied

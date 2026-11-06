@@ -18,7 +18,8 @@ pub use delta_batcher::DeltaBatcher;
 pub use dispatcher::{AuthoritativeToolDispatcher, CodeModeDispatcherBridge, DispatchContext};
 pub use history_normalizer::normalize_tool_history;
 pub use integration::{
-    FileSnapshot, IntegrationOutcome, IntegrationRequest, WorkflowIntegrationService,
+    FileSnapshot, IntegrationOutcome, IntegrationRequest, RollbackResult,
+    WorkflowIntegrationService, compute_change_set_hash,
 };
 pub use oscillation::{OscillationAlert, OscillationDetector, OscillationKind};
 pub use speculative::{

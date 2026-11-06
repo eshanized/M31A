@@ -92,6 +92,43 @@ pub enum WorkflowCommands {
         #[arg(long = "json", help = "Output artifacts as JSON")]
         json: bool,
     },
+
+    #[command(about = "Approve a pending workflow integration request")]
+    Approve {
+        #[arg(help = "Workflow identifier")]
+        workflow_id: String,
+
+        #[arg(help = "Approval request identifier")]
+        approval_id: String,
+
+        #[arg(long = "actor", help = "Actor approving the request")]
+        actor: Option<String>,
+
+        #[arg(long = "json", help = "Output result as JSON")]
+        json: bool,
+    },
+
+    #[command(about = "Reject a pending workflow integration request")]
+    Reject {
+        #[arg(help = "Workflow identifier")]
+        workflow_id: String,
+
+        #[arg(help = "Approval request identifier")]
+        approval_id: String,
+
+        #[arg(long = "actor", help = "Actor rejecting the request")]
+        actor: Option<String>,
+
+        #[arg(
+            long = "reason",
+            default_value = "Rejected by operator via CLI",
+            help = "Rejection rationale"
+        )]
+        reason: String,
+
+        #[arg(long = "json", help = "Output result as JSON")]
+        json: bool,
+    },
 }
 
 pub async fn run_workflow_mode(
@@ -408,6 +445,71 @@ pub async fn run_workflow_mode(
                         a.file_path.display()
                     );
                 }
+            }
+        }
+
+        WorkflowCommands::Approve {
+            workflow_id,
+            approval_id,
+            actor,
+            json,
+        } => {
+            let act = actor.as_deref().unwrap_or("cli-operator");
+            orchestrator
+                .approve_integration(&workflow_id, &approval_id, act, None)
+                .await?;
+
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "status": "approved",
+                        "workflow_id": workflow_id,
+                        "approval_id": approval_id,
+                        "actor": act,
+                    })
+                );
+            } else {
+                println!(
+                    "{} Approved integration request {} for workflow {}",
+                    "✔".green().bold(),
+                    approval_id.bright_yellow(),
+                    workflow_id.cyan().bold()
+                );
+            }
+        }
+
+        WorkflowCommands::Reject {
+            workflow_id,
+            approval_id,
+            actor,
+            reason,
+            json,
+        } => {
+            let act = actor.as_deref().unwrap_or("cli-operator");
+            orchestrator
+                .reject_integration(&workflow_id, &approval_id, act, Some(&reason))
+                .await?;
+
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "status": "rejected",
+                        "workflow_id": workflow_id,
+                        "approval_id": approval_id,
+                        "actor": act,
+                        "reason": reason,
+                    })
+                );
+            } else {
+                println!(
+                    "{} Rejected integration request {} for workflow {} ({})",
+                    "✖".red().bold(),
+                    approval_id.bright_yellow(),
+                    workflow_id.cyan().bold(),
+                    reason.dimmed()
+                );
             }
         }
     }

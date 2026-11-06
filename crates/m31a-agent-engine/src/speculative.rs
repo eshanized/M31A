@@ -274,6 +274,63 @@ pub fn parse_porcelain_path(line: &str) -> Option<String> {
     }
 }
 
+/// Robust parser for git porcelain v1 -z output.
+/// Handles NUL-delimited records, whitespace, unicode, and git renames (R/C entries contain 2 paths).
+pub fn parse_porcelain_z(raw: &[u8]) -> Vec<String> {
+    let mut files = Vec::new();
+    let mut iter = raw.split(|&b| b == 0);
+    while let Some(entry) = iter.next() {
+        if entry.is_empty() {
+            continue;
+        }
+        // Entry starts with status characters: e.g. " M path", "?? path", "R  new_path"
+        if entry.len() >= 3 {
+            let status_x = entry[0];
+            let is_rename = status_x == b'R' || status_x == b'C';
+            let path_bytes = if entry.len() > 3 { &entry[3..] } else { b"" };
+            if let Ok(path_str) = std::str::from_utf8(path_bytes) {
+                let trimmed = path_str.trim();
+                if !trimmed.is_empty() && !files.contains(&trimmed.to_string()) {
+                    files.push(trimmed.to_string());
+                }
+            }
+            if is_rename {
+                // Next NUL-terminated record in -z mode is the original path; consume and record it
+                if let Some(orig_bytes) = iter.next()
+                    && let Ok(orig_str) = std::str::from_utf8(orig_bytes)
+                {
+                    let trimmed_orig = orig_str.trim();
+                    if !trimmed_orig.is_empty() && !files.contains(&trimmed_orig.to_string()) {
+                        files.push(trimmed_orig.to_string());
+                    }
+                }
+            }
+        }
+    }
+    files
+}
+
+/// Shared factory constructor for CandidateExecutor across CLI, App Server, and Workflow.
+/// Fails closed if required dependencies are missing.
+pub fn create_candidate_executor(
+    base_client: Option<ProviderClient>,
+    tools: Option<ToolRegistry>,
+    storage: Option<Storage>,
+    exec_policy: Option<ExecPolicy>,
+    hooks: Option<Arc<HookRuntime>>,
+) -> Result<Arc<dyn CandidateExecutor>> {
+    let client = base_client
+        .ok_or_else(|| anyhow!("ProviderClient is required to construct CandidateExecutor"))?;
+    let tools =
+        tools.ok_or_else(|| anyhow!("ToolRegistry is required to construct CandidateExecutor"))?;
+    let storage =
+        storage.ok_or_else(|| anyhow!("Storage is required to construct CandidateExecutor"))?;
+    let policy = exec_policy.unwrap_or_else(ExecPolicy::standard);
+    Ok(Arc::new(AgentEngineCandidateExecutor::new(
+        client, tools, storage, policy, hooks,
+    )))
+}
+
 pub struct AgentEngineCandidateExecutor {
     base_client: ProviderClient,
     tools: ToolRegistry,
@@ -389,35 +446,59 @@ impl CandidateExecutor for AgentEngineCandidateExecutor {
                 .any(|a| a.join(".git").exists())
                 || ctx.workspace_root.join(".git").exists()
             {
-                if let Ok(output) = Command::new("git")
+                let status_res = Command::new("git")
                     .current_dir(&ctx.workspace_root)
-                    .args(["status", "--porcelain"])
-                    .output()
-                {
-                    let stdout = String::from_utf8_lossy(&output.stdout);
-                    for line in stdout.lines() {
-                        if let Some(path) = parse_porcelain_path(line)
-                            && !modified_files.contains(&path)
-                        {
-                            modified_files.push(path);
+                    .args(["status", "--porcelain=v1", "-z"])
+                    .output();
+                match status_res {
+                    Ok(output) => {
+                        if !output.status.success() {
+                            warn!(
+                                code = ?output.status.code(),
+                                "git status --porcelain=v1 -z returned non-zero exit code"
+                            );
+                        } else {
+                            let discovered = parse_porcelain_z(&output.stdout);
+                            for path in discovered {
+                                if !modified_files.contains(&path) {
+                                    modified_files.push(path);
+                                }
+                            }
                         }
+                    }
+                    Err(e) => {
+                        warn!(err = %e, "Failed executing git status");
                     }
                 }
 
                 // Add untracked files intent-to-add so git diff captures them
-                let _ = Command::new("git")
+                let add_res = Command::new("git")
                     .current_dir(&ctx.workspace_root)
                     .args(["add", "-N", "."])
                     .output();
+                if let Ok(add_out) = add_res
+                    && !add_out.status.success()
+                {
+                    warn!(code = ?add_out.status.code(), "git add -N . returned non-zero code");
+                }
 
-                if let Ok(output) = Command::new("git")
+                let diff_res = Command::new("git")
                     .current_dir(&ctx.workspace_root)
                     .args(["diff", "HEAD"])
-                    .output()
-                {
-                    let diff = String::from_utf8_lossy(&output.stdout).to_string();
-                    if !diff.trim().is_empty() {
-                        patch_content = Some(diff);
+                    .output();
+                match diff_res {
+                    Ok(output) => {
+                        if !output.status.success() {
+                            warn!(code = ?output.status.code(), "git diff HEAD returned non-zero code");
+                        } else {
+                            let diff = String::from_utf8_lossy(&output.stdout).to_string();
+                            if !diff.trim().is_empty() {
+                                patch_content = Some(diff);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        warn!(err = %e, "Failed executing git diff");
                     }
                 }
             }
@@ -802,6 +883,10 @@ impl SpeculativeArena {
                         skip_dirty_check: false,
                         skip_verification: false,
                         verification_timeout: Some(Duration::from_secs(30)),
+                        workflow_id: None,
+                        task_id: None,
+                        attempt_id: None,
+                        expected_change_set_hash: None,
                     };
 
                     let outcome = svc.integrate(&req).await.unwrap_or_else(|e| {
@@ -811,6 +896,7 @@ impl SpeculativeArena {
                             approval_granted: true,
                             patch_applied: false,
                             verification_passed: false,
+                            commit_completed: false,
                             rollback_performed: false,
                             commit_sha: None,
                             modified_files: Vec::new(),
@@ -1029,24 +1115,29 @@ impl SpeculativeArena {
         if sandbox.is_worktree && modified_files.is_empty() {
             if let Ok(output) = Command::new("git")
                 .current_dir(&sandbox.path)
-                .args(["status", "--porcelain"])
+                .args(["status", "--porcelain=v1", "-z"])
                 .output()
+                && output.status.success()
             {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                for line in stdout.lines() {
-                    if let Some(path) = parse_porcelain_path(line)
-                        && !modified_files.contains(&path)
-                    {
+                let discovered = parse_porcelain_z(&output.stdout);
+                for path in discovered {
+                    if !modified_files.contains(&path) {
                         modified_files.push(path);
                     }
                 }
             }
+
+            let _ = Command::new("git")
+                .current_dir(&sandbox.path)
+                .args(["add", "-N", "."])
+                .output();
 
             if patch_content.is_empty()
                 && let Ok(output) = Command::new("git")
                     .current_dir(&sandbox.path)
                     .args(["diff", "HEAD"])
                     .output()
+                && output.status.success()
             {
                 let diff = String::from_utf8_lossy(&output.stdout).to_string();
                 if !diff.trim().is_empty() {

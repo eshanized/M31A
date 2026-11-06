@@ -4,8 +4,9 @@
 use anyhow::{Context, Result, anyhow, bail};
 use chrono::Utc;
 use m31a_core::workflow::{
-    WorkflowArtifact, WorkflowEvent, WorkflowEventType, WorkflowPlan, WorkflowRun, WorkflowState,
-    WorkflowTask, WorkflowTaskStatus, WorkspaceIsolationStrategy,
+    WorkflowApprovalRequest, WorkflowApprovalStatus, WorkflowArtifact, WorkflowEvent,
+    WorkflowEventType, WorkflowPlan, WorkflowRun, WorkflowState, WorkflowTask, WorkflowTaskStatus,
+    WorkspaceIsolationStrategy,
 };
 use rusqlite::{Connection, params};
 use sha2::{Digest, Sha256};
@@ -295,6 +296,25 @@ impl WorkflowStore {
             }
         }
 
+        // Promote any pending tasks whose dependencies are already satisfied to 'ready'
+        tx.execute(
+            r#"
+            UPDATE workflow_tasks
+            SET status = 'ready'
+            WHERE workflow_id = ?1
+              AND status = 'pending'
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM workflow_task_dependencies d
+                  JOIN workflow_tasks dep ON dep.workflow_id = d.workflow_id AND dep.id = d.depends_on_task_id
+                  WHERE d.workflow_id = ?1
+                    AND d.task_id = workflow_tasks.id
+                    AND dep.status != 'completed'
+              )
+            "#,
+            params![plan.workflow_id],
+        )?;
+
         tx.commit()?;
         Ok(())
     }
@@ -542,8 +562,27 @@ impl WorkflowStore {
         error: Option<&str>,
     ) -> Result<()> {
         let mut conn = self.conn.lock().unwrap();
-        let tx = conn.transaction()?;
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let now = Utc::now().timestamp_millis();
+
+        // 1. Verify workflow exists and is active
+        let wf_state: String = match tx.query_row(
+            "SELECT state FROM workflows WHERE id = ?1",
+            params![workflow_id],
+            |row| row.get(0),
+        ) {
+            Ok(s) => s,
+            Err(rusqlite::Error::QueryReturnedNoRows) => {
+                bail!("Workflow '{workflow_id}' not found");
+            }
+            Err(e) => return Err(e.into()),
+        };
+
+        if matches!(wf_state.as_str(), "completed" | "failed" | "cancelled") {
+            bail!(
+                "Cannot update task '{task_id}' result: workflow '{workflow_id}' is in terminal state '{wf_state}'"
+            );
+        }
 
         let started_at: Option<i64> = if status == WorkflowTaskStatus::Running {
             Some(now)
@@ -718,9 +757,11 @@ impl WorkflowStore {
         }
 
         let mut conn = self.conn.lock().unwrap();
-        let tx = conn.transaction()?;
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let now = Utc::now().timestamp_millis();
-        let lease_expires = now + lease_duration_ms;
+        let lease_expires = now
+            .checked_add(lease_duration_ms)
+            .ok_or_else(|| anyhow!("Timestamp overflow for lease expiration"))?;
 
         // 1. Verify workflow exists and is active
         let wf_state: String = match tx.query_row(
@@ -757,9 +798,10 @@ impl WorkflowStore {
             })?;
             for r in active_rows {
                 let (paths_json, isolation) = r?;
-                if isolation != "worktree"
-                    && let Ok(paths) = serde_json::from_str::<Vec<PathBuf>>(&paths_json)
-                {
+                if isolation != "worktree" {
+                    let paths: Vec<PathBuf> = serde_json::from_str(&paths_json).map_err(|e| {
+                        anyhow!("Failed to parse active task declared_write_paths_json: {e}")
+                    })?;
                     for p in paths {
                         active_write_paths.insert(p);
                     }
@@ -774,7 +816,7 @@ impl WorkflowStore {
             FROM workflow_tasks t
             WHERE t.workflow_id = ?1
               AND t.id = ?2
-              AND t.status IN ('ready', 'retry_pending', 'pending')
+              AND t.status IN ('ready', 'retry_pending')
               AND NOT EXISTS (
                   SELECT 1
                   FROM workflow_task_dependencies d
@@ -790,7 +832,7 @@ impl WorkflowStore {
             SELECT t.id, t.attempt_id, t.declared_write_paths_json, t.workspace_isolation
             FROM workflow_tasks t
             WHERE t.workflow_id = ?1
-              AND t.status IN ('ready', 'retry_pending', 'pending')
+              AND t.status IN ('ready', 'retry_pending')
               AND NOT EXISTS (
                   SELECT 1
                   FROM workflow_task_dependencies d
@@ -830,7 +872,8 @@ impl WorkflowStore {
                 selected = Some((id, attempt));
                 break;
             }
-            let paths: Vec<PathBuf> = serde_json::from_str(&write_paths_json).unwrap_or_default();
+            let paths: Vec<PathBuf> = serde_json::from_str(&write_paths_json)
+                .map_err(|e| anyhow!("Failed to parse candidate write_paths_json: {e}"))?;
             let has_conflict = paths.iter().any(|p| active_write_paths.contains(p));
             if !has_conflict {
                 selected = Some((id, attempt));
@@ -840,7 +883,9 @@ impl WorkflowStore {
 
         let mut claimed_task_id = None;
         if let Some((ref id, current_attempt)) = selected {
-            let next_attempt = current_attempt + 1;
+            let next_attempt = current_attempt
+                .checked_add(1)
+                .ok_or_else(|| anyhow!("Attempt ID overflow"))?;
             let rows_updated = tx.execute(
                 r#"
                 UPDATE workflow_tasks
@@ -897,7 +942,7 @@ impl WorkflowStore {
     }
 
     /// Extends a worker's lease on an active task attempt.
-    /// Fails closed if lease expired or attempt_id was fenced.
+    /// Fails closed if lease expired, attempt_id was fenced, or workflow is terminal.
     pub fn renew_task_lease(
         &self,
         workflow_id: &str,
@@ -909,11 +954,31 @@ impl WorkflowStore {
         if lease_duration_ms <= 0 {
             bail!("Lease duration must be positive (got {lease_duration_ms}ms)");
         }
-        let conn = self.conn.lock().unwrap();
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let now = Utc::now().timestamp_millis();
-        let lease_expires = now + lease_duration_ms;
+        let lease_expires = now
+            .checked_add(lease_duration_ms)
+            .ok_or_else(|| anyhow!("Timestamp overflow for lease expiration"))?;
 
-        let rows = conn.execute(
+        // Verify workflow exists and is active
+        let wf_state: String = match tx.query_row(
+            "SELECT state FROM workflows WHERE id = ?1",
+            params![workflow_id],
+            |row| row.get(0),
+        ) {
+            Ok(s) => s,
+            Err(rusqlite::Error::QueryReturnedNoRows) => {
+                bail!("Workflow '{workflow_id}' not found");
+            }
+            Err(e) => return Err(e.into()),
+        };
+
+        if matches!(wf_state.as_str(), "completed" | "failed" | "cancelled") {
+            return Ok(false);
+        }
+
+        let rows = tx.execute(
             r#"
             UPDATE workflow_tasks
             SET lease_expires_at_epoch_ms = ?1
@@ -934,6 +999,7 @@ impl WorkflowStore {
             ],
         )?;
 
+        tx.commit()?;
         Ok(rows > 0)
     }
 
@@ -941,12 +1007,12 @@ impl WorkflowStore {
     /// recovering them to `retry_pending` if within retry budget or `failed` if exceeded.
     pub fn reconcile_stale_tasks(&self, workflow_id: &str, now_epoch_ms: i64) -> Result<usize> {
         let mut conn = self.conn.lock().unwrap();
-        let tx = conn.transaction()?;
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
 
         // Find stale tasks
         let mut stmt = tx.prepare(
             r#"
-            SELECT id, retry_count, max_retries
+            SELECT id, retry_count, max_retries, attempt_id, worker_id
             FROM workflow_tasks
             WHERE workflow_id = ?1
               AND status IN ('claimed', 'running', 'verifying')
@@ -955,28 +1021,52 @@ impl WorkflowStore {
             "#,
         )?;
 
-        let stale: Vec<(String, u32, u32)> = stmt
+        let stale: Vec<(String, u32, u32, u32, Option<String>)> = stmt
             .query_map(params![workflow_id, now_epoch_ms], |row| {
-                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
             })?
-            .filter_map(|r| r.ok())
-            .collect();
+            .collect::<Result<Vec<_>, _>>()?;
         drop(stmt);
 
         let count = stale.len();
-        for (id, retries, max_retries) in stale {
+        for (id, retries, max_retries, attempt_id, worker_id) in stale {
             if retries < max_retries {
+                let next_retries = retries.checked_add(1).unwrap_or(retries + 1);
                 tx.execute(
                     r#"
                     UPDATE workflow_tasks
                     SET status = 'retry_pending',
                         worker_id = NULL,
-                        retry_count = retry_count + 1,
+                        retry_count = ?3,
                         lease_expires_at_epoch_ms = NULL,
                         error_details = 'Worker lease expired; task rescheduled for retry'
-                    WHERE workflow_id = ?1 AND id = ?2
+                    WHERE workflow_id = ?1 AND id = ?2 AND attempt_id = ?4
                     "#,
-                    params![workflow_id, id],
+                    params![workflow_id, id, next_retries, attempt_id],
+                )?;
+
+                let event_id = format!("evt-stale-retry-{}", Uuid::new_v4().simple());
+                let payload = serde_json::json!({
+                    "expired_worker_id": worker_id,
+                    "attempt_id": attempt_id,
+                    "retry_count": next_retries,
+                    "max_retries": max_retries,
+                })
+                .to_string();
+                tx.execute(
+                    r#"
+                    INSERT INTO workflow_events (
+                        id, workflow_id, task_id, agent_id, event_type,
+                        timestamp_epoch_ms, correlation_id, payload_json, schema_version
+                    ) VALUES (?1, ?2, ?3, NULL, 'task_retried', ?4, NULL, ?5, 1)
+                    "#,
+                    params![event_id, workflow_id, id, now_epoch_ms, payload],
                 )?;
             } else {
                 tx.execute(
@@ -987,9 +1077,28 @@ impl WorkflowStore {
                         lease_expires_at_epoch_ms = NULL,
                         completed_at_epoch_ms = ?3,
                         error_details = 'Worker lease expired and max retries exceeded'
-                    WHERE workflow_id = ?1 AND id = ?2
+                    WHERE workflow_id = ?1 AND id = ?2 AND attempt_id = ?4
                     "#,
-                    params![workflow_id, id, now_epoch_ms],
+                    params![workflow_id, id, now_epoch_ms, attempt_id],
+                )?;
+
+                let event_id = format!("evt-stale-failed-{}", Uuid::new_v4().simple());
+                let payload = serde_json::json!({
+                    "expired_worker_id": worker_id,
+                    "attempt_id": attempt_id,
+                    "retry_count": retries,
+                    "max_retries": max_retries,
+                    "reason": "Worker lease expired and max retries exceeded",
+                })
+                .to_string();
+                tx.execute(
+                    r#"
+                    INSERT INTO workflow_events (
+                        id, workflow_id, task_id, agent_id, event_type,
+                        timestamp_epoch_ms, correlation_id, payload_json, schema_version
+                    ) VALUES (?1, ?2, ?3, NULL, 'task_failed', ?4, NULL, ?5, 1)
+                    "#,
+                    params![event_id, workflow_id, id, now_epoch_ms, payload],
                 )?;
             }
         }
@@ -1129,6 +1238,177 @@ impl WorkflowStore {
             list.push(r?);
         }
         Ok(list)
+    }
+
+    /// Persists a new approval request.
+    pub fn create_approval_request(&self, req: &WorkflowApprovalRequest) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            r#"
+            INSERT INTO workflow_approvals (
+                id, workflow_id, task_id, attempt_id, change_set_hash,
+                patch_preview, status, requested_at_epoch_ms,
+                decided_at_epoch_ms, decision_actor, decision_reason
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+            "#,
+            params![
+                req.id,
+                req.workflow_id,
+                req.task_id,
+                req.attempt_id,
+                req.change_set_hash,
+                req.patch_preview,
+                req.status.as_str(),
+                req.requested_at_epoch_ms,
+                req.decided_at_epoch_ms,
+                req.decision_actor,
+                req.decision_reason,
+            ],
+        )
+        .context("Failed inserting workflow approval into SQLite")?;
+        Ok(())
+    }
+
+    /// Fetches an approval request by ID.
+    pub fn get_approval_request(
+        &self,
+        approval_id: &str,
+    ) -> Result<Option<WorkflowApprovalRequest>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT id, workflow_id, task_id, attempt_id, change_set_hash,
+                   patch_preview, status, requested_at_epoch_ms,
+                   decided_at_epoch_ms, decision_actor, decision_reason
+            FROM workflow_approvals
+            WHERE id = ?1
+            "#,
+        )?;
+        let mut rows = stmt.query(params![approval_id])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(Self::parse_approval_row(row)?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Fetches the pending approval request for a workflow task attempt.
+    pub fn get_pending_approval(
+        &self,
+        workflow_id: &str,
+        task_id: &str,
+        attempt_id: u32,
+    ) -> Result<Option<WorkflowApprovalRequest>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT id, workflow_id, task_id, attempt_id, change_set_hash,
+                   patch_preview, status, requested_at_epoch_ms,
+                   decided_at_epoch_ms, decision_actor, decision_reason
+            FROM workflow_approvals
+            WHERE workflow_id = ?1 AND task_id = ?2 AND attempt_id = ?3 AND status = 'pending'
+            ORDER BY requested_at_epoch_ms DESC
+            LIMIT 1
+            "#,
+        )?;
+        let mut rows = stmt.query(params![workflow_id, task_id, attempt_id])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(Self::parse_approval_row(row)?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Lists all approvals for a workflow.
+    pub fn list_approvals(&self, workflow_id: &str) -> Result<Vec<WorkflowApprovalRequest>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT id, workflow_id, task_id, attempt_id, change_set_hash,
+                   patch_preview, status, requested_at_epoch_ms,
+                   decided_at_epoch_ms, decision_actor, decision_reason
+            FROM workflow_approvals
+            WHERE workflow_id = ?1
+            ORDER BY requested_at_epoch_ms ASC
+            "#,
+        )?;
+        let rows = stmt.query_map(params![workflow_id], |row| {
+            Self::parse_approval_row(row)
+                .map_err(|e| rusqlite::Error::ToSqlConversionFailure(e.into()))
+        })?;
+        let mut list = Vec::new();
+        for r in rows {
+            list.push(r?);
+        }
+        Ok(list)
+    }
+
+    /// Records an approval decision for an approval request.
+    /// Returns true if updated, false if not found or already decided.
+    pub fn record_approval_decision(
+        &self,
+        approval_id: &str,
+        status: WorkflowApprovalStatus,
+        actor: &str,
+        reason: Option<&str>,
+    ) -> Result<bool> {
+        let conn = self.conn.lock().unwrap();
+        let now = Utc::now().timestamp_millis();
+        let rows = conn.execute(
+            r#"
+            UPDATE workflow_approvals
+            SET status = ?1,
+                decided_at_epoch_ms = ?2,
+                decision_actor = ?3,
+                decision_reason = ?4
+            WHERE id = ?5 AND status = 'pending'
+            "#,
+            params![status.as_str(), now, actor, reason, approval_id],
+        )?;
+        Ok(rows > 0)
+    }
+
+    /// Verifies if a patch change-set hash is approved for the current workflow, task, and attempt.
+    pub fn is_patch_approved(
+        &self,
+        workflow_id: &str,
+        task_id: &str,
+        attempt_id: u32,
+        change_set_hash: &str,
+    ) -> Result<bool> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT 1 FROM workflow_approvals
+            WHERE workflow_id = ?1
+              AND task_id = ?2
+              AND attempt_id = ?3
+              AND change_set_hash = ?4
+              AND status = 'approved'
+            LIMIT 1
+            "#,
+        )?;
+        let mut rows = stmt.query(params![workflow_id, task_id, attempt_id, change_set_hash])?;
+        Ok(rows.next()?.is_some())
+    }
+
+    fn parse_approval_row(row: &rusqlite::Row) -> Result<WorkflowApprovalRequest> {
+        let status_str: String = row.get(6)?;
+        let status = WorkflowApprovalStatus::from_str(&status_str)
+            .unwrap_or(WorkflowApprovalStatus::Pending);
+        Ok(WorkflowApprovalRequest {
+            id: row.get(0)?,
+            workflow_id: row.get(1)?,
+            task_id: row.get(2)?,
+            attempt_id: row.get(3)?,
+            change_set_hash: row.get(4)?,
+            patch_preview: row.get(5)?,
+            status,
+            requested_at_epoch_ms: row.get(7)?,
+            decided_at_epoch_ms: row.get(8)?,
+            decision_actor: row.get(9)?,
+            decision_reason: row.get(10)?,
+        })
     }
 
     /// Stores artifact content into an immutable content-addressed file in `base_dir` and saves its metadata.

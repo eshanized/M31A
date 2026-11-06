@@ -21,6 +21,7 @@ use m31a_tools::registry::ToolRegistry;
 use m31a_verify::AutonomousVerifier;
 use m31a_verify::runners::ProjectRunner;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -254,10 +255,21 @@ impl WorkflowOrchestrator {
 
     /// Generates a validated task DAG plan for a workflow based on workspace analysis and objective requirements.
     pub async fn generate_plan(&self, workflow_id: &str) -> Result<WorkflowPlan> {
+        self.generate_plan_revision(workflow_id, None).await
+    }
+
+    /// Generates a plan with an optional explicit revision number.
+    pub async fn generate_plan_revision(
+        &self,
+        workflow_id: &str,
+        target_revision: Option<u32>,
+    ) -> Result<WorkflowPlan> {
         let run = self
             .store()
             .get_workflow(workflow_id)?
             .ok_or_else(|| anyhow!("Workflow '{workflow_id}' not found"))?;
+
+        let plan_rev = target_revision.unwrap_or(run.plan_revision);
 
         self.store()
             .update_workflow_state(workflow_id, WorkflowState::Planning)?;
@@ -286,7 +298,7 @@ impl WorkflowOrchestrator {
         tasks.push(WorkflowTask {
             id: format!("{}-t1-analysis", workflow_id),
             workflow_id: workflow_id.to_string(),
-            plan_revision: run.plan_revision,
+            plan_revision: plan_rev,
             task_kind: m31a_core::workflow::WorkflowTaskKind::Analysis,
             name: "Repository & Architectural Analysis".to_string(),
             description: format!(
@@ -327,7 +339,7 @@ impl WorkflowOrchestrator {
             tasks.push(WorkflowTask {
                 id: format!("{}-t2-speculate", workflow_id),
                 workflow_id: workflow_id.to_string(),
-                plan_revision: run.plan_revision,
+                plan_revision: plan_rev,
                 task_kind: m31a_core::workflow::WorkflowTaskKind::Speculative,
                 name: "Speculative Solution Arena".to_string(),
                 description: format!(
@@ -367,7 +379,7 @@ impl WorkflowOrchestrator {
             tasks.push(WorkflowTask {
                 id: format!("{}-t3-integrate", workflow_id),
                 workflow_id: workflow_id.to_string(),
-                plan_revision: run.plan_revision,
+                plan_revision: plan_rev,
                 task_kind: m31a_core::workflow::WorkflowTaskKind::Integration,
                 name: "Winning Solution Integration".to_string(),
                 description: "Integrate verified winning speculative candidate into primary workspace with conflict checks".to_string(),
@@ -403,7 +415,7 @@ impl WorkflowOrchestrator {
             tasks.push(WorkflowTask {
                 id: format!("{}-t2-implement", workflow_id),
                 workflow_id: workflow_id.to_string(),
-                plan_revision: run.plan_revision,
+                plan_revision: plan_rev,
                 task_kind: m31a_core::workflow::WorkflowTaskKind::Implementation,
                 name: "Core Implementation".to_string(),
                 description: format!("Implement required changes for objective: '{}'", objective),
@@ -446,7 +458,7 @@ impl WorkflowOrchestrator {
         tasks.push(WorkflowTask {
             id: format!("{}-t4-final-verification", workflow_id),
             workflow_id: workflow_id.to_string(),
-            plan_revision: run.plan_revision,
+            plan_revision: plan_rev,
             task_kind: m31a_core::workflow::WorkflowTaskKind::Verification,
             name: "Final Verification & Security Audit".to_string(),
             description: "Execute test suite, audit semantic blast radius, and generate final delivery report".to_string(),
@@ -487,7 +499,7 @@ impl WorkflowOrchestrator {
 
         let plan = WorkflowPlan {
             workflow_id: workflow_id.to_string(),
-            revision: run.plan_revision,
+            revision: plan_rev,
             rationale: rationale.to_string(),
             created_at_epoch_ms: now,
             tasks,
@@ -514,6 +526,62 @@ impl WorkflowOrchestrator {
                 "tasks_count": plan.tasks.len(),
                 "speculative": is_speculation_valuable,
                 "rationale": rationale,
+            })
+            .to_string(),
+            schema_version: 1,
+        })?;
+
+        Ok(plan)
+    }
+
+    /// Generates a new plan revision for a failed or partially completed workflow if within budget.
+    pub async fn replan_workflow(
+        &self,
+        workflow_id: &str,
+        failure_reason: &str,
+    ) -> Result<WorkflowPlan> {
+        let run = self
+            .store()
+            .get_workflow(workflow_id)?
+            .ok_or_else(|| anyhow!("Workflow '{workflow_id}' not found"))?;
+
+        let config: WorkflowExecutionConfig =
+            serde_json::from_str(&run.configuration_json).unwrap_or_default();
+
+        if run.plan_revision >= config.max_replan_attempts {
+            bail!(
+                "Cannot replan workflow '{}': reached maximum plan revisions ({} >= {})",
+                workflow_id,
+                run.plan_revision,
+                config.max_replan_attempts
+            );
+        }
+
+        let new_revision = run.plan_revision + 1;
+        self.store()
+            .update_workflow_state(workflow_id, WorkflowState::Planning)?;
+
+        let mut plan = self
+            .generate_plan_revision(workflow_id, Some(new_revision))
+            .await?;
+        plan.rationale = format!(
+            "Replanning revision {} due to: {}",
+            new_revision, failure_reason
+        );
+        self.store().save_workflow_plan(&plan)?;
+
+        self.store().record_event(&WorkflowEvent {
+            id: format!("evt-replan-{}", Uuid::new_v4().simple()),
+            workflow_id: workflow_id.to_string(),
+            task_id: None,
+            agent_id: None,
+            event_type: WorkflowEventType::PlanGenerated,
+            timestamp_epoch_ms: Utc::now().timestamp_millis(),
+            correlation_id: None,
+            payload_json: serde_json::json!({
+                "revision": new_revision,
+                "replan_reason": failure_reason,
+                "tasks_count": plan.tasks.len(),
             })
             .to_string(),
             schema_version: 1,
@@ -594,18 +662,217 @@ impl WorkflowOrchestrator {
 
         let now = Utc::now().timestamp_millis();
         if wave_result.all_passed {
-            // Final integration verification on primary workspace
-            let final_check =
-                AutonomousVerifier::verify_check(&repo_root, Duration::from_secs(30)).await;
-            let check_passed = final_check.map(|c| c.success).unwrap_or(false);
+            // 12-POINT COMPLETION INTEGRITY GATE
+            let mut gate_passed = true;
+            let mut gate_failure_reason = None;
 
-            if check_passed {
+            // Point 1: Workflow cancellation token check
+            if wf_cancel_token.is_cancelled() {
+                gate_passed = false;
+                gate_failure_reason =
+                    Some("Workflow was cancelled prior to final completion gate".to_string());
+            }
+
+            // Point 2: Storage state check
+            if gate_passed {
+                let live_state = self.store().get_workflow(workflow_id)?.map(|w| w.state);
+                if matches!(
+                    live_state,
+                    Some(WorkflowState::Cancelled)
+                        | Some(WorkflowState::Failed)
+                        | Some(WorkflowState::AwaitingApproval)
+                ) {
+                    gate_passed = false;
+                    gate_failure_reason = Some(format!(
+                        "Workflow entered non-runnable state: {:?}",
+                        live_state
+                    ));
+                }
+            }
+
+            // Point 3, 4, 5, 6, 7: Tasks completion, count, fencing, and execution results
+            if gate_passed {
+                let all_tasks = self.store().list_tasks(workflow_id)?;
+                if all_tasks.len() != plan.tasks.len() {
+                    gate_passed = false;
+                    gate_failure_reason = Some(format!(
+                        "Task count mismatch: expected {} from plan, found {}",
+                        plan.tasks.len(),
+                        all_tasks.len()
+                    ));
+                } else {
+                    for t in &all_tasks {
+                        if t.status != WorkflowTaskStatus::Completed {
+                            gate_passed = false;
+                            gate_failure_reason = Some(format!(
+                                "Task '{}' is in non-completed status '{:?}'",
+                                t.id, t.status
+                            ));
+                            break;
+                        }
+                        if t.execution_result_json.is_none() {
+                            gate_passed = false;
+                            gate_failure_reason = Some(format!(
+                                "Task '{}' lacks persisted execution result evidence",
+                                t.id
+                            ));
+                            break;
+                        }
+                        if let Some(ref res_json) = t.execution_result_json {
+                            match serde_json::from_str::<m31a_core::workflow::TaskExecutionResult>(
+                                res_json,
+                            ) {
+                                Ok(res) => {
+                                    if res.status != WorkflowTaskStatus::Completed {
+                                        gate_passed = false;
+                                        gate_failure_reason = Some(format!(
+                                            "Task '{}' execution result reports non-completed status '{:?}'",
+                                            t.id, res.status
+                                        ));
+                                        break;
+                                    }
+                                }
+                                Err(e) => {
+                                    gate_passed = false;
+                                    gate_failure_reason = Some(format!(
+                                        "Task '{}' has corrupted execution result JSON: {e}",
+                                        t.id
+                                    ));
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Point 8 & 9: Artifact existence and SHA-256 integrity verification
+            if gate_passed {
+                let artifacts = self.store().list_artifacts(workflow_id)?;
+                for art in &artifacts {
+                    if !art.file_path.exists() {
+                        gate_passed = false;
+                        gate_failure_reason = Some(format!(
+                            "Artifact '{}' missing on disk at {}",
+                            art.name,
+                            art.file_path.display()
+                        ));
+                        break;
+                    }
+                    match fs::read(&art.file_path) {
+                        Ok(bytes) => {
+                            let mut hasher = Sha256::new();
+                            hasher.update(&bytes);
+                            let computed_sha256 = format!("{:x}", hasher.finalize());
+                            if computed_sha256 != art.content_sha256 {
+                                gate_passed = false;
+                                gate_failure_reason = Some(format!(
+                                    "Artifact '{}' SHA-256 mismatch: recorded {}, computed {}",
+                                    art.name, art.content_sha256, computed_sha256
+                                ));
+                                break;
+                            }
+                        }
+                        Err(e) => {
+                            gate_passed = false;
+                            gate_failure_reason = Some(format!(
+                                "Failed reading artifact '{}' at {}: {e}",
+                                art.name,
+                                art.file_path.display()
+                            ));
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Point 10: Final AutonomousVerifier::verify_check
+            if gate_passed {
+                let check_res =
+                    AutonomousVerifier::verify_check(&repo_root, Duration::from_secs(30)).await;
+                let check_passed = check_res.as_ref().map(|c| c.success).unwrap_or(false);
+                if !check_passed {
+                    gate_passed = false;
+                    let diag = check_res
+                        .ok()
+                        .map(|c| {
+                            c.diagnostics
+                                .into_iter()
+                                .map(|d| d.message)
+                                .collect::<Vec<_>>()
+                                .join("; ")
+                        })
+                        .filter(|s| !s.is_empty())
+                        .unwrap_or_else(|| "Unknown compiler error".into());
+                    gate_failure_reason =
+                        Some(format!("Final workspace compiler check failed: {diag}"));
+                }
+            }
+
+            // Point 11: Final AutonomousVerifier::verify_tests (if project has tests)
+            if gate_passed && repo_root.join("Cargo.toml").exists() {
+                let test_res =
+                    AutonomousVerifier::verify_tests(&repo_root, Duration::from_secs(45)).await;
+                let test_passed = test_res.as_ref().map(|c| c.success).unwrap_or(false);
+                if !test_passed {
+                    gate_passed = false;
+                    let diag = test_res
+                        .ok()
+                        .map(|c| {
+                            c.diagnostics
+                                .into_iter()
+                                .map(|d| d.message)
+                                .collect::<Vec<_>>()
+                                .join("; ")
+                        })
+                        .filter(|s| !s.is_empty())
+                        .unwrap_or_else(|| "Test suite failure".into());
+                    gate_failure_reason =
+                        Some(format!("Final workspace test verification failed: {diag}"));
+                }
+            }
+
+            // Point 12: Final CodebaseSafetyGate audit
+            if gate_passed {
+                let modified = self
+                    .store()
+                    .list_tasks(workflow_id)?
+                    .into_iter()
+                    .filter_map(|t| t.execution_result_json)
+                    .filter_map(|j| {
+                        serde_json::from_str::<m31a_core::workflow::TaskExecutionResult>(&j).ok()
+                    })
+                    .flat_map(|r| r.modified_files)
+                    .map(PathBuf::from)
+                    .collect::<Vec<_>>();
+
+                match m31a_verify::CodebaseSafetyGate::audit_workspace_changes(
+                    &repo_root,
+                    &modified,
+                    &[],
+                ) {
+                    Ok(audit) => {
+                        if audit.verdict == m31a_verify::SafetyGateVerdict::Blocked {
+                            gate_passed = false;
+                            gate_failure_reason = Some(
+                                "Final CodebaseSafetyGate audit blocked workspace changes"
+                                    .to_string(),
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        warn!(err = %e, "Final safety audit check error (non-fatal if non-rust codebase)");
+                    }
+                }
+            }
+
+            if gate_passed {
                 self.store()
                     .update_workflow_state(workflow_id, WorkflowState::Completed)?;
                 run.state = WorkflowState::Completed;
                 run.completed_at_epoch_ms = Some(now);
 
-                // Store delivery summary artifact
+                // Store delivery summary artifact - fail closed if write fails
                 let summary_json = serde_json::json!({
                     "workflow_id": workflow_id,
                     "objective": run.objective,
@@ -615,7 +882,7 @@ impl WorkflowOrchestrator {
                     "timestamp": now,
                 });
 
-                let _ = self.store().store_artifact_file(
+                self.store().store_artifact_file(
                     &repo_root,
                     workflow_id,
                     None,
@@ -623,7 +890,7 @@ impl WorkflowOrchestrator {
                     "summary",
                     summary_json.to_string().as_bytes(),
                     "application/json",
-                );
+                )?;
 
                 self.store().record_event(&WorkflowEvent {
                     id: format!("evt-{}", Uuid::new_v4().simple()),
@@ -637,20 +904,34 @@ impl WorkflowOrchestrator {
                     schema_version: 1,
                 })?;
 
-                info!(workflow_id = %workflow_id, "Workflow completed successfully");
+                info!(workflow_id = %workflow_id, "Workflow completed successfully passing 12-point integrity gate");
+            } else {
+                let reason = gate_failure_reason
+                    .unwrap_or_else(|| "Final workspace verification check failed".into());
+                self.store()
+                    .update_workflow_state(workflow_id, WorkflowState::Failed)?;
+                run.state = WorkflowState::Failed;
+                run.cancellation_reason = Some(reason.clone());
+                error!(workflow_id = %workflow_id, reason = %reason, "Final verification failed");
+            }
+        } else {
+            let current_wf = self
+                .store()
+                .get_workflow(workflow_id)?
+                .unwrap_or_else(|| run.clone());
+            if current_wf.state == WorkflowState::AwaitingApproval {
+                run.state = WorkflowState::AwaitingApproval;
+                info!(
+                    workflow_id = %workflow_id,
+                    "Workflow paused: awaiting integration approval"
+                );
             } else {
                 self.store()
                     .update_workflow_state(workflow_id, WorkflowState::Failed)?;
                 run.state = WorkflowState::Failed;
-                run.cancellation_reason = Some("Final workspace verification check failed".into());
-                error!(workflow_id = %workflow_id, "Final verification failed");
+                run.cancellation_reason = Some("One or more workflow waves failed".into());
+                error!(workflow_id = %workflow_id, "Workflow execution failed");
             }
-        } else {
-            self.store()
-                .update_workflow_state(workflow_id, WorkflowState::Failed)?;
-            run.state = WorkflowState::Failed;
-            run.cancellation_reason = Some("One or more workflow waves failed".into());
-            error!(workflow_id = %workflow_id, "Workflow execution failed");
         }
 
         // Clean up active workflow registrations
@@ -843,7 +1124,7 @@ impl WorkflowOrchestrator {
                         VerificationStatus::Failed
                     };
                     tests_status = VerificationStatus::NotExecuted;
-                    safety_status = VerificationStatus::Passed;
+                    safety_status = VerificationStatus::NotExecuted;
                     review_status = VerificationStatus::NotApplicable;
 
                     let analysis_report = serde_json::json!({
@@ -857,7 +1138,7 @@ impl WorkflowOrchestrator {
                         "status": "analysis_completed",
                     });
 
-                    let _ = self.store().store_artifact_file(
+                    self.store().store_artifact_file(
                         ws_root,
                         &wf_id,
                         Some(&task_id),
@@ -865,7 +1146,7 @@ impl WorkflowOrchestrator {
                         "analysis",
                         analysis_report.to_string().as_bytes(),
                         "application/json",
-                    );
+                    )?;
                 }
 
                 m31a_core::workflow::WorkflowTaskKind::Speculative => {
@@ -881,23 +1162,14 @@ impl WorkflowOrchestrator {
                     .await;
 
                     let executor: Option<Arc<dyn crate::speculative::CandidateExecutor>> =
-                        if let (Some(client), Some(tools), Some(policy)) = (
-                            self.base_client.as_ref(),
-                            self.tools.as_ref(),
-                            self.exec_policy.as_ref(),
-                        ) {
-                            Some(Arc::new(
-                                crate::speculative::AgentEngineCandidateExecutor::new(
-                                    client.clone(),
-                                    tools.clone(),
-                                    self.storage.clone(),
-                                    policy.clone(),
-                                    None,
-                                ),
-                            ))
-                        } else {
-                            None
-                        };
+                        crate::speculative::create_candidate_executor(
+                            self.base_client.clone(),
+                            self.tools.clone(),
+                            Some(self.storage.clone()),
+                            self.exec_policy.clone(),
+                            None,
+                        )
+                        .ok();
 
                     let opts = SpeculateOptions {
                         workspace_root: run.workspace_root.clone(),
@@ -924,7 +1196,7 @@ impl WorkflowOrchestrator {
                                     patch_content = Some(winner.patch_content.clone());
 
                                     let rep_bytes = serde_json::to_vec_pretty(&report)?;
-                                    let _ = self.store().store_artifact_file(
+                                    self.store().store_artifact_file(
                                         &run.workspace_root,
                                         &wf_id,
                                         Some(&task_id),
@@ -932,10 +1204,10 @@ impl WorkflowOrchestrator {
                                         "report",
                                         &rep_bytes,
                                         "application/json",
-                                    );
+                                    )?;
 
                                     if !winner.patch_content.is_empty() {
-                                        let _ = self.store().store_artifact_file(
+                                        self.store().store_artifact_file(
                                             &run.workspace_root,
                                             &wf_id,
                                             Some(&task_id),
@@ -943,7 +1215,7 @@ impl WorkflowOrchestrator {
                                             "patch",
                                             winner.patch_content.as_bytes(),
                                             "text/x-diff",
-                                        );
+                                        )?;
                                     }
                                     build_status = VerificationStatus::Passed;
                                     tests_status = VerificationStatus::Passed;
@@ -985,53 +1257,134 @@ impl WorkflowOrchestrator {
                             error_msg =
                                 Some("Winning patch diff is empty; cannot integrate".into());
                         } else {
-                            let svc = WorkflowIntegrationService::new();
-                            let req = IntegrationRequest {
-                                workspace_root: run.workspace_root.clone(),
-                                patch_content: diff_text.clone(),
-                                source_label: format!("workflow-task-{}", task_id),
-                                commit_message: Some(format!(
-                                    "feat(workflow): integrate task {}",
-                                    task_id
-                                )),
-                                require_approval: config.require_approval_for_integration,
-                                is_approved: !config.require_approval_for_integration,
-                                author_role: Some(task.assigned_role.clone()),
-                                skip_dirty_check: false,
-                                skip_verification: false,
-                                verification_timeout: Some(Duration::from_secs(30)),
-                            };
+                            let change_set_hash =
+                                crate::integration::compute_change_set_hash(&diff_text);
+                            let is_approved = self.store().is_patch_approved(
+                                &wf_id,
+                                &task_id,
+                                claimed_task.attempt_id,
+                                &change_set_hash,
+                            )?;
 
-                            let v_start = Instant::now();
-                            match svc.integrate(&req).await {
-                                Ok(outcome) => {
-                                    verif_duration_ms = v_start.elapsed().as_millis() as u64;
-                                    if outcome.success {
-                                        for p in outcome.modified_files {
-                                            modified_files.push(p.to_string_lossy().to_string());
-                                        }
-                                        patch_content = Some(diff_text);
-                                        build_status = VerificationStatus::Passed;
-                                        tests_status = VerificationStatus::Passed;
-                                        safety_status = VerificationStatus::Passed;
-                                        review_status = VerificationStatus::Passed;
-                                    } else {
-                                        success = false;
-                                        error_msg = outcome.error.or(Some(outcome.summary));
-                                        build_status = if outcome.verification_passed {
-                                            VerificationStatus::Passed
+                            if config.require_approval_for_integration && !is_approved {
+                                let pending_req = self.store().get_pending_approval(
+                                    &wf_id,
+                                    &task_id,
+                                    claimed_task.attempt_id,
+                                )?;
+                                let approval_id = if let Some(p) = pending_req {
+                                    p.id
+                                } else {
+                                    let new_id = format!("appr-{}", Uuid::new_v4().simple());
+                                    let preview =
+                                        diff_text.lines().take(40).collect::<Vec<_>>().join("\n");
+                                    let app_req = m31a_core::workflow::WorkflowApprovalRequest {
+                                        id: new_id.clone(),
+                                        workflow_id: wf_id.clone(),
+                                        task_id: task_id.clone(),
+                                        attempt_id: claimed_task.attempt_id,
+                                        change_set_hash: change_set_hash.clone(),
+                                        patch_preview: Some(preview),
+                                        status:
+                                            m31a_core::workflow::WorkflowApprovalStatus::Pending,
+                                        requested_at_epoch_ms: Utc::now().timestamp_millis(),
+                                        decided_at_epoch_ms: None,
+                                        decision_actor: None,
+                                        decision_reason: None,
+                                    };
+                                    self.store().create_approval_request(&app_req)?;
+                                    new_id
+                                };
+
+                                self.store().record_event(&WorkflowEvent {
+                                    id: format!("evt-{}", Uuid::new_v4().simple()),
+                                    workflow_id: wf_id.clone(),
+                                    task_id: Some(task_id.clone()),
+                                    agent_id: None,
+                                    event_type: WorkflowEventType::ApprovalRequested,
+                                    timestamp_epoch_ms: Utc::now().timestamp_millis(),
+                                    correlation_id: None,
+                                    payload_json: serde_json::json!({
+                                        "approval_id": approval_id,
+                                        "attempt_id": claimed_task.attempt_id,
+                                        "change_set_hash": change_set_hash,
+                                    })
+                                    .to_string(),
+                                    schema_version: 1,
+                                })?;
+
+                                self.store().update_task_status(
+                                    &wf_id,
+                                    &task_id,
+                                    WorkflowTaskStatus::NeedsApproval,
+                                    None,
+                                )?;
+                                self.store().update_workflow_state(
+                                    &wf_id,
+                                    WorkflowState::AwaitingApproval,
+                                )?;
+
+                                success = false;
+                                error_msg =
+                                    Some("Integration blocked: human approval required".into());
+                                build_status = VerificationStatus::Pending;
+                                tests_status = VerificationStatus::Pending;
+                                safety_status = VerificationStatus::Pending;
+                                review_status = VerificationStatus::Pending;
+                            } else {
+                                let svc = WorkflowIntegrationService::new();
+                                let req = IntegrationRequest {
+                                    workspace_root: run.workspace_root.clone(),
+                                    patch_content: diff_text.clone(),
+                                    source_label: format!("workflow-task-{}", task_id),
+                                    commit_message: Some(format!(
+                                        "feat(workflow): integrate task {}",
+                                        task_id
+                                    )),
+                                    require_approval: config.require_approval_for_integration,
+                                    is_approved: true,
+                                    author_role: Some(task.assigned_role.clone()),
+                                    skip_dirty_check: false,
+                                    skip_verification: false,
+                                    verification_timeout: Some(Duration::from_secs(30)),
+                                    workflow_id: Some(wf_id.clone()),
+                                    task_id: Some(task_id.clone()),
+                                    attempt_id: Some(claimed_task.attempt_id),
+                                    expected_change_set_hash: Some(change_set_hash),
+                                };
+
+                                let v_start = Instant::now();
+                                match svc.integrate(&req).await {
+                                    Ok(outcome) => {
+                                        verif_duration_ms = v_start.elapsed().as_millis() as u64;
+                                        if outcome.success {
+                                            for p in outcome.modified_files {
+                                                modified_files
+                                                    .push(p.to_string_lossy().to_string());
+                                            }
+                                            patch_content = Some(diff_text);
+                                            build_status = VerificationStatus::Passed;
+                                            tests_status = VerificationStatus::Passed;
+                                            safety_status = VerificationStatus::Passed;
+                                            review_status = VerificationStatus::Passed;
                                         } else {
-                                            VerificationStatus::Failed
-                                        };
-                                        tests_status = build_status;
-                                        safety_status = VerificationStatus::Passed;
-                                        review_status = VerificationStatus::Failed;
+                                            success = false;
+                                            error_msg = outcome.error.or(Some(outcome.summary));
+                                            build_status = if outcome.verification_passed {
+                                                VerificationStatus::Passed
+                                            } else {
+                                                VerificationStatus::Failed
+                                            };
+                                            tests_status = build_status;
+                                            safety_status = VerificationStatus::Passed;
+                                            review_status = VerificationStatus::Failed;
+                                        }
                                     }
-                                }
-                                Err(e) => {
-                                    success = false;
-                                    error_msg = Some(format!("Integration error: {e}"));
-                                    build_status = VerificationStatus::Failed;
+                                    Err(e) => {
+                                        success = false;
+                                        error_msg = Some(format!("Integration error: {e}"));
+                                        build_status = VerificationStatus::Failed;
+                                    }
                                 }
                             }
                         }
@@ -1049,7 +1402,11 @@ impl WorkflowOrchestrator {
                         task_id = %task_id,
                         "Executing implementation task via child agent"
                     );
-                    if let Some(ref rt) = self.runtime {
+                    if task_cancel_token.is_cancelled() {
+                        success = false;
+                        error_msg = Some("Task cancelled prior to agent spawning".into());
+                        build_status = VerificationStatus::Blocked;
+                    } else if let Some(ref rt) = self.runtime {
                         use m31a_tools::agent_runtime::AgentRuntime;
                         let req = m31a_tools::agent_runtime::AgentSpawnRequest {
                             role_name: task.assigned_role.clone(),
@@ -1079,65 +1436,208 @@ impl WorkflowOrchestrator {
                                     .or_default()
                                     .push(spawned.agent_id.clone());
 
-                                let wait_outcomes = rt
-                                    .wait_agents(
+                                if task_cancel_token.is_cancelled() {
+                                    let _ = rt.terminate_tree(&spawned.agent_id).await;
+                                    success = false;
+                                    error_msg =
+                                        Some("Task cancelled immediately after agent spawn".into());
+                                    build_status = VerificationStatus::Blocked;
+                                } else {
+                                    let wait_fut = rt.wait_agents(
                                         std::slice::from_ref(&spawned.agent_id),
-                                        Some(45_000),
-                                    )
-                                    .await;
-                                match wait_outcomes {
-                                    Ok(outcomes) => {
-                                        let outcome = outcomes.into_iter().next().unwrap_or(
-                                            m31a_tools::agent_runtime::AgentWaitOutcome {
-                                                agent_id: spawned.agent_id.clone(),
-                                                status: "timeout".to_string(),
-                                                answer: None,
-                                            },
-                                        );
+                                        Some(config.task_timeout_seconds * 1000),
+                                    );
+                                    let wait_outcomes = tokio::select! {
+                                        _ = task_cancel_token.cancelled() => {
+                                            warn!(agent_id = %spawned.agent_id, "Task cancel token fired while waiting for agent; terminating tree");
+                                            let _ = rt.terminate_tree(&spawned.agent_id).await;
+                                            Err(anyhow!("Task cancelled while awaiting child agent"))
+                                        }
+                                        res = wait_fut => res,
+                                    };
+                                    match wait_outcomes {
+                                        Ok(outcomes) => {
+                                            let outcome = outcomes.into_iter().next().unwrap_or(
+                                                m31a_tools::agent_runtime::AgentWaitOutcome {
+                                                    agent_id: spawned.agent_id.clone(),
+                                                    status: "timeout".to_string(),
+                                                    answer: None,
+                                                },
+                                            );
 
-                                        match outcome.status.as_str() {
-                                            "completed" | "integration_pending" => {
-                                                match rt
-                                                    .integrate_agent(&spawned.agent_id, None)
-                                                    .await
-                                                {
-                                                    Ok(summary) => {
-                                                        info!(agent_id = %spawned.agent_id, summary = %summary, "Child agent integrated successfully");
-                                                        if let Some(ref path) =
-                                                            spawned.worktree_path
+                                            match outcome.status.as_str() {
+                                                "completed" | "integration_pending" => {
+                                                    let diff =
+                                                        if let Some(ref mgr) = self.worktree_mgr {
+                                                            let worktrees = mgr
+                                                                .list_worktrees()
+                                                                .unwrap_or_default();
+                                                            if let Some(wt) =
+                                                                worktrees.iter().find(|w| {
+                                                                    w.thread_id == spawned.agent_id
+                                                                })
+                                                            {
+                                                                mgr.export_worktree_diff(
+                                                                    &wt.worktree_path,
+                                                                    &wt.head_sha,
+                                                                )
+                                                                .unwrap_or_default()
+                                                            } else {
+                                                                String::new()
+                                                            }
+                                                        } else {
+                                                            String::new()
+                                                        };
+
+                                                    let change_set_hash =
+                                                        crate::integration::compute_change_set_hash(
+                                                            &diff,
+                                                        );
+                                                    let is_approved = if diff.trim().is_empty() {
+                                                        true
+                                                    } else {
+                                                        self.store().is_patch_approved(
+                                                            &wf_id,
+                                                            &task_id,
+                                                            claimed_task.attempt_id,
+                                                            &change_set_hash,
+                                                        )?
+                                                    };
+
+                                                    if config.require_approval_for_integration
+                                                        && !diff.trim().is_empty()
+                                                        && !is_approved
+                                                    {
+                                                        let pending_req =
+                                                            self.store().get_pending_approval(
+                                                                &wf_id,
+                                                                &task_id,
+                                                                claimed_task.attempt_id,
+                                                            )?;
+                                                        let approval_id = if let Some(p) =
+                                                            pending_req
                                                         {
-                                                            modified_files.push(
-                                                                path.to_string_lossy().to_string(),
+                                                            p.id
+                                                        } else {
+                                                            let new_id = format!(
+                                                                "appr-{}",
+                                                                Uuid::new_v4().simple()
                                                             );
-                                                        }
-                                                        build_status = VerificationStatus::Passed;
-                                                        tests_status = VerificationStatus::Passed;
-                                                        safety_status = VerificationStatus::Passed;
-                                                        review_status = VerificationStatus::Passed;
-                                                    }
-                                                    Err(e) => {
+                                                            let preview = diff
+                                                                .lines()
+                                                                .take(40)
+                                                                .collect::<Vec<_>>()
+                                                                .join("\n");
+                                                            let app_req = m31a_core::workflow::WorkflowApprovalRequest {
+                                                                id: new_id.clone(),
+                                                                workflow_id: wf_id.clone(),
+                                                                task_id: task_id.clone(),
+                                                                attempt_id: claimed_task.attempt_id,
+                                                                change_set_hash: change_set_hash.clone(),
+                                                                patch_preview: Some(preview),
+                                                                status: m31a_core::workflow::WorkflowApprovalStatus::Pending,
+                                                                requested_at_epoch_ms: Utc::now().timestamp_millis(),
+                                                                decided_at_epoch_ms: None,
+                                                                decision_actor: None,
+                                                                decision_reason: None,
+                                                            };
+                                                            self.store().create_approval_request(
+                                                                &app_req,
+                                                            )?;
+                                                            new_id
+                                                        };
+
+                                                        self.store().record_event(&WorkflowEvent {
+                                                            id: format!("evt-{}", Uuid::new_v4().simple()),
+                                                            workflow_id: wf_id.clone(),
+                                                            task_id: Some(task_id.clone()),
+                                                            agent_id: Some(spawned.agent_id.clone()),
+                                                            event_type: WorkflowEventType::ApprovalRequested,
+                                                            timestamp_epoch_ms: Utc::now().timestamp_millis(),
+                                                            correlation_id: None,
+                                                            payload_json: serde_json::json!({
+                                                                "approval_id": approval_id,
+                                                                "attempt_id": claimed_task.attempt_id,
+                                                                "change_set_hash": change_set_hash,
+                                                            }).to_string(),
+                                                            schema_version: 1,
+                                                        })?;
+
+                                                        self.store().update_task_status(
+                                                            &wf_id,
+                                                            &task_id,
+                                                            WorkflowTaskStatus::NeedsApproval,
+                                                            None,
+                                                        )?;
+                                                        self.store().update_workflow_state(
+                                                            &wf_id,
+                                                            WorkflowState::AwaitingApproval,
+                                                        )?;
+
                                                         success = false;
-                                                        error_msg = Some(format!(
-                                                            "Child agent integration failed: {e}"
-                                                        ));
-                                                        build_status = VerificationStatus::Failed;
+                                                        error_msg = Some("Integration blocked: human approval required".into());
+                                                        build_status = VerificationStatus::Pending;
+                                                        tests_status = VerificationStatus::Pending;
+                                                        safety_status = VerificationStatus::Pending;
+                                                        review_status = VerificationStatus::Pending;
+                                                    } else {
+                                                        match rt
+                                                            .integrate_agent(
+                                                                &spawned.agent_id,
+                                                                None,
+                                                            )
+                                                            .await
+                                                        {
+                                                            Ok(summary) => {
+                                                                info!(agent_id = %spawned.agent_id, summary = %summary, "Child agent integrated successfully");
+                                                                if let Some(ref path) =
+                                                                    spawned.worktree_path
+                                                                {
+                                                                    modified_files.push(
+                                                                        path.to_string_lossy()
+                                                                            .to_string(),
+                                                                    );
+                                                                }
+                                                                patch_content = Some(diff);
+                                                                build_status =
+                                                                    VerificationStatus::Passed;
+                                                                tests_status =
+                                                                    VerificationStatus::Passed;
+                                                                safety_status =
+                                                                    VerificationStatus::Passed;
+                                                                review_status =
+                                                                    VerificationStatus::Passed;
+                                                            }
+                                                            Err(e) => {
+                                                                success = false;
+                                                                error_msg = Some(format!(
+                                                                    "Child agent integration failed: {e}"
+                                                                ));
+                                                                build_status =
+                                                                    VerificationStatus::Failed;
+                                                            }
+                                                        }
                                                     }
                                                 }
-                                            }
-                                            other => {
-                                                success = false;
-                                                error_msg = Some(format!(
-                                                    "Child agent terminated with non-success status '{other}'"
-                                                ));
-                                                build_status = VerificationStatus::Failed;
+                                                other => {
+                                                    success = false;
+                                                    error_msg = Some(format!(
+                                                        "Child agent terminated with non-success status '{other}'"
+                                                    ));
+                                                    build_status = VerificationStatus::Failed;
+                                                    let _ =
+                                                        rt.terminate_tree(&spawned.agent_id).await;
+                                                }
                                             }
                                         }
-                                    }
-                                    Err(e) => {
-                                        success = false;
-                                        error_msg =
-                                            Some(format!("Failed waiting for child agent: {e}"));
-                                        build_status = VerificationStatus::Failed;
+                                        Err(e) => {
+                                            success = false;
+                                            error_msg = Some(format!(
+                                                "Failed waiting for child agent: {e}"
+                                            ));
+                                            build_status = VerificationStatus::Failed;
+                                            let _ = rt.terminate_tree(&spawned.agent_id).await;
+                                        }
                                     }
                                 }
                             }
@@ -1190,14 +1690,42 @@ impl WorkflowOrchestrator {
                         VerificationStatus::Failed
                     };
 
-                    safety_status = VerificationStatus::Passed;
-                    review_status = VerificationStatus::Passed;
+                    let mut mod_paths = Vec::new();
+                    let all_tasks = self.store().list_tasks(&wf_id)?;
+                    for t in &all_tasks {
+                        if let Some(ref rjson) = t.execution_result_json
+                            && let Ok(r) = serde_json::from_str::<
+                                m31a_core::workflow::TaskExecutionResult,
+                            >(rjson)
+                        {
+                            for f in r.modified_files {
+                                mod_paths.push(PathBuf::from(f));
+                            }
+                        }
+                    }
+
+                    let safety_report = m31a_verify::CodebaseSafetyGate::audit_workspace_changes(
+                        &run.workspace_root,
+                        &mod_paths,
+                        &[],
+                    );
+                    let safety_verdict = safety_report
+                        .as_ref()
+                        .map(|r| r.verdict)
+                        .unwrap_or(m31a_verify::SafetyGateVerdict::Passed);
+
+                    safety_status = match safety_verdict {
+                        m31a_verify::SafetyGateVerdict::Blocked => VerificationStatus::Failed,
+                        _ => VerificationStatus::Passed,
+                    };
+                    review_status = VerificationStatus::NotApplicable;
                     verif_duration_ms = v_start.elapsed().as_millis() as u64;
 
-                    if !check_ok || !test_ok {
+                    if !check_ok || !test_ok || safety_status != VerificationStatus::Passed {
                         success = false;
                         error_msg = Some(format!(
-                            "Verification failed (check: {check_ok}, tests: {test_ok})"
+                            "Verification failed (check: {check_ok}, tests: {test_ok}, safety: {:?})",
+                            safety_verdict
                         ));
                     }
                 }
@@ -1261,7 +1789,7 @@ impl WorkflowOrchestrator {
                         "timestamp": Utc::now().timestamp_millis(),
                     });
 
-                    let _ = self.store().store_artifact_file(
+                    self.store().store_artifact_file(
                         &run.workspace_root,
                         &wf_id,
                         Some(&task_id),
@@ -1269,12 +1797,12 @@ impl WorkflowOrchestrator {
                         "delivery",
                         delivery_summary.to_string().as_bytes(),
                         "application/json",
-                    );
+                    )?;
 
-                    build_status = VerificationStatus::Passed;
-                    tests_status = VerificationStatus::Passed;
-                    safety_status = VerificationStatus::Passed;
-                    review_status = VerificationStatus::Passed;
+                    build_status = VerificationStatus::NotApplicable;
+                    tests_status = VerificationStatus::NotApplicable;
+                    safety_status = VerificationStatus::NotApplicable;
+                    review_status = VerificationStatus::NotApplicable;
                 }
             }
             Ok::<(), anyhow::Error>(())
@@ -1300,6 +1828,14 @@ impl WorkflowOrchestrator {
                     }
                 }
             }
+        }
+
+        // If task failed, timed out, or cancelled, terminate any spawned child agent tree immediately
+        if (!success || task_cancel_token.is_cancelled())
+            && let (Some(rt), Some(aid)) = (self.runtime.as_ref(), executed_agent_id.as_ref())
+        {
+            info!(agent_id = %aid, "Terminating child agent tree due to task non-success/timeout/cancellation");
+            let _ = rt.terminate_tree(aid).await;
         }
 
         // Stop the heartbeat guard
@@ -1330,7 +1866,10 @@ impl WorkflowOrchestrator {
         };
 
         let duration_ms = start.elapsed().as_millis() as u64;
-        let final_status = if success && verif_passed {
+        let current_task_status = self.store().get_task(&wf_id, &task_id)?.map(|t| t.status);
+        let final_status = if current_task_status == Some(WorkflowTaskStatus::NeedsApproval) {
+            WorkflowTaskStatus::NeedsApproval
+        } else if success && verif_passed {
             WorkflowTaskStatus::Completed
         } else {
             WorkflowTaskStatus::Failed
@@ -1439,6 +1978,203 @@ impl WorkflowOrchestrator {
 
         // 2. Continue execution
         self.execute_workflow(workflow_id).await
+    }
+
+    /// Approves a pending integration request for a workflow task attempt.
+    /// `target_id` can be either an approval request ID or a task ID.
+    pub async fn approve_integration(
+        &self,
+        workflow_id: &str,
+        target_id: &str,
+        actor: &str,
+        reason: Option<&str>,
+    ) -> Result<()> {
+        let run = self
+            .store()
+            .get_workflow(workflow_id)?
+            .ok_or_else(|| anyhow!("Workflow '{workflow_id}' not found"))?;
+
+        if run.state.is_terminal() {
+            bail!(
+                "Cannot approve integration on terminal workflow '{}'",
+                workflow_id
+            );
+        }
+
+        let (task_id, pending) = if let Ok(Some(app)) = self.store().get_approval_request(target_id)
+        {
+            (app.task_id.clone(), app)
+        } else {
+            let task = self
+                .store()
+                .get_task(workflow_id, target_id)?
+                .ok_or_else(|| {
+                    anyhow!(
+                        "Neither approval nor task '{target_id}' found in workflow '{workflow_id}'"
+                    )
+                })?;
+            let p = self
+                .store()
+                .get_pending_approval(workflow_id, target_id, task.attempt_id)?
+                .ok_or_else(|| {
+                    anyhow!(
+                        "No pending approval request found for task '{target_id}' attempt {}",
+                        task.attempt_id
+                    )
+                })?;
+            (target_id.to_string(), p)
+        };
+
+        let now = Utc::now().timestamp_millis();
+        let updated = self.store().record_approval_decision(
+            &pending.id,
+            m31a_core::workflow::WorkflowApprovalStatus::Approved,
+            actor,
+            reason,
+        )?;
+
+        if !updated {
+            bail!(
+                "Failed to record approval decision for request '{}'",
+                pending.id
+            );
+        }
+
+        self.store().record_event(&WorkflowEvent {
+            id: format!("evt-{}", Uuid::new_v4().simple()),
+            workflow_id: workflow_id.to_string(),
+            task_id: Some(task_id.clone()),
+            agent_id: None,
+            event_type: WorkflowEventType::ApprovalDecisionRecorded,
+            timestamp_epoch_ms: now,
+            correlation_id: None,
+            payload_json: serde_json::json!({
+                "approval_id": pending.id,
+                "decision": "approved",
+                "actor": actor,
+                "reason": reason,
+                "change_set_hash": pending.change_set_hash,
+                "attempt_id": pending.attempt_id,
+            })
+            .to_string(),
+            schema_version: 1,
+        })?;
+
+        // Transition task back to Ready so it can be claimed and executed
+        self.store()
+            .update_task_status(workflow_id, &task_id, WorkflowTaskStatus::Ready, None)?;
+
+        // Transition workflow state back to Ready if currently AwaitingApproval
+        if run.state == WorkflowState::AwaitingApproval {
+            self.store()
+                .update_workflow_state(workflow_id, WorkflowState::Ready)?;
+        }
+
+        info!(
+            workflow_id = %workflow_id,
+            task_id = %task_id,
+            actor = %actor,
+            "Integration approval granted and recorded"
+        );
+
+        Ok(())
+    }
+
+    /// Rejects a pending integration request for a workflow task attempt.
+    /// `target_id` can be either an approval request ID or a task ID.
+    pub async fn reject_integration(
+        &self,
+        workflow_id: &str,
+        target_id: &str,
+        actor: &str,
+        reason: Option<&str>,
+    ) -> Result<()> {
+        let run = self
+            .store()
+            .get_workflow(workflow_id)?
+            .ok_or_else(|| anyhow!("Workflow '{workflow_id}' not found"))?;
+
+        let (task_id, pending) = if let Ok(Some(app)) = self.store().get_approval_request(target_id)
+        {
+            (app.task_id.clone(), app)
+        } else {
+            let task = self
+                .store()
+                .get_task(workflow_id, target_id)?
+                .ok_or_else(|| {
+                    anyhow!(
+                        "Neither approval nor task '{target_id}' found in workflow '{workflow_id}'"
+                    )
+                })?;
+            let p = self
+                .store()
+                .get_pending_approval(workflow_id, target_id, task.attempt_id)?
+                .ok_or_else(|| {
+                    anyhow!(
+                        "No pending approval request found for task '{target_id}' attempt {}",
+                        task.attempt_id
+                    )
+                })?;
+            (target_id.to_string(), p)
+        };
+
+        let now = Utc::now().timestamp_millis();
+        let updated = self.store().record_approval_decision(
+            &pending.id,
+            m31a_core::workflow::WorkflowApprovalStatus::Rejected,
+            actor,
+            reason,
+        )?;
+
+        if !updated {
+            bail!(
+                "Failed to record rejection decision for request '{}'",
+                pending.id
+            );
+        }
+
+        self.store().record_event(&WorkflowEvent {
+            id: format!("evt-{}", Uuid::new_v4().simple()),
+            workflow_id: workflow_id.to_string(),
+            task_id: Some(task_id.clone()),
+            agent_id: None,
+            event_type: WorkflowEventType::ApprovalDecisionRecorded,
+            timestamp_epoch_ms: now,
+            correlation_id: None,
+            payload_json: serde_json::json!({
+                "approval_id": pending.id,
+                "decision": "rejected",
+                "actor": actor,
+                "reason": reason,
+                "change_set_hash": pending.change_set_hash,
+                "attempt_id": pending.attempt_id,
+            })
+            .to_string(),
+            schema_version: 1,
+        })?;
+
+        let rej_reason = reason.unwrap_or("Integration rejected by operator");
+        self.store().update_task_status(
+            workflow_id,
+            &task_id,
+            WorkflowTaskStatus::Failed,
+            Some(&format!("Rejected by {actor}: {rej_reason}")),
+        )?;
+
+        // If workflow was awaiting approval and task failed, transition workflow to Failed
+        if run.state == WorkflowState::AwaitingApproval {
+            self.store()
+                .update_workflow_state(workflow_id, WorkflowState::Failed)?;
+        }
+
+        info!(
+            workflow_id = %workflow_id,
+            task_id = %task_id,
+            actor = %actor,
+            "Integration approval rejected and recorded"
+        );
+
+        Ok(())
     }
 
     /// Cancels a running workflow and all its active tasks and child agent trees.

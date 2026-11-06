@@ -3369,9 +3369,42 @@ pub fn handle_screen_key_event(app: &mut App, key: crossterm::event::KeyEvent) {
         KeyCode::Char('9') => app.switch_screen(crate::screens::Screen::Settings),
         KeyCode::Char('0') => app.switch_screen(crate::screens::Screen::Diagnostics),
         KeyCode::Char('i') => {
-            app.toggle_inspector();
+            if app.current_screen == crate::screens::Screen::Agents {
+                let wf_store = app.storage.workflow_store();
+                if let Ok(workflows) = wf_store.list_workflows(50)
+                    && let Some(wf) = workflows.get(app.screen_selected_index)
+                {
+                    let tasks = wf_store.list_tasks(&wf.id).unwrap_or_default();
+                    let artifacts = wf_store.list_artifacts(&wf.id).unwrap_or_default();
+                    app.provider_status_message = Some(format!(
+                        "Inspection [{}]: {} tasks, {} artifacts, objective: '{}'",
+                        wf.id,
+                        tasks.len(),
+                        artifacts.len(),
+                        wf.objective
+                    ));
+                }
+            } else {
+                app.toggle_inspector();
+            }
         }
         KeyCode::Enter => match app.current_screen {
+            crate::screens::Screen::Agents => {
+                let wf_store = app.storage.workflow_store();
+                if let Ok(workflows) = wf_store.list_workflows(50)
+                    && let Some(wf) = workflows.get(app.screen_selected_index)
+                {
+                    let tasks = wf_store.list_tasks(&wf.id).unwrap_or_default();
+                    let artifacts = wf_store.list_artifacts(&wf.id).unwrap_or_default();
+                    app.provider_status_message = Some(format!(
+                        "Workflow {}: {} tasks, {} artifacts, state: {:?}",
+                        wf.id,
+                        tasks.len(),
+                        artifacts.len(),
+                        wf.state
+                    ));
+                }
+            }
             crate::screens::Screen::Sessions => {
                 if let Ok(threads) = app.storage.list_threads(50)
                     && let Some(t) = threads.get(app.screen_selected_index)
@@ -3511,6 +3544,180 @@ pub fn handle_screen_key_event(app: &mut App, key: crossterm::event::KeyEvent) {
             {
                 let _ = app.storage.delete_thread(&t.id);
                 app.provider_status_message = Some(format!("Deleted session {}", t.id));
+            }
+        }
+        KeyCode::Char('a') => {
+            if app.current_screen == crate::screens::Screen::Agents {
+                let wf_store = app.storage.workflow_store();
+                if let Ok(workflows) = wf_store.list_workflows(50)
+                    && let Some(wf) = workflows.get(app.screen_selected_index)
+                {
+                    if let Ok(approvals) = wf_store.list_approvals(&wf.id)
+                        && let Some(pending) = approvals.iter().find(|a| {
+                            a.status == m31a_core::workflow::WorkflowApprovalStatus::Pending
+                        })
+                    {
+                        let wf_id = wf.id.clone();
+                        let app_id = pending.id.clone();
+                        let storage = app.storage.clone();
+                        let event_tx = app.event_tx.clone();
+                        app.provider_status_message =
+                            Some(format!("Approving integration {}...", app_id));
+                        tokio::spawn(async move {
+                            let orch = m31a_agent_engine::workflow::WorkflowOrchestrator::new(
+                                storage, None, None, None, None,
+                            );
+                            match orch
+                                .approve_integration(&wf_id, &app_id, "tui-operator", None)
+                                .await
+                            {
+                                Ok(()) => {
+                                    let _ = event_tx
+                                        .send(crate::app::TuiEvent::ProviderStatus(format!(
+                                            "Integration {} approved for workflow {}",
+                                            app_id, wf_id
+                                        )))
+                                        .await;
+                                }
+                                Err(e) => {
+                                    let _ = event_tx
+                                        .send(crate::app::TuiEvent::ProviderStatus(format!(
+                                            "Approval failed: {e}"
+                                        )))
+                                        .await;
+                                }
+                            }
+                        });
+                    } else {
+                        app.provider_status_message =
+                            Some("No pending approval for selected workflow".to_string());
+                    }
+                }
+            }
+        }
+        KeyCode::Char('r') => {
+            if app.current_screen == crate::screens::Screen::Agents {
+                let wf_store = app.storage.workflow_store();
+                if let Ok(workflows) = wf_store.list_workflows(50)
+                    && let Some(wf) = workflows.get(app.screen_selected_index)
+                {
+                    if let Ok(approvals) = wf_store.list_approvals(&wf.id)
+                        && let Some(pending) = approvals.iter().find(|a| {
+                            a.status == m31a_core::workflow::WorkflowApprovalStatus::Pending
+                        })
+                    {
+                        let wf_id = wf.id.clone();
+                        let app_id = pending.id.clone();
+                        let storage = app.storage.clone();
+                        let event_tx = app.event_tx.clone();
+                        app.provider_status_message =
+                            Some(format!("Rejecting integration {}...", app_id));
+                        tokio::spawn(async move {
+                            let orch = m31a_agent_engine::workflow::WorkflowOrchestrator::new(
+                                storage, None, None, None, None,
+                            );
+                            match orch
+                                .reject_integration(
+                                    &wf_id,
+                                    &app_id,
+                                    "tui-operator",
+                                    Some("Rejected via TUI"),
+                                )
+                                .await
+                            {
+                                Ok(()) => {
+                                    let _ = event_tx
+                                        .send(crate::app::TuiEvent::ProviderStatus(format!(
+                                            "Integration {} rejected for workflow {}",
+                                            app_id, wf_id
+                                        )))
+                                        .await;
+                                }
+                                Err(e) => {
+                                    let _ = event_tx
+                                        .send(crate::app::TuiEvent::ProviderStatus(format!(
+                                            "Rejection failed: {e}"
+                                        )))
+                                        .await;
+                                }
+                            }
+                        });
+                    } else {
+                        app.provider_status_message =
+                            Some("No pending approval for selected workflow".to_string());
+                    }
+                }
+            }
+        }
+        KeyCode::Char('c') => {
+            if app.current_screen == crate::screens::Screen::Agents {
+                let wf_store = app.storage.workflow_store();
+                if let Ok(workflows) = wf_store.list_workflows(50)
+                    && let Some(wf) = workflows.get(app.screen_selected_index)
+                {
+                    let wf_id = wf.id.clone();
+                    let storage = app.storage.clone();
+                    let event_tx = app.event_tx.clone();
+                    app.provider_status_message = Some(format!("Cancelling workflow {}...", wf_id));
+                    tokio::spawn(async move {
+                        let orch = m31a_agent_engine::workflow::WorkflowOrchestrator::new(
+                            storage, None, None, None, None,
+                        );
+                        match orch
+                            .cancel_workflow(&wf_id, "Cancelled by operator via TUI")
+                            .await
+                        {
+                            Ok(()) => {
+                                let _ = event_tx
+                                    .send(crate::app::TuiEvent::ProviderStatus(format!(
+                                        "Workflow {} cancelled",
+                                        wf_id
+                                    )))
+                                    .await;
+                            }
+                            Err(e) => {
+                                let _ = event_tx
+                                    .send(crate::app::TuiEvent::ProviderStatus(format!(
+                                        "Cancellation failed: {e}"
+                                    )))
+                                    .await;
+                            }
+                        }
+                    });
+                }
+            }
+        }
+        KeyCode::Char('u') if app.current_screen == crate::screens::Screen::Agents => {
+            let wf_store = app.storage.workflow_store();
+            if let Ok(workflows) = wf_store.list_workflows(50)
+                && let Some(wf) = workflows.get(app.screen_selected_index)
+            {
+                let wf_id = wf.id.clone();
+                let storage = app.storage.clone();
+                let event_tx = app.event_tx.clone();
+                app.provider_status_message = Some(format!("Resuming workflow {}...", wf_id));
+                tokio::spawn(async move {
+                    let orch = m31a_agent_engine::workflow::WorkflowOrchestrator::new(
+                        storage, None, None, None, None,
+                    );
+                    match orch.resume_workflow(&wf_id).await {
+                        Ok(resumed) => {
+                            let _ = event_tx
+                                .send(crate::app::TuiEvent::ProviderStatus(format!(
+                                    "Workflow {} resumed ({:?})",
+                                    wf_id, resumed.state
+                                )))
+                                .await;
+                        }
+                        Err(e) => {
+                            let _ = event_tx
+                                .send(crate::app::TuiEvent::ProviderStatus(format!(
+                                    "Resumption failed: {e}"
+                                )))
+                                .await;
+                        }
+                    }
+                });
             }
         }
         _ => {}

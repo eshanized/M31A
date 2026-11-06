@@ -888,6 +888,10 @@ async fn test_approval_gated_integration_blocks_unapproved_integration() {
         skip_dirty_check: true,
         skip_verification: false,
         verification_timeout: Some(Duration::from_secs(30)),
+        workflow_id: None,
+        task_id: None,
+        attempt_id: None,
+        expected_change_set_hash: None,
     };
 
     let outcome_unapproved = service.integrate(&req_unapproved).await.unwrap();
@@ -923,6 +927,10 @@ async fn test_approval_gated_integration_blocks_unapproved_integration() {
         skip_dirty_check: true,
         skip_verification: false,
         verification_timeout: Some(Duration::from_secs(30)),
+        workflow_id: None,
+        task_id: None,
+        attempt_id: None,
+        expected_change_set_hash: None,
     };
 
     let outcome_approved = service

@@ -17,7 +17,7 @@
 //!   `request_user_input` disabled) so they can never deadlock on an
 //!   unanswered interactive oneshot.
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use m31a_core::prompts::{CollaborationMode, SystemPromptBuilder};
 use m31a_core::types::{ChatMessage, Role, SessionMetadata};
@@ -1184,176 +1184,45 @@ impl AgentRuntime for EngineAgentRuntime {
             return Ok("Agent produced no changes; marked as integrated.".to_string());
         }
 
-        // 1. Path validation — reject directory traversal and protected targets
-        m31a_storage::WorktreeManager::validate_patch_paths(&diff)?;
-
-        // 2. Preflight check against parent HEAD
-        if !mgr.git_preflight_check(&diff)? {
-            let err =
-                "Preflight check failed: patch conflicts with parent repository HEAD".to_string();
-            let _ = cell
-                .status_tx
-                .send(AgentRunStatus::IntegrationRejected(err.clone()));
-            return Err(anyhow!(err));
-        }
-
-        // 3. Code review via ReviewEngine
-        let review_report = m31a_review::ReviewEngine::analyze(&diff);
-        if review_report.verdict == m31a_review::ReviewVerdict::RequestChanges {
-            let reasons: Vec<String> = review_report
-                .findings
-                .iter()
-                .filter(|f| {
-                    f.severity == m31a_review::ReviewSeverity::Critical
-                        || f.severity == m31a_review::ReviewSeverity::High
-                })
-                .map(|f| format!("{}: {}", f.title, f.description))
-                .collect();
-            let err = format!(
-                "Integration rejected by Code Review Engine: {}",
-                reasons.join("; ")
-            );
-            let _ = cell
-                .status_tx
-                .send(AgentRunStatus::IntegrationRejected(err.clone()));
-            return Err(anyhow!(err));
-        }
-
-        // 4. Isolated worktree test verification: project detection, formatting, compilation, test execution
-        let test_result = mgr.test_patch_in_isolated_worktree(&diff, |isolated_path| {
-            let is_rust = isolated_path.join("Cargo.toml").exists();
-            let is_node = isolated_path.join("package.json").exists();
-            let is_python = isolated_path.join("pyproject.toml").exists()
-                || isolated_path.join("setup.py").exists()
-                || isolated_path.join("requirements.txt").exists();
-            let is_go = isolated_path.join("go.mod").exists();
-
-            if !is_rust && !is_node && !is_python && !is_go {
-                return Err(anyhow!(
-                    "VerificationIncomplete: unsupported project type; automated verification cannot prove correctness without recognized build manifest (Cargo.toml, package.json, pyproject.toml, or go.mod)"
-                ));
-            }
-
-            fn run_timed_cmd(mut cmd: std::process::Command, label: &str, timeout: std::time::Duration) -> Result<()> {
-                cmd.stdout(std::process::Stdio::piped());
-                cmd.stderr(std::process::Stdio::piped());
-                let mut child = cmd.spawn().with_context(|| format!("Failed to spawn {label}"))?;
-                let stdout = child.stdout.take();
-                let stderr = child.stderr.take();
-                const MAX_CAPTURE: usize = 64 * 1024;
-                let out_handle = std::thread::spawn(move || {
-                    let mut buf = Vec::new();
-                    if let Some(mut r) = stdout {
-                        let mut chunk = [0u8; 4096];
-                        while let Ok(n) = std::io::Read::read(&mut r, &mut chunk) {
-                            if n == 0 { break; }
-                            if buf.len() < MAX_CAPTURE {
-                                let to_copy = n.min(MAX_CAPTURE - buf.len());
-                                buf.extend_from_slice(&chunk[..to_copy]);
-                            }
-                        }
-                    }
-                    buf
-                });
-                let err_handle = std::thread::spawn(move || {
-                    let mut buf = Vec::new();
-                    if let Some(mut r) = stderr {
-                        let mut chunk = [0u8; 4096];
-                        while let Ok(n) = std::io::Read::read(&mut r, &mut chunk) {
-                            if n == 0 { break; }
-                            if buf.len() < MAX_CAPTURE {
-                                let to_copy = n.min(MAX_CAPTURE - buf.len());
-                                buf.extend_from_slice(&chunk[..to_copy]);
-                            }
-                        }
-                    }
-                    buf
-                });
-
-                let start = std::time::Instant::now();
-                loop {
-                    match child.try_wait() {
-                        Ok(Some(status)) => {
-                            let _ = out_handle.join();
-                            let err_bytes = err_handle.join().unwrap_or_default();
-                            if !status.success() {
-                                let err_str = String::from_utf8_lossy(&err_bytes);
-                                return Err(anyhow!("{label} failed (exit status {status}): {err_str}"));
-                            }
-                            return Ok(());
-                        }
-                        Ok(None) => {
-                            if start.elapsed() >= timeout {
-                                let _ = child.kill();
-                                let _ = child.wait();
-                                let _ = out_handle.join();
-                                let _ = err_handle.join();
-                                return Err(anyhow!("{label} timed out after {:?}", timeout));
-                            }
-                            std::thread::sleep(std::time::Duration::from_millis(50));
-                        }
-                        Err(e) => {
-                            let _ = child.kill();
-                            let _ = child.wait();
-                            return Err(anyhow!("Failed waiting on {label}: {e}"));
-                        }
-                    }
-                }
-            }
-
-            let cmd_timeout = std::time::Duration::from_secs(30);
-
-            if is_rust {
-                let mut fmt_cmd = std::process::Command::new("cargo");
-                fmt_cmd.args(["fmt", "--all", "--", "--check"]).current_dir(isolated_path);
-                let _ = run_timed_cmd(fmt_cmd, "cargo fmt", cmd_timeout);
-
-                let mut check_cmd = std::process::Command::new("cargo");
-                check_cmd.args(["check", "--all-targets"]).current_dir(isolated_path);
-                run_timed_cmd(check_cmd, "cargo check", cmd_timeout)?;
-
-                let mut test_cmd = std::process::Command::new("cargo");
-                test_cmd.args(["test", "--no-fail-fast"]).current_dir(isolated_path);
-                run_timed_cmd(test_cmd, "cargo test", cmd_timeout)?;
-            } else if is_node {
-                let mut test_cmd = std::process::Command::new("npm");
-                test_cmd.args(["test", "--", "--passWithNoTests"]).current_dir(isolated_path);
-                run_timed_cmd(test_cmd, "npm test", cmd_timeout)?;
-            } else if is_python {
-                let mut test_cmd = std::process::Command::new("python3");
-                test_cmd.args(["-m", "unittest"]).current_dir(isolated_path);
-                run_timed_cmd(test_cmd, "python unittest", cmd_timeout)?;
-            } else if is_go {
-                let mut test_cmd = std::process::Command::new("go");
-                test_cmd.args(["test", "./..."]).current_dir(isolated_path);
-                run_timed_cmd(test_cmd, "go test", cmd_timeout)?;
-            }
-
-            Ok(())
-        });
-
-        if let Err(e) = test_result {
-            let err = format!(
-                "Integration verification failed in isolated worktree: {}",
-                e
-            );
-            let _ = cell
-                .status_tx
-                .send(AgentRunStatus::IntegrationRejected(err.clone()));
-            return Err(anyhow!(err));
-        }
-
-        // 5. Commit validated changes to parent repo
+        // Authoritative primary-workspace integration via WorkflowIntegrationService
         let default_msg = format!("feat(agent): integrate changes from agent {}", agent_id);
         let msg = commit_message.unwrap_or(&default_msg);
-        let commit_sha = mgr.apply_and_commit_worktree_diff(&diff, msg, agent_id, &cell.role)?;
 
+        let svc = crate::integration::WorkflowIntegrationService::new();
+        let req = crate::integration::IntegrationRequest {
+            workspace_root: self.cwd.clone(),
+            patch_content: diff,
+            source_label: agent_id.to_string(),
+            commit_message: Some(msg.to_string()),
+            require_approval: false,
+            is_approved: true,
+            author_role: Some(cell.role.clone()),
+            skip_dirty_check: false,
+            skip_verification: false,
+            verification_timeout: Some(std::time::Duration::from_secs(30)),
+            workflow_id: None,
+            task_id: None,
+            attempt_id: None,
+            expected_change_set_hash: None,
+        };
+
+        let outcome = svc.integrate(&req).await?;
+        if !outcome.success {
+            let err = outcome.error.unwrap_or(outcome.summary);
+            let _ = cell
+                .status_tx
+                .send(AgentRunStatus::IntegrationRejected(err.clone()));
+            return Err(anyhow!(err));
+        }
+
+        let commit_sha = outcome
+            .commit_sha
+            .unwrap_or_else(|| "uncommitted".to_string());
         let _ = cell.status_tx.send(AgentRunStatus::Integrated);
         let _ = self.storage.set_spawn_edge_status(agent_id, "integrated");
 
         Ok(format!(
-            "Agent `{agent_id}` changes verified and integrated into parent repository: commit {}",
-            commit_sha
+            "Agent `{agent_id}` changes verified and integrated into parent repository: commit {commit_sha}"
         ))
     }
 

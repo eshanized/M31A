@@ -594,7 +594,8 @@ fn render_agents_screen(f: &mut Frame, app: &App, area: Rect, t: &Theme) {
             Cell::from("-").style(t.style_muted()),
         ]));
     } else {
-        for wf in &workflows {
+        for (idx, wf) in workflows.iter().enumerate() {
+            let is_selected = idx == app.screen_selected_index;
             let tasks = wf_store.list_tasks(&wf.id).unwrap_or_default();
             let completed = tasks
                 .iter()
@@ -629,19 +630,40 @@ fn render_agents_screen(f: &mut Frame, app: &App, area: Rect, t: &Theme) {
                 "-".to_string()
             };
 
-            wf_rows.push(Row::new(vec![
-                Cell::from(wf.id.clone()).style(t.style_secondary().add_modifier(Modifier::BOLD)),
-                Cell::from(wf.workflow_type.clone()),
-                Cell::from(wf.objective.clone()),
-                Cell::from(Span::styled(
-                    state_label,
-                    Style::default()
-                        .fg(t.color(state_color))
-                        .add_modifier(Modifier::BOLD),
-                )),
-                Cell::from(wave_str),
-                Cell::from(format!("v{}", wf.plan_revision)),
-            ]));
+            let id_span = if is_selected {
+                Span::styled(
+                    format!("▶ {}", wf.id),
+                    t.style_secondary().add_modifier(Modifier::BOLD),
+                )
+            } else {
+                Span::styled(
+                    format!("  {}", wf.id),
+                    t.style_secondary().add_modifier(Modifier::BOLD),
+                )
+            };
+
+            let row_style = if is_selected {
+                t.style_surface2()
+            } else {
+                Style::default()
+            };
+
+            wf_rows.push(
+                Row::new(vec![
+                    Cell::from(id_span),
+                    Cell::from(wf.workflow_type.clone()),
+                    Cell::from(wf.objective.clone()),
+                    Cell::from(Span::styled(
+                        state_label,
+                        Style::default()
+                            .fg(t.color(state_color))
+                            .add_modifier(Modifier::BOLD),
+                    )),
+                    Cell::from(wave_str),
+                    Cell::from(format!("v{}", wf.plan_revision)),
+                ])
+                .style(row_style),
+            );
         }
     }
 
@@ -855,7 +877,7 @@ fn render_agents_screen(f: &mut Frame, app: &App, area: Rect, t: &Theme) {
                 t.style_secondary().add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                "[c] Close agent  |  [t] Terminate Tree  |  [i] Integrate Changes  |  [Enter] Inspect  |  [Esc] Chat",
+                "[a] Approve  |  [r] Reject  |  [c] Cancel WF  |  [u] Resume WF  |  [i] Inspect  |  [t] Terminate Tree  |  [Esc] Chat",
                 t.style_muted(),
             ),
         ]),

@@ -26,6 +26,16 @@ use tracing::{error, info, warn};
 use m31a_storage::{WorktreeManager, WorktreeSettings};
 use m31a_verify::AutonomousVerifier;
 
+/// Static mutual exclusion lock guaranteeing serialized integration onto target workspaces.
+static INTEGRATION_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// Computes immutable content-addressed SHA-256 hash for patch change sets.
+pub fn compute_change_set_hash(patch: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(patch.as_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
 /// Request payload describing an integration operation.
 #[derive(Debug, Clone)]
 pub struct IntegrationRequest {
@@ -49,6 +59,14 @@ pub struct IntegrationRequest {
     pub skip_verification: bool,
     /// Maximum duration for post-integration verification commands.
     pub verification_timeout: Option<Duration>,
+    /// Associated workflow identifier, if part of a managed workflow.
+    pub workflow_id: Option<String>,
+    /// Associated task identifier, if part of a managed workflow.
+    pub task_id: Option<String>,
+    /// Attempt identifier for fencing checks.
+    pub attempt_id: Option<u32>,
+    /// Expected change-set hash for immutable binding.
+    pub expected_change_set_hash: Option<String>,
 }
 
 /// Detailed outcome of an integration attempt.
@@ -59,11 +77,23 @@ pub struct IntegrationOutcome {
     pub approval_granted: bool,
     pub patch_applied: bool,
     pub verification_passed: bool,
+    #[serde(default)]
+    pub commit_completed: bool,
     pub rollback_performed: bool,
     pub commit_sha: Option<String>,
     pub modified_files: Vec<PathBuf>,
     pub error: Option<String>,
     pub summary: String,
+}
+
+/// Structured outcome of a verified exact rollback operation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RollbackResult {
+    pub restored_files: Vec<PathBuf>,
+    pub removed_created_files: Vec<PathBuf>,
+    pub failed_files: Vec<(PathBuf, String)>,
+    pub complete: bool,
+    pub diagnostics: Option<String>,
 }
 
 /// Snapshot of an individual file prior to patch application.
@@ -74,6 +104,7 @@ pub enum FileSnapshot {
         relative_path: PathBuf,
         content: Vec<u8>,
         sha256: String,
+        mode: Option<u32>,
     },
     NonExistent {
         path: PathBuf,
@@ -82,9 +113,29 @@ pub enum FileSnapshot {
 }
 
 impl FileSnapshot {
-    /// Capture snapshot of a file relative to workspace root.
+    /// Capture snapshot of a file relative to workspace root with symlink containment checks.
     pub fn snapshot(workspace_root: &Path, rel_path: &Path) -> Result<Self> {
         let full_path = workspace_root.join(rel_path);
+
+        // Symlink containment check
+        if full_path.is_symlink() {
+            let target = fs::read_link(&full_path)?;
+            let resolved = if target.is_absolute() {
+                target
+            } else {
+                full_path.parent().unwrap_or(workspace_root).join(target)
+            };
+            if let (Ok(can_ws), Ok(can_res)) =
+                (workspace_root.canonicalize(), resolved.canonicalize())
+                && !can_res.starts_with(&can_ws)
+            {
+                bail!(
+                    "Symlink escape detected: {} points outside workspace",
+                    rel_path.display()
+                );
+            }
+        }
+
         if full_path.exists() && full_path.is_file() {
             let content = fs::read(&full_path).with_context(|| {
                 format!("Failed to read file for snapshot: {}", full_path.display())
@@ -92,11 +143,25 @@ impl FileSnapshot {
             let mut hasher = Sha256::new();
             hasher.update(&content);
             let sha256 = format!("{:x}", hasher.finalize());
+
+            let mode = fs::metadata(&full_path).ok().map(|m| {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    m.permissions().mode()
+                }
+                #[cfg(not(unix))]
+                {
+                    0
+                }
+            });
+
             Ok(Self::Existing {
                 path: full_path,
                 relative_path: rel_path.to_path_buf(),
                 content,
                 sha256,
+                mode,
             })
         } else {
             Ok(Self::NonExistent {
@@ -113,13 +178,32 @@ impl FileSnapshot {
                 path,
                 content,
                 sha256,
+                mode,
                 ..
             } => {
                 if let Some(parent) = path.parent() {
                     fs::create_dir_all(parent)?;
                 }
-                fs::write(path, content)
-                    .with_context(|| format!("Failed to restore file: {}", path.display()))?;
+
+                // Write via safe atomic restoration
+                let tmp_path =
+                    path.with_extension(format!("tmp_restore_{}", uuid::Uuid::new_v4().simple()));
+                fs::write(&tmp_path, content).with_context(|| {
+                    format!(
+                        "Failed to write tmp file for restoration: {}",
+                        tmp_path.display()
+                    )
+                })?;
+
+                #[cfg(unix)]
+                if let Some(m) = mode {
+                    use std::os::unix::fs::PermissionsExt;
+                    let _ = fs::set_permissions(&tmp_path, fs::Permissions::from_mode(*m));
+                }
+
+                fs::rename(&tmp_path, path).with_context(|| {
+                    format!("Failed to rename restored file: {}", path.display())
+                })?;
 
                 // Verify restoration hash
                 let restored = fs::read(path)?;
@@ -136,10 +220,14 @@ impl FileSnapshot {
                 }
             }
             Self::NonExistent { path, .. } => {
-                if path.exists() {
-                    let _ = fs::remove_file(path);
+                if path.exists() || path.is_symlink() {
+                    if path.is_dir() {
+                        let _ = fs::remove_dir_all(path);
+                    } else {
+                        let _ = fs::remove_file(path);
+                    }
                 }
-                if path.exists() {
+                if path.exists() || path.is_symlink() {
                     bail!(
                         "Rollback verification failed: file {} still exists after removal",
                         path.display()
@@ -163,7 +251,32 @@ impl WorkflowIntegrationService {
 
     /// Execute an authoritative integration workflow.
     pub async fn integrate(&self, req: &IntegrationRequest) -> Result<IntegrationOutcome> {
+        let _integration_guard = INTEGRATION_LOCK.lock().await;
         let is_git = req.workspace_root.join(".git").exists();
+
+        // 0. Change-set hash verification
+        let actual_hash = compute_change_set_hash(&req.patch_content);
+        if let Some(ref expected) = req.expected_change_set_hash
+            && expected != &actual_hash
+        {
+            return Ok(IntegrationOutcome {
+                success: false,
+                pre_check_clean: false,
+                approval_granted: false,
+                patch_applied: false,
+                verification_passed: false,
+                commit_completed: false,
+                rollback_performed: false,
+                commit_sha: None,
+                modified_files: Vec::new(),
+                error: Some(format!(
+                    "Change-set hash mismatch: expected {expected}, got {actual_hash}"
+                )),
+                summary:
+                    "Integration rejected: change-set hash does not match authorized change set"
+                        .into(),
+            });
+        }
 
         // 1. Approval gating
         if req.require_approval && !req.is_approved {
@@ -173,44 +286,12 @@ impl WorkflowIntegrationService {
                 approval_granted: false,
                 patch_applied: false,
                 verification_passed: false,
+                commit_completed: false,
                 rollback_performed: false,
                 commit_sha: None,
                 modified_files: Vec::new(),
                 error: Some("Human approval required for integration but not granted".into()),
                 summary: "Integration blocked: pending human approval".into(),
-            });
-        }
-
-        // 2. Dirty workspace check (fail closed if target workspace contains uncommitted changes)
-        let is_clean = if is_git && !req.skip_dirty_check {
-            let settings = WorktreeSettings::new(&req.workspace_root);
-            let mgr = WorktreeManager::new(settings);
-            match mgr.is_dirty(&req.workspace_root) {
-                Ok(dirty) => !dirty,
-                Err(e) => {
-                    warn!(err = %e, "Failed inspecting workspace cleanliness; failing closed");
-                    false
-                }
-            }
-        } else {
-            true
-        };
-
-        if !is_clean {
-            return Ok(IntegrationOutcome {
-                success: false,
-                pre_check_clean: false,
-                approval_granted: true,
-                patch_applied: false,
-                verification_passed: false,
-                rollback_performed: false,
-                commit_sha: None,
-                modified_files: Vec::new(),
-                error: Some(
-                    "Target workspace contains uncommitted changes or cleanliness check failed; clean workspace required"
-                        .into(),
-                ),
-                summary: "Integration blocked: target workspace is dirty".into(),
             });
         }
 
@@ -222,6 +303,7 @@ impl WorkflowIntegrationService {
                 approval_granted: true,
                 patch_applied: false,
                 verification_passed: true,
+                commit_completed: true,
                 rollback_performed: false,
                 commit_sha: None,
                 modified_files: Vec::new(),
@@ -230,26 +312,28 @@ impl WorkflowIntegrationService {
             });
         }
 
-        // 3. Path extraction and containment verification
-        let affected_rel_paths = match self.extract_and_validate_paths(&req.patch_content) {
-            Ok(paths) => paths,
-            Err(e) => {
-                return Ok(IntegrationOutcome {
-                    success: false,
-                    pre_check_clean: true,
-                    approval_granted: true,
-                    patch_applied: false,
-                    verification_passed: false,
-                    rollback_performed: false,
-                    commit_sha: None,
-                    modified_files: Vec::new(),
-                    error: Some(format!("Patch validation failed: {e}")),
-                    summary: format!("Integration rejected: invalid patch paths: {e}"),
-                });
-            }
-        };
+        // 2. Path extraction and containment verification
+        let affected_rel_paths =
+            match self.extract_and_validate_paths(&req.workspace_root, &req.patch_content) {
+                Ok(paths) => paths,
+                Err(e) => {
+                    return Ok(IntegrationOutcome {
+                        success: false,
+                        pre_check_clean: true,
+                        approval_granted: true,
+                        patch_applied: false,
+                        verification_passed: false,
+                        commit_completed: false,
+                        rollback_performed: false,
+                        commit_sha: None,
+                        modified_files: Vec::new(),
+                        error: Some(format!("Patch validation failed: {e}")),
+                        summary: format!("Integration rejected: invalid patch paths: {e}"),
+                    });
+                }
+            };
 
-        // 4. Code review engine gate
+        // 3. Code review engine gate
         let review_report = m31a_review::ReviewEngine::analyze(&req.patch_content);
         if review_report.verdict == m31a_review::ReviewVerdict::RequestChanges {
             let reasons: Vec<String> = review_report
@@ -271,11 +355,80 @@ impl WorkflowIntegrationService {
                 approval_granted: true,
                 patch_applied: false,
                 verification_passed: false,
+                commit_completed: false,
                 rollback_performed: false,
                 commit_sha: None,
                 modified_files: Vec::new(),
                 error: Some(err_text.clone()),
                 summary: err_text,
+            });
+        }
+
+        // 4. Verification preflight manifest check
+        if !req.skip_verification {
+            let is_rust = req.workspace_root.join("Cargo.toml").exists();
+            let is_node = req.workspace_root.join("package.json").exists();
+            let is_python = req.workspace_root.join("pyproject.toml").exists()
+                || req.workspace_root.join("setup.py").exists()
+                || req.workspace_root.join("requirements.txt").exists();
+            let is_go = req.workspace_root.join("go.mod").exists();
+            let is_bazel = req.workspace_root.join("BUILD.bazel").exists()
+                || req.workspace_root.join("MODULE.bazel").exists()
+                || req.workspace_root.join("WORKSPACE").exists();
+            let is_cmake = req.workspace_root.join("CMakeLists.txt").exists();
+            let is_gradle = req.workspace_root.join("build.gradle").exists()
+                || req.workspace_root.join("build.gradle.kts").exists();
+
+            if !is_rust && !is_node && !is_python && !is_go && !is_bazel && !is_cmake && !is_gradle
+            {
+                let err_msg = "VerificationIncomplete: unsupported project type; automated verification cannot prove correctness without recognized build manifest (Cargo.toml, package.json, pyproject.toml, or go.mod)".to_string();
+                return Ok(IntegrationOutcome {
+                    success: false,
+                    pre_check_clean: true,
+                    approval_granted: true,
+                    patch_applied: false,
+                    verification_passed: false,
+                    commit_completed: false,
+                    rollback_performed: false,
+                    commit_sha: None,
+                    modified_files: Vec::new(),
+                    error: Some(err_msg.clone()),
+                    summary: err_msg,
+                });
+            }
+        }
+
+        // 5. Dirty workspace check (fail closed if target workspace contains uncommitted changes)
+        let is_clean = if is_git && !req.skip_dirty_check {
+            let settings = WorktreeSettings::new(&req.workspace_root);
+            let mgr = WorktreeManager::new(settings);
+            match mgr.is_dirty(&req.workspace_root) {
+                Ok(dirty) => !dirty,
+                Err(e) => {
+                    warn!(err = %e, "Failed inspecting workspace cleanliness; failing closed");
+                    false
+                }
+            }
+        } else {
+            true
+        };
+
+        if !is_clean {
+            return Ok(IntegrationOutcome {
+                success: false,
+                pre_check_clean: false,
+                approval_granted: true,
+                patch_applied: false,
+                verification_passed: false,
+                commit_completed: false,
+                rollback_performed: false,
+                commit_sha: None,
+                modified_files: Vec::new(),
+                error: Some(
+                    "Target workspace contains uncommitted changes or cleanliness check failed; clean workspace required"
+                        .into(),
+                ),
+                summary: "Integration blocked: target workspace is dirty".into(),
             });
         }
 
@@ -291,6 +444,7 @@ impl WorkflowIntegrationService {
                         approval_granted: true,
                         patch_applied: false,
                         verification_passed: false,
+                        commit_completed: false,
                         rollback_performed: false,
                         commit_sha: None,
                         modified_files: Vec::new(),
@@ -305,18 +459,22 @@ impl WorkflowIntegrationService {
         let apply_result = self.apply_patch(&req.workspace_root, &req.patch_content);
         if let Err(e) = apply_result {
             // Rollback any partial file changes made
-            self.execute_exact_rollback(&snapshots);
+            let rb = self.execute_exact_rollback(&snapshots);
             return Ok(IntegrationOutcome {
                 success: false,
                 pre_check_clean: true,
                 approval_granted: true,
                 patch_applied: false,
                 verification_passed: false,
+                commit_completed: false,
                 rollback_performed: true,
                 commit_sha: None,
                 modified_files: affected_rel_paths,
                 error: Some(format!("Patch application failed: {e}")),
-                summary: format!("Patch application failed; rolled back changes: {e}"),
+                summary: format!(
+                    "Patch application failed; rolled back changes (complete={}): {e}",
+                    rb.complete
+                ),
             });
         }
 
@@ -327,13 +485,14 @@ impl WorkflowIntegrationService {
             // Compiler check
             match AutonomousVerifier::verify_check(&req.workspace_root, timeout).await {
                 Ok(report) if !report.success => {
-                    self.execute_exact_rollback(&snapshots);
+                    let rb = self.execute_exact_rollback(&snapshots);
                     return Ok(IntegrationOutcome {
                         success: false,
                         pre_check_clean: true,
                         approval_granted: true,
                         patch_applied: true,
                         verification_passed: false,
+                        commit_completed: false,
                         rollback_performed: true,
                         commit_sha: None,
                         modified_files: affected_rel_paths,
@@ -344,24 +503,29 @@ impl WorkflowIntegrationService {
                                 .as_deref()
                                 .unwrap_or(&report.raw_output)
                         )),
-                        summary:
-                            "Verification failed (compiler check); exact per-file rollback executed"
-                                .into(),
+                        summary: format!(
+                            "Verification failed (compiler check); exact per-file rollback executed (complete={})",
+                            rb.complete
+                        ),
                     });
                 }
                 Err(e) => {
-                    self.execute_exact_rollback(&snapshots);
+                    let rb = self.execute_exact_rollback(&snapshots);
                     return Ok(IntegrationOutcome {
                         success: false,
                         pre_check_clean: true,
                         approval_granted: true,
                         patch_applied: true,
                         verification_passed: false,
+                        commit_completed: false,
                         rollback_performed: true,
                         commit_sha: None,
                         modified_files: affected_rel_paths,
                         error: Some(format!("Failed executing post-integration check: {e}")),
-                        summary: "Verification error during compiler check; exact per-file rollback executed".into(),
+                        summary: format!(
+                            "Verification error during compiler check; exact per-file rollback executed (complete={})",
+                            rb.complete
+                        ),
                     });
                 }
                 Ok(_) => {}
@@ -370,13 +534,14 @@ impl WorkflowIntegrationService {
             // Test execution
             match AutonomousVerifier::verify_tests(&req.workspace_root, timeout).await {
                 Ok(report) if !report.success => {
-                    self.execute_exact_rollback(&snapshots);
+                    let rb = self.execute_exact_rollback(&snapshots);
                     return Ok(IntegrationOutcome {
                         success: false,
                         pre_check_clean: true,
                         approval_granted: true,
                         patch_applied: true,
                         verification_passed: false,
+                        commit_completed: false,
                         rollback_performed: true,
                         commit_sha: None,
                         modified_files: affected_rel_paths,
@@ -387,25 +552,29 @@ impl WorkflowIntegrationService {
                                 .as_deref()
                                 .unwrap_or(&report.raw_output)
                         )),
-                        summary: "Verification failed (tests); exact per-file rollback executed"
-                            .into(),
+                        summary: format!(
+                            "Verification failed (tests); exact per-file rollback executed (complete={})",
+                            rb.complete
+                        ),
                     });
                 }
                 Err(e) => {
-                    self.execute_exact_rollback(&snapshots);
+                    let rb = self.execute_exact_rollback(&snapshots);
                     return Ok(IntegrationOutcome {
                         success: false,
                         pre_check_clean: true,
                         approval_granted: true,
                         patch_applied: true,
                         verification_passed: false,
+                        commit_completed: false,
                         rollback_performed: true,
                         commit_sha: None,
                         modified_files: affected_rel_paths,
                         error: Some(format!("Failed executing post-integration tests: {e}")),
-                        summary:
-                            "Verification error during test suite; exact per-file rollback executed"
-                                .into(),
+                        summary: format!(
+                            "Verification error during test suite; exact per-file rollback executed (complete={})",
+                            rb.complete
+                        ),
                     });
                 }
                 Ok(_) => {}
@@ -413,7 +582,7 @@ impl WorkflowIntegrationService {
         }
 
         // 8. Commit changes if working inside a Git repository
-        let commit_sha = if is_git {
+        let (commit_sha, commit_completed) = if is_git {
             match self.commit_integrated_changes(
                 &req.workspace_root,
                 &affected_rel_paths,
@@ -421,20 +590,37 @@ impl WorkflowIntegrationService {
                 &req.source_label,
                 req.author_role.as_deref().unwrap_or("Autonomous Agent"),
             ) {
-                Ok(sha) => Some(sha),
+                Ok(sha) => (Some(sha), true),
                 Err(e) => {
-                    warn!(err = %e, "Git commit after verification failed");
-                    None
+                    warn!(err = %e, "Git commit after verification failed; triggering exact per-file rollback");
+                    let rb = self.execute_exact_rollback(&snapshots);
+                    return Ok(IntegrationOutcome {
+                        success: false,
+                        pre_check_clean: true,
+                        approval_granted: true,
+                        patch_applied: true,
+                        verification_passed: true,
+                        commit_completed: false,
+                        rollback_performed: true,
+                        commit_sha: None,
+                        modified_files: affected_rel_paths,
+                        error: Some(format!("Git commit failed: {e}")),
+                        summary: format!(
+                            "Integration failed: git commit error: {e}; exact rollback executed (complete={})",
+                            rb.complete
+                        ),
+                    });
                 }
             }
         } else {
-            None
+            (None, true)
         };
 
         info!(
             source = %req.source_label,
             files_count = affected_rel_paths.len(),
             commit = ?commit_sha,
+            commit_completed,
             "Integration successfully completed and verified"
         );
 
@@ -444,6 +630,7 @@ impl WorkflowIntegrationService {
             approval_granted: true,
             patch_applied: true,
             verification_passed: true,
+            commit_completed,
             rollback_performed: false,
             commit_sha,
             modified_files: affected_rel_paths,
@@ -452,8 +639,12 @@ impl WorkflowIntegrationService {
         })
     }
 
-    /// Extract and strictly validate paths affected by a patch.
-    fn extract_and_validate_paths(&self, patch_content: &str) -> Result<Vec<PathBuf>> {
+    /// Extract and strictly validate paths affected by a patch, rejecting traversal and symlink escapes.
+    fn extract_and_validate_paths(
+        &self,
+        workspace_root: &Path,
+        patch_content: &str,
+    ) -> Result<Vec<PathBuf>> {
         let mut paths = Vec::new();
         if patch_content.contains("*** Begin Patch") {
             let parsed = m31a_tools::patch::parse_patch(patch_content)
@@ -474,6 +665,26 @@ impl WorkflowIntegrationService {
                 if matches!(comp, std::path::Component::ParentDir) {
                     bail!(
                         "Path traversal attempt ('..') detected in path: {}",
+                        p.display()
+                    );
+                }
+            }
+
+            // Symlink escape check: ensure parent/file does not escape workspace via symlinks
+            let target_path = workspace_root.join(p);
+            if target_path.is_symlink() {
+                let target = fs::read_link(&target_path)?;
+                let resolved = if target.is_absolute() {
+                    target
+                } else {
+                    target_path.parent().unwrap_or(workspace_root).join(target)
+                };
+                if let (Ok(can_ws), Ok(can_res)) =
+                    (workspace_root.canonicalize(), resolved.canonicalize())
+                    && !can_res.starts_with(&can_ws)
+                {
+                    bail!(
+                        "Symlink escape attempt detected: {} escapes workspace boundary",
                         p.display()
                     );
                 }
@@ -518,11 +729,47 @@ impl WorkflowIntegrationService {
     }
 
     /// Execute exact per-file rollback using pre-integration snapshots.
-    pub fn execute_exact_rollback(&self, snapshots: &[FileSnapshot]) {
+    pub fn execute_exact_rollback(&self, snapshots: &[FileSnapshot]) -> RollbackResult {
+        let mut restored_files = Vec::new();
+        let mut removed_created_files = Vec::new();
+        let mut failed_files = Vec::new();
+
         for snap in snapshots {
-            if let Err(e) = snap.restore() {
-                error!(err = %e, "Failed restoring snapshot during exact per-file rollback");
+            match snap {
+                FileSnapshot::Existing { relative_path, .. } => match snap.restore() {
+                    Ok(()) => restored_files.push(relative_path.clone()),
+                    Err(e) => {
+                        error!(err = %e, path = %relative_path.display(), "Failed restoring snapshot during exact per-file rollback");
+                        failed_files.push((relative_path.clone(), e.to_string()));
+                    }
+                },
+                FileSnapshot::NonExistent { relative_path, .. } => match snap.restore() {
+                    Ok(()) => removed_created_files.push(relative_path.clone()),
+                    Err(e) => {
+                        error!(err = %e, path = %relative_path.display(), "Failed removing created file during exact per-file rollback");
+                        failed_files.push((relative_path.clone(), e.to_string()));
+                    }
+                },
             }
+        }
+
+        let complete = failed_files.is_empty();
+        let diagnostics = if complete {
+            None
+        } else {
+            Some(format!(
+                "Rollback failed for {} files: {:?}",
+                failed_files.len(),
+                failed_files
+            ))
+        };
+
+        RollbackResult {
+            restored_files,
+            removed_created_files,
+            failed_files,
+            complete,
+            diagnostics,
         }
     }
 
@@ -601,6 +848,10 @@ mod tests {
             skip_dirty_check: true,
             skip_verification: true,
             verification_timeout: None,
+            workflow_id: None,
+            task_id: None,
+            attempt_id: None,
+            expected_change_set_hash: None,
         };
 
         let res = svc.integrate(&req).await.unwrap();
@@ -629,7 +880,7 @@ mod tests {
 "#;
 
         let svc = WorkflowIntegrationService::new();
-        let affected = svc.extract_and_validate_paths(patch_text).unwrap();
+        let affected = svc.extract_and_validate_paths(root, patch_text).unwrap();
         assert_eq!(affected.len(), 2);
 
         // Take pre-integration snapshots
@@ -679,6 +930,10 @@ mod tests {
             skip_dirty_check: true,
             skip_verification: true,
             verification_timeout: None,
+            workflow_id: None,
+            task_id: None,
+            attempt_id: None,
+            expected_change_set_hash: None,
         };
 
         let res = svc.integrate(&req).await.unwrap();
