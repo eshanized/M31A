@@ -15,7 +15,7 @@ fn test_cli_version_and_help() {
     let output = m31a_bin().arg("--version").output().unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("0.1.13") || stdout.contains("m31a"));
+    assert!(stdout.contains("0.1.14") || stdout.contains("m31a"));
 
     // 2. --help
     let output = m31a_bin().arg("--help").output().unwrap();

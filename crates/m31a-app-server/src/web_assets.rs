@@ -428,7 +428,7 @@ pub const INDEX_HTML: &str = r###"<!DOCTYPE html>
     <div class="brand">
       <div class="brand-logo">M3</div>
       <span>M31A Workstation</span>
-      <span class="brand-tag">v0.1.13 • Pure Rust Engine</span>
+      <span class="brand-tag">v0.1.14 • Pure Rust Engine</span>
     </div>
 
     <div class="top-controls">

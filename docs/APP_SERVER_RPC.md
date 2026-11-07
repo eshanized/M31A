@@ -76,7 +76,7 @@ Query runtime health, system version, active threads, and resource metrics.
   "jsonrpc": "2.0",
   "id": 1,
   "result": {
-    "version": "0.1.13",
+    "version": "0.1.14",
     "uptime_seconds": 3600,
     "active_threads": 2,
     "sandbox_backend": "bubblewrap",

@@ -438,9 +438,9 @@ mod tests {
         let (client, _notifs) = AppServerClient::connect(&sock_path).await.unwrap();
 
         // 1. Initialize
-        let init_resp = client.initialize("m31a-cli", "0.1.13").await.unwrap();
+        let init_resp = client.initialize("m31a-cli", "0.1.14").await.unwrap();
         assert_eq!(init_resp["server_name"], "m31a-app-server");
-        assert_eq!(init_resp["version"], "0.1.13");
+        assert_eq!(init_resp["version"], "0.1.14");
 
         // 2. Thread start in untrusted workspace without authorization fails closed
         let unauth_res = client
@@ -495,7 +495,7 @@ mod tests {
         let (client, mut notif_rx) = AppServerClient::connect(&sock_path).await.unwrap();
 
         // 1. Initialize
-        let init_val = client.initialize("m31a-test", "0.1.13").await.unwrap();
+        let init_val = client.initialize("m31a-test", "0.1.14").await.unwrap();
         assert_eq!(init_val["server_name"], "m31a-app-server");
 
         // 2. Grant workspace trust legitimately before creating thread

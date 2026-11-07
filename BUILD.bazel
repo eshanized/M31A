@@ -5,14 +5,14 @@ package(default_visibility = ["//visibility:public"])
 # Main CLI Binary Target
 m31a_binary(
     name = "m31a",
-    version = "0.1.13",
+    version = "0.1.14",
 )
 
 # Multi-Platform Release Archive Target
 m31a_release_archive(
     name = "m31a_release",
     binary = ":m31a",
-    version = "0.1.13",
+    version = "0.1.14",
 )
 
 # Protocol Schema Bundle Target

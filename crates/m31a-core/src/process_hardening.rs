@@ -56,9 +56,13 @@ fn apply_linux_process_hardening() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    static TEST_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn test_scrub_dangerous_env_vars() {
+        let _guard = TEST_LOCK.lock().unwrap();
         unsafe {
             env::set_var("LD_PRELOAD", "/malicious/lib.so");
             env::set_var("DYLD_LIBRARY_PATH", "/malicious/lib");
@@ -73,6 +77,7 @@ mod tests {
 
     #[test]
     fn test_apply_process_hardening_safe() {
+        let _guard = TEST_LOCK.lock().unwrap();
         // Must not crash or panic
         apply_process_hardening();
     }

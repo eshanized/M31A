@@ -39,7 +39,20 @@ M31A uses NVIDIA NIM frontier models (e.g. Nemotron, DeepSeek R1, Codestral).
 
 ## 2. Installation
 
-### Option A: Install via Cargo (Recommended)
+### Option A: Quick Install Script (Recommended for Linux)
+
+Install the pre-compiled binary directly with automatic architecture detection, Bubblewrap dependency verification, and PATH configuration:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/eshanized/M31A/master/install.sh | bash
+```
+
+Or install a specific version using the local installer:
+```bash
+./install.sh --version 0.1.14
+```
+
+### Option B: Install via Cargo
 
 To build and install the release binary directly into `~/.cargo/bin/`:
 
@@ -58,7 +71,7 @@ Verify your installation:
 m31a --version
 ```
 
-### Option B: Build Release Binary Manually
+### Option C: Build Release Binary Manually
 
 ```bash
 cargo build --release -p m31a-cli
@@ -66,7 +79,7 @@ cargo build --release -p m31a-cli
 cp target/release/m31a ~/.local/bin/
 ```
 
-### Option C: Build with Bazel
+### Option D: Build with Bazel
 
 ```bash
 bazel build //bazel:m31a

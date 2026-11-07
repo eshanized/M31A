@@ -11,6 +11,51 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [0.1.14] — 2026-11-07
+
+### Added
+- **Autonomous Workflow Orchestration & Speculative Execution**:
+  - Implemented typed task kinds (`TaskKind`) and dependency fencing in the autonomous workflow architecture.
+  - Published comprehensive specifications and architecture documentation for autonomous workflow orchestration and speculative execution (`docs/architecture/AUTONOMOUS_WORKFLOW_ARCHITECTURE.md`, `docs/architecture/SPECULATIVE_EXECUTION_ARCHITECTURE.md`, `docs/specs/SPECULATIVE_EVALUATION_MODEL.md`).
+- **Execution Integrity Architecture (Rounds 2 & 3)**:
+  - Implemented Round 2 Execution Integrity Architecture establishing fail-closed validation, hardened UDS socket binding, and turn boundary isolation.
+  - Published Round 3 Baseline Audit report documenting execution integrity gaps, implementation specification, and verification roadmap (`docs/reports/ROUND_3_BASELINE_AUDIT.md`, `docs/reports/ROUND_3_IMPLEMENTATION_REPORT.md`, `docs/reports/ROUND_3_VERIFICATION_REPORT.md`).
+  - Added structured verification records and evidence grounding for continuous learning.
+- **Production Installer & Uninstaller Suite**:
+  - Added official Linux installer script (`install.sh`, `scripts/install.sh`) supporting terminal progress bar rendering, SHA-256 checksum verification, system-wide (`/usr/local/bin`) or user-local (`~/.m31a/bin`) installation, local binary installation, and source builds.
+  - Added dedicated uninstaller (`uninstall.sh`, `scripts/uninstall.sh`) providing complete cleanup of binaries, runtime state, configuration, SQLite databases, logs, and shell PATH modifications.
+- **Local-First Resource Validation**:
+  - Introduced `ResourceValidator` for workspace filesystem permission checks and turn safety validation in `m31a-app-server`.
+  - Enforced schema validation, parameter bounds, and hardened token checks across JSON-RPC endpoints.
+- **Tool Registry, Sandboxing & Extensions**:
+  - Implemented host-issued approval binding and staged plugin installation with safe archive extraction (`flate2`, `hex`), publisher verification (`ed25519-dalek`), and checksum validation.
+  - Tool call context propagation and atomic approval consumption.
+  - Introduced concurrent `BrowserSessionManager` with RFC 6455 frame bounds, IP blocklist, CDP subresource boundary filtering, and strict SSRF defenses.
+  - Offline preview options and dimensions decoding for synthetic image generation.
+  - AST sandboxing, cell execution timeouts, and cancellation token propagation in `m31a-code-mode`.
+  - Isolated mutation testing to shadow directory trees in `m31a-verify`.
+  - Visual regression constraints and screenshot assertions.
+- **TUI & Terminal Enhancements**:
+  - Centralized icon system with configurable Lucide, Unicode, and ASCII modes.
+  - Clipboard reading and paste functionality with CRLF normalization.
+  - Realtime voice adaptive RMS energy voice activity detection (VAD) and hardware detection.
+
+### Changed
+- **Provider Architecture**: Refactored model provider integration to focus primarily on NVIDIA NIM frontier intelligence with enhanced dynamic context window resolution logic.
+- **App Server Hardening**: Replaced legacy authentication middleware with local-first resource validator and hardened Unix Domain Socket bindings.
+- **Analytics & Telemetry**: Introduced typed `TurnMetrics` struct eliminating parameter misordering across analytics pipelines.
+- **Dependencies Bump**: Updated `similar` to 3.2.1, `tonic-build` to 0.14.9, `shlex` to 2.0.1, `crossterm` to 0.29.0, `ratatui` to 0.30.2.
+- **Version Bump**: Bumped workspace package and SDK versions to `0.1.14`.
+
+### Fixed
+- **CI & Build System**: Gated seccomp for Linux platforms, standardized rustup default toolchain across GitHub Actions and Bazel, resolved protobuf-compiler dependencies, and added Bubblewrap to system dependencies.
+- **Execution Policy & Security**: Enforced strict read-only checks for `git` and `find` commands in plan mode; restricted cloud tasks local fallback to explicit bang commands; implemented CSPRNG RFC 7636 PKCE exchange; hardened Unix domain socket binding with symlink and stale checks; repaired feature flag persistence across restarts.
+
+### Removed
+- **Legacy Auth & Cloud Artifacts**: Removed obsolete first-party authentication request schemas, error codes, and workload identity OAuth modules in favor of authentic local-first security.
+
+---
+
 ## [0.1.13] — 2026-11-01
 
 ### Added
@@ -531,7 +576,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ### Added
 - Initial project genesis: single-crate architecture, kernel, and phase planning
 
-[Unreleased]: https://github.com/eshanized/M31A/compare/v0.1.13...HEAD
+[Unreleased]: https://github.com/eshanized/M31A/compare/v0.1.14...HEAD
+[0.1.14]: https://github.com/eshanized/M31A/compare/v0.1.13...v0.1.14
 [0.1.13]: https://github.com/eshanized/M31A/compare/v0.1.12...v0.1.13
 [0.1.12]: https://github.com/eshanized/M31A/releases/tag/v0.1.12
 [0.1.11]: https://github.com/eshanized/M31A/releases/tag/v0.1.11

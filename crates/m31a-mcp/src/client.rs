@@ -139,7 +139,7 @@ impl McpClient {
             },
             client_info: Implementation {
                 name: "m31a-client".to_string(),
-                version: "0.1.13".to_string(),
+                version: "0.1.14".to_string(),
             },
         };
 

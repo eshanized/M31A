@@ -116,7 +116,7 @@ class M31AClient:
     async def initialize(
         self,
         client_name: str = "m31a-python-sdk",
-        client_version: str = "0.1.13",
+        client_version: str = "0.1.14",
     ) -> InitializeResult:
         res = await self.request("initialize", {"client_name": client_name, "client_version": client_version})
         return InitializeResult(

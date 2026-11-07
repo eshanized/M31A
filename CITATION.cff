@@ -4,8 +4,8 @@ authors:
   - family-names: "Roy"
     given-names: "Eshan"
 title: "M31A: Autonomous Agentic Coding Assistant Powered by NVIDIA NIM"
-version: 0.1.13
-date-released: 2026-11-01
+version: 0.1.14
+date-released: 2026-11-07
 url: "https://m31a.tonmoyinfrastructure.org/"
 repository-code: "https://github.com/eshanized/M31A"
 license: MIT

@@ -275,7 +275,7 @@ async fn handle_connection(
         let health = serde_json::json!({
             "status": "healthy",
             "server": "m31a-app-server",
-            "version": "0.1.13",
+            "version": "0.1.14",
             "active_turns": server.active_turns.lock().unwrap().len(),
         });
         let bytes = serde_json::to_vec(&health)?;

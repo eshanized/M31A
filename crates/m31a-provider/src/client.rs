@@ -162,7 +162,7 @@ impl NvidiaNimClient {
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         headers.insert(
             "User-Agent",
-            HeaderValue::from_static("M31A/0.1.13 (Linux x86_64)"),
+            HeaderValue::from_static("M31A/0.1.14 (Linux x86_64)"),
         );
 
         let client = reqwest::Client::builder()

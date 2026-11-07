@@ -81,7 +81,7 @@ m31a_binary = rule(
     implementation = _m31a_binary_impl,
     executable = True,
     attrs = {
-        "version": attr.string(default = "0.1.13"),
+        "version": attr.string(default = "0.1.14"),
         "package": attr.string(default = "m31a-cli"),
         "bin_name": attr.string(default = "m31a"),
         "srcs": attr.label_list(allow_files = True),
@@ -203,7 +203,7 @@ m31a_release_archive = rule(
             cfg = "target",
         ),
         "platforms": attr.string_list(mandatory = False),
-        "version": attr.string(default = "0.1.13"),
+        "version": attr.string(default = "0.1.14"),
     },
 )
 

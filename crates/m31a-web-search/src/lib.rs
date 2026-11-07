@@ -408,7 +408,7 @@ impl DuckDuckGoProvider {
     pub fn new() -> Self {
         Self {
             client: reqwest::Client::builder()
-                .user_agent("M31A/0.1.13 (compatible; WebSearch)")
+                .user_agent("M31A/0.1.14 (compatible; WebSearch)")
                 .build()
                 .unwrap(),
         }

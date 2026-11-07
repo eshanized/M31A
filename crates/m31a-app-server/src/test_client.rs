@@ -78,7 +78,7 @@ impl LocalAppServerSession {
                 Ok(json!({
                     "server_info": {
                         "name": "m31a-app-server",
-                        "version": "0.1.13"
+                        "version": "0.1.14"
                     },
                     "session_id": format!("sess_{client_name}"),
                     "capabilities": {

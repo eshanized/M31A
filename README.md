@@ -133,7 +133,7 @@ curl -fsSL https://raw.githubusercontent.com/eshanized/M31A/master/install.sh | 
 
 Or install a specific version or from a local binary:
 ```bash
-./install.sh --version 0.1.13
+./install.sh --version 0.1.14
 ./install.sh --binary ./target/release/m31a
 ```
 
@@ -410,6 +410,9 @@ npm test --prefix sdk/typescript
 - [Getting Started Walkthrough](docs/GETTING_STARTED.md)
 - [Terminal User Interface (TUI) User Guide](docs/TUI_GUIDE.md)
 - [System Architecture](docs/ARCHITECTURE.md)
+- [Autonomous Workflow Architecture](docs/architecture/AUTONOMOUS_WORKFLOW_ARCHITECTURE.md)
+- [Speculative Execution Architecture](docs/architecture/SPECULATIVE_EXECUTION_ARCHITECTURE.md)
+- [Execution Integrity Architecture (Round 2)](docs/architecture/EXECUTION_INTEGRITY_ROUND_2.md)
 - [CLI Command Reference](docs/CLI_REFERENCE.md)
 - [Configuration Guide](docs/CONFIGURATION.md)
 - [App Server & JSON-RPC 2.0 Protocol](docs/APP_SERVER_RPC.md)
@@ -417,6 +420,7 @@ npm test --prefix sdk/typescript
 - [Extensions, Skills & MCP Integration](docs/EXTENSIONS_AND_SKILLS.md)
 - [Multi-Agent Swarm & Distributed Mesh](docs/SWARM_AND_MULTI_AGENT.md)
 - [TUI Architecture](docs/tui/TUI-ARCHITECTURE.md)
+- [Round 3 Baseline Audit Report](docs/reports/ROUND_3_BASELINE_AUDIT.md)
 - [Deep Implementation Gap & Production Remediation Report](docs/reports/DEEP_IMPLEMENTATION_GAP_REMEDIATION_REPORT.md)
 - [Logical Bug & Security Remediation Report](docs/reports/LOGICAL_BUG_REMEDIATION_REPORT.md)
 - [Roadmap](ROADMAP.md)

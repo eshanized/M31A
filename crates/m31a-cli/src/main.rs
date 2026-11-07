@@ -47,7 +47,7 @@ mod workflow;
 #[command(
     name = "m31a",
     about = "M31A: High-performance autonomous agentic coding assistant powered by NVIDIA NIM",
-    version = "0.1.13"
+    version = "0.1.14"
 )]
 struct Cli {
     #[arg(help = "Optional user prompt to start an interactive or single-turn session")]

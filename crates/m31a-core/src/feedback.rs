@@ -121,7 +121,7 @@ impl FeedbackBundleManager {
             bundle_id: bundle_id.clone(),
             timestamp_micros: now_micros,
             user_note: user_note.map(str::to_string),
-            m31a_version: "0.1.13".to_string(),
+            m31a_version: "0.1.14".to_string(),
             system_info: sys_info,
             attachments: sanitized_attachments,
         };

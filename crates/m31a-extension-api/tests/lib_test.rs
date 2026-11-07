@@ -196,7 +196,7 @@ fn test_in_process_plugin_execution_pipeline() {
     let ctx = ExtensionContext {
         config: PluginConfig::default(),
         workspace_root: PathBuf::from("/tmp"),
-        m31a_version: "0.1.13".to_string(),
+        m31a_version: "0.1.14".to_string(),
         api_version: 1,
     };
 
