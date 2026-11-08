@@ -71,7 +71,7 @@ colored = "3.0"
 async-trait = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
 directories = "6.0"
-dirs = "6.0"
+dirs = "7.0"
 shlex = "2.0"
 tempfile = "3.17"
 regex = "1.11"
