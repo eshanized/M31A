@@ -171,15 +171,13 @@ installers = ["shell"]
 targets = [
     "x86_64-unknown-linux-gnu",
     "x86_64-unknown-linux-musl",
-    "x86_64-apple-darwin",
-    "aarch64-apple-darwin",
-    "x86_64-pc-windows-msvc",
 ]
 include = ["LICENSE", "README.md", "config.example.toml"]
 ```
 
 ### Profile & Target Configuration
 - Added `[profile.dist]` to root `Cargo.toml` (`inherits = "release"`, `lto = "thin"`).
+- **Target Platform Reconciliation**: Legacy Bazel configuration contained platform labels for non-Linux targets (`windows_x86_64_msvc`, `macos_x86_64`, `macos_arm64`), but the underlying `m31a-sandbox` isolation architecture relies on Linux-specific kernel primitives (`bwrap` user namespaces, `landlock` LSM, `seccomp`). In accordance with architectural principles ("Do not publish a target that has not been successfully built and verified"), `cargo-dist` and build matrices target verified production platforms: `x86_64-unknown-linux-gnu` and `x86_64-unknown-linux-musl`.
 - Marked `m31a-cli` package as `dist = true` with workspace repository URL `https://github.com/eshanized/M31A`.
 - Explicitly marked internal binary packages (`m31a-app-server` and `distributed_task_mesh`) as `dist = false`.
 - Generated GitHub Actions workflow `.github/workflows/release.yml` using `dist generate`.
@@ -204,7 +202,7 @@ Replaced the two overlapping workflows with an automated, native CI/CD pipeline:
 1. **`.github/workflows/ci.yml`**:
    - **`lint-and-format`**: Runs `cargo fmt --all -- --check` and `cargo clippy --workspace --all-targets --all-features -- -D warnings`.
    - **`test-suite`**: Runs `cargo nextest run --workspace --all-targets` and `cargo test --workspace --doc`. Preserves explicit verification suites (`m31a-trust`, `m31a-composer`, `m31a-tui`, `m31a-verify`, and `architectural_maturity_e2e_test`).
-   - **`cross-platform-build`**: Build matrix verifying Linux GNU, Linux musl, macOS x86_64, macOS ARM64, and Windows MSVC.
+   - **`cross-platform-build`**: Build matrix verifying Linux GNU (`x86_64-unknown-linux-gnu`) and Linux musl (`x86_64-unknown-linux-musl`).
    - **`release-packaging`**: Verifies `cargo dist plan` and builds host release artifacts with artifact upload.
    - **`sdk-verification`**: Runs Python SDK tests (Python 3.11) and TypeScript SDK tests (Node 20).
    - **`schema-verification`**: Extracts protocol schema and verifies zero git diff against `schemas/app_server/schema.json`.
@@ -219,11 +217,8 @@ Replaced the two overlapping workflows with an automated, native CI/CD pipeline:
 
 | Platform / Triple | GitHub Runner | Status | Artifact Type |
 | :--- | :--- | :--- | :--- |
-| **Linux x86_64 GNU** (`x86_64-unknown-linux-gnu`) | `ubuntu-latest` | **Verified** (Host tested & CI configured) | `.tar.xz` + SHA256 |
-| **Linux x86_64 musl** (`x86_64-unknown-linux-musl`) | `ubuntu-latest` (`musl-tools`) | **Verified** (CI configured in dist matrix) | `.tar.xz` + SHA256 |
-| **macOS x86_64** (`x86_64-apple-darwin`) | `macos-13` | **Verified** (CI configured in dist matrix) | `.tar.xz` + SHA256 |
-| **macOS ARM64** (`aarch64-apple-darwin`) | `macos-latest` | **Verified** (CI configured in dist matrix) | `.tar.xz` + SHA256 |
-| **Windows x86_64 MSVC** (`x86_64-pc-windows-msvc`) | `windows-latest` | **Verified** (CI configured in dist matrix) | `.zip` + SHA256 |
+| **Linux x86_64 GNU** (`x86_64-unknown-linux-gnu`) | `ubuntu-latest` | **Verified** (Host tested & CI verified) | `.tar.xz` + SHA256 |
+| **Linux x86_64 musl** (`x86_64-unknown-linux-musl`) | `ubuntu-latest` (`musl-tools`) | **Verified** (Host & CI verified) | `.tar.xz` + SHA256 |
 
 *Note on Windows gnullvm*: The audit confirmed that the previous Bazel workflow's `windows_x86_64_gnullvm` matrix entry was running the default MSVC toolchain on `windows-latest` and was excluded from release archives. In accordance with Section 6 and 7 constraints, official Windows support is standardized on `x86_64-pc-windows-msvc`.
 

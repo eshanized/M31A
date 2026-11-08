@@ -1611,7 +1611,13 @@ edition = "2021"
         .unwrap();
 
         assert_eq!(report.total_candidates, 2);
-        assert_eq!(report.winning_branch_id.as_deref(), Some("candidate-valid"));
+        assert_eq!(
+            report.winning_branch_id.as_deref(),
+            Some("candidate-valid"),
+            "Speculative arena failed: rationale={}, evals={:?}",
+            report.decision_rationale,
+            report.evaluations
+        );
         let winner = report
             .evaluations
             .iter()
@@ -1720,7 +1726,11 @@ edition = "2021"
         assert_eq!(report.total_candidates, 1);
         assert!(report.winning_branch_id.is_none());
         assert!(!report.evaluations[0].hard_gates_passed);
-        assert!(report.evaluations[0].build_passed);
+        assert!(
+            report.evaluations[0].build_passed,
+            "Build failed with: {:?}, evidence: {:?}",
+            report.evaluations[0].failure_reason, report.evaluations[0].build_evidence
+        );
         assert!(!report.evaluations[0].tests_passed);
         assert!(matches!(
             report.evaluations[0].failure_reason,

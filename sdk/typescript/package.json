@@ -15,7 +15,7 @@
   },
   "scripts": {
     "build": "tsc",
-    "test": "node --test dist/test/**/*.test.js",
+    "test": "node --test dist/test",
     "pretest": "tsc"
   },
   "keywords": [
