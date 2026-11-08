@@ -2524,6 +2524,8 @@ mod tests {
         let config = Arc::new(Config {
             model: "nvidia/nemotron-3.5-lightning-30b-a3b".to_string(),
             model_provider: Some("nim".to_string()),
+            api_key: m31a_core::resolve_stored_api_key()
+                .or_else(|| Some("nvapi-runtime-integration-token".to_string())),
             ..Default::default()
         });
         let storage = Storage::open_in_memory().unwrap();
