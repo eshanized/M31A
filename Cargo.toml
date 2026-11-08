@@ -85,7 +85,7 @@ ratatui = { version = "0.29", default-features = false, features = ["crossterm"]
 crossterm = { version = "0.29", features = ["event-stream"] }
 tokio-util = "0.7"
 rand = "0.10"
-which = "7.0"
+which = "8.0"
 unicode-width = "0.2"
 unicode-segmentation = "1.12"
 m31a-core = { path = "crates/m31a-core" }
