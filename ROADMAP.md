@@ -19,7 +19,7 @@ M31A is built to be the premier open-source, sovereign, enterprise-grade autonom
 - [x] **Multi-Layer Security Model**: Linux Bubblewrap isolation, read-only masks, AST/prefix ExecPolicy, and Guardian supervisor.
 - [x] **Vibe Coding Engine & Speculative Arena**: Continuous background compilation/auto-healing loop and parallel hypothesis sandboxes.
 - [x] **Official Client SDKs**: First-party TypeScript (`@m31a/sdk`) and Python (`m31a`) packages with multi-transport JSON-RPC 2.0 support.
-- [x] **Multi-Platform Build Matrix**: Cargo workspace and Bazel 7 configuration covering Linux, macOS, and Windows.
+- [x] **Multi-Platform Build Matrix**: Cargo workspace, Nextest test runner, and Just / cargo-dist release configuration covering Linux, macOS, and Windows.
 
 ---
 

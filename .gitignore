@@ -15,7 +15,6 @@ dist/
 /codex/
 .m31a-vault/
 .m31a/
-bazel-*
 
 # Benchmark & test runtime outputs
 benchmark_results.json
@@ -27,8 +26,4 @@ benchmark*.json
 *.pyc
 *.pyo
 .pytest_cache/
-
-# Local Bazel configuration
-.bazelrc.local
-user.bazelrc
 

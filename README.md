@@ -6,7 +6,6 @@
 
 <p align="center">
   <a href="https://github.com/eshanized/M31A/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/eshanized/M31A/ci.yml?branch=master&label=Rust%20CI&style=flat-square" alt="Rust CI" /></a>
-  <a href="https://github.com/eshanized/M31A/actions/workflows/bazel.yml"><img src="https://img.shields.io/github/actions/workflow/status/eshanized/M31A/bazel.yml?branch=master&label=Bazel%20CI&style=flat-square" alt="Bazel CI" /></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-green.svg?style=flat-square" alt="License: MIT" /></a>
   <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Rust-2024%20Edition-orange.svg?style=flat-square&logo=rust" alt="Rust 2024" /></a>
   <a href="https://build.nvidia.com/"><img src="https://img.shields.io/badge/Powered%20By-NVIDIA%20NIM-76B900.svg?style=flat-square&logo=nvidia" alt="NVIDIA NIM" /></a>
@@ -152,9 +151,10 @@ cargo build --release -p m31a-cli
 cp target/release/m31a ~/.local/bin/
 ```
 
-*Alternatively, build with Bazel 7*:
+*Alternatively, build and test using Just*:
 ```bash
-bazel build //bazel:m31a
+just release
+just test-fast
 ```
 
 #### Uninstall & Data Cleanup

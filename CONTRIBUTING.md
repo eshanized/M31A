@@ -28,12 +28,12 @@ All contributors and maintainers are expected to abide by our [Code of Conduct](
 
 ## Monorepo Architecture
 
-M31A is organized as a Cargo workspace with Bazel build support, containing 39 Rust crates, official SDKs, and examples:
+M31A is organized as a Cargo workspace with Just orchestration and cargo-nextest test execution, containing 39 Rust crates, official SDKs, and examples:
 
 ```
 M31A/
 ├── Cargo.toml                  # Cargo workspace definition (Rust 2024 edition)
-├── BUILD.bazel / MODULE.bazel  # Multi-platform Bazel 7 configuration
+├── justfile                    # Unified developer command runner
 ├── crates/                     # 39 modular domain crates
 │   ├── m31a-cli/               # Unified 'm31a' binary entrypoint (54 subcommands)
 │   ├── m31a-core/              # Core types, configuration, session models, skills
@@ -75,15 +75,27 @@ For a comprehensive explanation of each crate's responsibilities, consult [`crat
   rustup default stable
   rustup component add clippy rustfmt
   ```
-- **Bazel (Optional)**: Bazel 7.4+ or Bazelisk (`bazel-contrib/setup-bazel`).
-- **Python (Optional for Python SDK)**: Python >= 3.10
+- **Just Command Runner**: [just](https://github.com/casey/just) command orchestrator.
+- **cargo-nextest**: [cargo-nextest](https://nexte.st/) fast test runner.
+- **cargo-dist**: [cargo-dist](https://opensource.axo.dev/cargo-dist/) for release packaging.
+- **Python (Optional for Python SDK & Benchmarks)**: Python >= 3.10
 - **Node.js (Optional for TypeScript SDK)**: Node.js >= 18 and npm
 
 ---
 
 ## Building the Project
 
-### Using Cargo
+### Using Just (Recommended)
+
+```bash
+# Build workspace in development mode
+just build
+
+# Build production release binary
+just release
+```
+
+### Using Cargo Directly
 
 To compile the entire workspace in debug mode:
 
@@ -104,35 +116,34 @@ To run the binary directly:
 cargo run -p m31a-cli -- doctor
 ```
 
-### Using Bazel
-
-To build the release binary with Bazel:
-
-```bash
-bazel build //bazel:m31a
-```
-
 ---
 
 ## Running Tests
 
 ### Workspace Rust Tests
 
-We maintain an uncompromising testing standard. Run the complete test suite:
+We maintain an uncompromising testing standard. Run tests using Just or Cargo:
 
 ```bash
-# Run full workspace test execution (no API key needed for standard suite)
+# Run unit & integration tests fast with cargo-nextest
+just test-fast
+
+# Run the complete test suite including documentation tests
+just test
+
+# Or run directly with Cargo
 cargo test --workspace
+cargo test --workspace --doc
 ```
 
 Run crate-specific test suites:
 
 ```bash
-cargo test -p m31a-tools
-cargo test -p m31a-tui
-cargo test -p m31a-execpolicy
-cargo test -p m31a-sandbox
-cargo test -p m31a-agent-engine
+cargo nextest run -p m31a-tools
+cargo nextest run -p m31a-tui
+cargo nextest run -p m31a-execpolicy
+cargo nextest run -p m31a-sandbox
+cargo nextest run -p m31a-agent-engine
 ```
 
 ### Live NVIDIA NIM Tests (Optional)

@@ -371,32 +371,40 @@ download_and_install() {
     trap 'rm -rf "$tmp_dir"' EXIT
 
     local base_url="https://github.com/$REPO/releases/download/v${version}"
-    local tarball_name="m31a-${version}-linux-${arch}.tar.gz"
     local raw_bin_name="m31a-${version}-linux-${raw_arch}"
     local download_success=false
 
-    # Attempt to download SHA256SUMS for integrity validation
+    # Attempt to download SHA256SUMS or sha256.sum for integrity validation
     local checksums_file="$tmp_dir/SHA256SUMS"
-    curl -fsSL "${base_url}/SHA256SUMS" -o "$checksums_file" 2>/dev/null || true
+    curl -fsSL "${base_url}/SHA256SUMS" -o "$checksums_file" 2>/dev/null || curl -fsSL "${base_url}/sha256.sum" -o "$checksums_file" 2>/dev/null || true
 
-    # Try tarball first
-    local tarball_url="${base_url}/${tarball_name}"
-    log_info "Downloading ${BOLD}${tarball_name}${NC}..."
-    if download_with_progress "$tarball_url" "$tmp_dir/$tarball_name"; then
-        verify_checksum "$tmp_dir/$tarball_name" "$checksums_file"
+    # Try release archive candidates (cargo-dist archives or legacy archives)
+    local archive_candidates=(
+        "m31a-cli-${raw_arch}-unknown-linux-gnu.tar.xz"
+        "m31a-cli-${raw_arch}-unknown-linux-musl.tar.xz"
+        "m31a-${version}-linux-${arch}.tar.gz"
+    )
 
-        log_info "Extracting archive..."
-        tar -xzf "$tmp_dir/$tarball_name" -C "$tmp_dir"
-        
-        # Locate binary within extracted archive
-        local extracted_bin
-        extracted_bin=$(find "$tmp_dir" -type f -name "$APP" 2>/dev/null | head -n 1 || true)
-        if [ -n "$extracted_bin" ] && [ -f "$extracted_bin" ]; then
-            mv "$extracted_bin" "$INSTALL_DIR/$APP"
-            chmod 755 "$INSTALL_DIR/$APP"
-            download_success=true
+    for archive_name in "${archive_candidates[@]}"; do
+        local archive_url="${base_url}/${archive_name}"
+        log_info "Attempting download of ${BOLD}${archive_name}${NC}..."
+        if download_with_progress "$archive_url" "$tmp_dir/$archive_name"; then
+            verify_checksum "$tmp_dir/$archive_name" "$checksums_file"
+
+            log_info "Extracting archive..."
+            tar -xf "$tmp_dir/$archive_name" -C "$tmp_dir"
+            
+            # Locate binary within extracted archive
+            local extracted_bin
+            extracted_bin=$(find "$tmp_dir" -type f -name "$APP" 2>/dev/null | head -n 1 || true)
+            if [ -n "$extracted_bin" ] && [ -f "$extracted_bin" ]; then
+                mv "$extracted_bin" "$INSTALL_DIR/$APP"
+                chmod 755 "$INSTALL_DIR/$APP"
+                download_success=true
+                break
+            fi
         fi
-    fi
+    done
 
     # Fallback to standalone binary if tarball was not found or extraction failed
     if [ "$download_success" != "true" ]; then

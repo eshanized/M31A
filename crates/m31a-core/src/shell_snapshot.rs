@@ -72,6 +72,7 @@ impl ShellSnapshot {
         {
             if let Ok(output) = std::process::Command::new(&shell_path)
                 .args(["-l", "-c", "env"])
+                .stdin(std::process::Stdio::null())
                 .output()
                 && output.status.success()
             {
@@ -90,9 +91,20 @@ impl ShellSnapshot {
             }
 
             // §7.10: Capture interactive startup aliases (e.g. `alias` command output)
-            if let Ok(alias_output) = std::process::Command::new(&shell_path)
-                .args(["-i", "-c", "alias"])
-                .output()
+            let mut alias_cmd = std::process::Command::new(&shell_path);
+            alias_cmd.args(["-i", "-c", "alias"]);
+            alias_cmd.stdin(std::process::Stdio::null());
+            #[cfg(unix)]
+            {
+                use std::os::unix::process::CommandExt;
+                unsafe {
+                    alias_cmd.pre_exec(|| {
+                        libc::setsid();
+                        Ok(())
+                    });
+                }
+            }
+            if let Ok(alias_output) = alias_cmd.output()
                 && alias_output.status.success()
             {
                 let text = String::from_utf8_lossy(&alias_output.stdout);

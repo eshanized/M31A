@@ -79,11 +79,12 @@ cargo build --release -p m31a-cli
 cp target/release/m31a ~/.local/bin/
 ```
 
-### Option D: Build with Bazel
+### Option D: Build with Just
 
 ```bash
-bazel build //bazel:m31a
-# The binary is generated at bazel-bin/bazel/m31a
+just release
+# Or build debug workspace
+just build
 ```
 
 ---

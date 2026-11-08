@@ -1,4 +1,4 @@
-name: Rust CI
+name: CI
 
 on:
   push:
@@ -25,9 +25,6 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - name: Set default Rust toolchain
-        run: rustup default stable
-
       - name: Install system dependencies
         run: |
           sudo apt-get update && sudo apt-get install -y protobuf-compiler bubblewrap
@@ -52,7 +49,7 @@ jobs:
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
   test-suite:
-    name: Genuine Workspace Tests
+    name: Workspace Tests (Nextest)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -61,8 +58,8 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Set default Rust toolchain
-        run: rustup default stable
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
 
       - name: Install system dependencies
         run: |
@@ -81,8 +78,11 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-test-
 
-      - name: Run full workspace test execution
-        run: env -u NVIDIA_API_KEY cargo test --workspace
+      - name: Run workspace unit and integration tests (Nextest)
+        run: env -u NVIDIA_API_KEY cargo nextest run --workspace --all-targets
+
+      - name: Run documentation tests
+        run: cargo test --workspace --doc
 
       - name: Run workspace trust verification suite
         run: cargo test -p m31a-trust
@@ -96,10 +96,61 @@ jobs:
       - name: Run architectural maturity e2e test
         run: cargo test -p m31a-agent-engine --test architectural_maturity_e2e_test
 
-  live-nvidia-suite:
-    name: Live NVIDIA NIM Verification Suite
-    needs: test-suite
-    if: github.event_name == 'workflow_dispatch'
+  cross-platform-build:
+    name: Build Verification (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+          - os: macos-13
+            target: x86_64-apple-darwin
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update && sudo apt-get install -y protobuf-compiler bubblewrap musl-tools
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target/
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-build-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.target }}-cargo-build-
+            ${{ runner.os }}-cargo-
+
+      - name: Build M31A CLI release binary
+        run: cargo build --release -p m31a-cli --bin m31a --target ${{ matrix.target }}
+
+  release-packaging:
+    name: Release Packaging Verification
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -108,8 +159,130 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Set default Rust toolchain
-        run: rustup default stable
+      - name: Install cargo-dist
+        uses: taiki-e/install-action@cargo-dist
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler bubblewrap
+
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target/
+          key: ${{ runner.os }}-cargo-dist-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-dist-
+
+      - name: Plan release distribution
+        run: cargo dist plan
+
+      - name: Build host release artifacts
+        run: cargo dist build --artifacts=host
+
+      - name: Upload local packaging artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: m31a-release-artifacts
+          path: target/distrib/
+          retention-days: 7
+
+  sdk-verification:
+    name: SDK Test Suite
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run Python SDK tests
+        run: PYTHONPATH=sdk/python python3 -m unittest discover -s sdk/python/tests
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Run TypeScript SDK tests
+        run: |
+          cd sdk/typescript
+          npm ci
+          npm test
+
+  schema-verification:
+    name: Protocol Schema Verification
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Verify schema extraction
+        run: |
+          python3 scripts/extract_protocol_schema.py schemas/app_server/schema.json
+          git diff --exit-code schemas/
+
+  e2e-benchmark:
+    name: E2E Benchmark
+    runs-on: ubuntu-latest
+    needs: [test-suite]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler bubblewrap
+
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target/
+          key: ${{ runner.os }}-cargo-bench-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-bench-
+
+      - name: Build M31A CLI binary for benchmark
+        run: cargo build --release -p m31a-cli --bin m31a
+
+      - name: Run E2E benchmark
+        run: python3 scripts/benchmark_runner.py --name bench_full_session --iterations 5 --output benchmark_results.json
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: benchmark_results.json
+          retention-days: 7
+
+  live-nvidia-suite:
+    name: Live NVIDIA NIM Verification Suite
+    needs: [test-suite]
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Install system dependencies
         run: |

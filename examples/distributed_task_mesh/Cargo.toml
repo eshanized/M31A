@@ -5,6 +5,9 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 
+[package.metadata.dist]
+dist = false
+
 [dependencies]
 tokio = { workspace = true, features = ["full"] }
 serde = { workspace = true, features = ["derive"] }

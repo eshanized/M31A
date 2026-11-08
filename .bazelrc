@@ -1,7 +1,0 @@
-# Default build & test configurations for M31A
-build --action_env=RUSTUP_TOOLCHAIN=stable
-test --test_env=PATH
-test --test_env=HOME
-test --test_env=CARGO_HOME
-test --test_env=RUSTUP_HOME
-test --test_env=RUSTUP_TOOLCHAIN=stable
