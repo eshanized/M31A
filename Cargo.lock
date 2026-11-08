@@ -1719,7 +1719,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "m31a-core",
- "prost 0.13.5",
+ "prost 0.14.4",
  "serde",
  "serde_json",
  "tempfile",
