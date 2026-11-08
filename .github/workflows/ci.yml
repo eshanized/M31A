@@ -127,13 +127,7 @@ jobs:
       - name: Set default Rust toolchain
         run: rustup default stable
 
-      - name: Install Protoc
-        uses: arduino/setup-protoc@v3
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Install Linux build dependencies
-        if: runner.os == 'Linux'
         run: |
           sudo apt-get update && sudo apt-get install -y protobuf-compiler bubblewrap musl-tools
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
