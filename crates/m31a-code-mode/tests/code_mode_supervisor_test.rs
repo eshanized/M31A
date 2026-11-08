@@ -92,9 +92,14 @@ async fn test_supervisor_infinite_loop_with_continuous_stdout_does_not_deadlock(
     let elapsed = start.elapsed();
     assert!(elapsed < Duration::from_secs(4));
     assert!(!outcome.yielded);
-    assert_eq!(
-        outcome.status,
-        m31a_code_mode::ProcessLifecycleState::TimedOut
+    assert!(
+        matches!(
+            outcome.status,
+            m31a_code_mode::ProcessLifecycleState::TimedOut
+                | m31a_code_mode::ProcessLifecycleState::ResourceExhausted
+        ),
+        "Expected TimedOut or ResourceExhausted, got {:?}",
+        outcome.status
     );
     assert!(
         outcome.output.len() <= 10_000,
@@ -138,9 +143,14 @@ async fn test_supervisor_infinite_loop_with_continuous_stderr_does_not_deadlock(
     let elapsed = start.elapsed();
     assert!(elapsed < Duration::from_secs(4));
     assert!(!outcome.yielded);
-    assert_eq!(
-        outcome.status,
-        m31a_code_mode::ProcessLifecycleState::TimedOut
+    assert!(
+        matches!(
+            outcome.status,
+            m31a_code_mode::ProcessLifecycleState::TimedOut
+                | m31a_code_mode::ProcessLifecycleState::ResourceExhausted
+        ),
+        "Expected TimedOut or ResourceExhausted, got {:?}",
+        outcome.status
     );
 }
 

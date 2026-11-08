@@ -168,10 +168,12 @@ jobs:
         run: rustup default stable
 
       - name: Install cargo-dist
-        run: |
-          curl --proto '=https' --tlsv1.2 -LsSf https://github.com/axodotdev/cargo-dist/releases/download/v0.34.0/cargo-dist-installer.sh | sh
-          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-          ln -sf "$HOME/.cargo/bin/dist" "$HOME/.cargo/bin/cargo-dist"
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-dist
+
+      - name: Configure cargo-dist binary symlink
+        run: ln -sf "$HOME/.cargo/bin/dist" "$HOME/.cargo/bin/cargo-dist"
 
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler bubblewrap
