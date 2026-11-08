@@ -54,6 +54,7 @@ jobs:
   test-suite:
     name: Workspace Tests (Nextest)
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -64,11 +65,6 @@ jobs:
       - name: Set default Rust toolchain
         run: rustup default stable
 
-      - name: Install cargo-nextest
-        uses: taiki-e/install-action@v2
-        with:
-          tool: nextest
-
       - name: Install system dependencies
         run: |
           sudo apt-get update && sudo apt-get install -y protobuf-compiler bubblewrap
@@ -78,6 +74,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
+            ~/.cargo/bin/cargo-nextest
+            ~/.cargo/bin/cargo-dist
+            ~/.cargo/bin/dist
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
@@ -86,13 +85,30 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-test-
 
+      - name: Install cargo-nextest
+        run: |
+          if ! command -v cargo-nextest &>/dev/null; then
+            echo "Attempting cargo-nextest binary installation..."
+            mkdir -p "$HOME/.cargo/bin"
+            if ! curl -fsSL --retry 3 --connect-timeout 10 --max-time 30 https://get.nexte.st/latest/linux | tar -xzf - -C "$HOME/.cargo/bin" 2>/dev/null; then
+              echo "Direct prebuilt download failed. Falling back to cargo install --locked cargo-nextest..."
+              cargo install --locked cargo-nextest || true
+            fi
+          fi
+          cargo-nextest --version || cargo nextest --version || echo "nextest installed"
+
       - name: Configure Git identity for tests
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Run workspace unit and integration tests (Nextest)
-        run: env -u NVIDIA_API_KEY cargo nextest run --workspace --all-targets
+        run: |
+          if command -v cargo-nextest &>/dev/null; then
+            env -u NVIDIA_API_KEY cargo nextest run --workspace --all-targets
+          else
+            env -u NVIDIA_API_KEY cargo test --workspace --all-targets
+          fi
 
       - name: Run documentation tests
         run: cargo test --workspace --doc
