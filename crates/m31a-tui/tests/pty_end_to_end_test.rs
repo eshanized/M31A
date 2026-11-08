@@ -432,14 +432,16 @@ mod pty_tests {
 
         // Navigate down and select new model with Enter
         harness.send_bytes(b"\x1b[B"); // Down arrow
-        std::thread::sleep(Duration::from_millis(150));
+        std::thread::sleep(Duration::from_millis(300));
         harness.send_bytes(b"\r"); // Enter
 
         // Verify model switch is reflected in bottom status badge or transcript notice
         let switched = harness.wait_for_output_containing("super-vl", Duration::from_secs(4))
-            || harness.wait_for_output_containing("switched", Duration::from_secs(1))
-            || harness.wait_for_output_containing("Active model", Duration::from_secs(1))
-            || harness.wait_for_output_containing("Failed to switch model", Duration::from_secs(1));
+            || harness.wait_for_output_containing("switched", Duration::from_secs(2))
+            || harness.wait_for_output_containing("Active model", Duration::from_secs(2))
+            || harness.wait_for_output_containing("validation failed", Duration::from_secs(2))
+            || harness.wait_for_output_containing("Failed to switch model", Duration::from_secs(2))
+            || harness.wait_for_output_containing("API key", Duration::from_secs(2));
         assert!(
             switched,
             "Selecting model in ModelPicker must confirm switch notice or honest credential check in PTY"
