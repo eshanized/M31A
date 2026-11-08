@@ -523,7 +523,15 @@ impl WorktreeManager {
 
         let commit_out = Command::new("git")
             .current_dir(&self.settings.repo_root)
-            .args(["commit", "-m", &full_commit_message])
+            .args([
+                "-c",
+                "user.name=M31A Agent Swarm",
+                "-c",
+                "user.email=agent-swarm@m31a.local",
+                "commit",
+                "-m",
+                &full_commit_message,
+            ])
             .output()
             .context("Failed executing git commit for agent changes")?;
 
@@ -553,6 +561,10 @@ mod tests {
         let path = dir.path().to_path_buf();
 
         let repo = Repository::init(&path).unwrap();
+        if let Ok(mut config) = repo.config() {
+            let _ = config.set_str("user.name", "M31A Test");
+            let _ = config.set_str("user.email", "test@m31a.local");
+        }
         let sig = git2::Signature::now("M31A Test", "test@m31a.local").unwrap();
 
         let file_path = path.join("README.md");

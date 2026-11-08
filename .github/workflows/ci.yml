@@ -86,6 +86,11 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-test-
 
+      - name: Configure Git identity for tests
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
       - name: Run workspace unit and integration tests (Nextest)
         run: env -u NVIDIA_API_KEY cargo nextest run --workspace --all-targets
 
