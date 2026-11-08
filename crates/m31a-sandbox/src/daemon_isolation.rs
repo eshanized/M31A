@@ -46,7 +46,10 @@ impl DaemonIsolation {
         let abs_workspace = std::fs::canonicalize(&abs_workspace).unwrap_or(abs_workspace);
         let workspace_cwd = &abs_workspace;
 
-        // Helper to register masks for both original path and canonical target if symlinked
+        // Helper to register masks for canonical target if existing.
+        // We canonicalize all paths so bwrap always mounts onto real directories/files
+        // rather than symlinks or paths with symlinked ancestors (like /var/run -> /run),
+        // which causes bwrap to fail with "Can't mount on symlink destination" or "Can't mkdir".
         let add_dir_mask = |dir: PathBuf, target_masks: &mut Vec<MaskType>| {
             let abs_dir = if dir.is_absolute() {
                 dir
@@ -54,13 +57,10 @@ impl DaemonIsolation {
                 std::env::current_dir().unwrap_or_default().join(dir)
             };
             if abs_dir.is_dir() {
-                if let Ok(canon) = abs_dir.canonicalize()
-                    && canon != abs_dir
-                    && canon.is_dir()
-                {
-                    target_masks.push(MaskType::DirectoryTmpfs(canon));
+                let target = abs_dir.canonicalize().unwrap_or(abs_dir);
+                if target.is_dir() {
+                    target_masks.push(MaskType::DirectoryTmpfs(target));
                 }
-                target_masks.push(MaskType::DirectoryTmpfs(abs_dir));
             }
         };
 
@@ -74,16 +74,12 @@ impl DaemonIsolation {
                 if abs_file.is_dir() {
                     add_dir_mask(abs_file, target_masks);
                 } else {
-                    if let Ok(canon) = abs_file.canonicalize()
-                        && canon != abs_file
-                    {
-                        if canon.is_dir() {
-                            target_masks.push(MaskType::DirectoryTmpfs(canon));
-                        } else {
-                            target_masks.push(MaskType::FileDevNull(canon));
-                        }
+                    let target = abs_file.canonicalize().unwrap_or(abs_file);
+                    if target.is_dir() {
+                        target_masks.push(MaskType::DirectoryTmpfs(target));
+                    } else {
+                        target_masks.push(MaskType::FileDevNull(target));
                     }
-                    target_masks.push(MaskType::FileDevNull(abs_file));
                 }
             }
         };
