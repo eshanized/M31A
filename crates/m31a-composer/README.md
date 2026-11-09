@@ -1,36 +1,71 @@
 # `m31a-composer`
 
-Advanced multiline terminal textarea, paste burst protection, `@` file mentions, and slash command autocompletion for **M31A**.
+> Multiline prompt composer, soft-wrapping textarea, undo/redo history, paste burst normalization, and slash-command autocompletion for M31A.
 
 ---
 
-## Overview
+## Why Does This Crate Exist?
 
-`m31a-composer` powers the user prompt input experience in the M31A Terminal User Interface. It handles multiline editing, cursor navigation, terminal paste-burst buffering (compressing 1,000+ line pastes into interactive preview pills), `@` symbol/file fuzzy mentions, and slash command parsing with real-time popup autocompletion.
+Prompting an autonomous coding assistant often requires multiline instructions, pasted stack traces, and embedded code snippets. Single-line terminal inputs (like standard `readline`) are frustrating when you need to navigate up a few lines to fix a typo, paste 20 lines of JSON without terminal glitching, or complete a slash command.
 
----
-
-## User-Facing Capabilities
-
-- **Multiline Textarea**: Smooth text entry with `Shift+Enter` for newlines and `Enter` to submit.
-- **Paste Burst Protection**: When pasting huge blocks of code or logs, prevents terminal UI lag by rendering a compact `[Pasted Code: 250 lines]` pill widget.
-- **Slash Command Autocompletion (`/`)**: Real-time fuzzy popup suggesting commands like `/help`, `/model`, `/vibe`, `/diff`, and `/safety`.
-- **`@` Mentions**: Type `@` to search files and inject targeted workspace context directly into your prompt.
+`m31a-composer` provides a specialized terminal text editor built for AI interaction:
+- **Multiline Textarea (`TextArea`)**: Smooth 2D cursor navigation (`Up`, `Down`, `Left`, `Right`, `Home`, `End`), word jumps (`Alt+F`, `Alt+B`), and line deletion (`Ctrl+K`).
+- **Undo/Redo History**: Full snapshot undo stack (`Ctrl+Z`, `Ctrl+Y`).
+- **Paste Burst Normalization (`paste_burst.rs`)**: Detects bracketed paste mode, normalizing CRLF newlines and preventing input lag when pasting large code blocks.
+- **Slash Commands & Mentions Autocompletion**: Live popups for `/command` suggestions and `@` file path completions using fuzzy matching.
 
 ---
 
-## Developer Guide & Architecture
+## Core Concepts & How It Works
 
-### Key Modules
+### 1. Two-Dimensional Cursor Navigation (`textarea.rs`)
+Tracks `cursor_row` and `cursor_col` across a `Vec<String>` buffer. Supports newline insertion with `Shift+Enter` and form submission with `Enter`.
 
-- [`textarea`](src/textarea.rs): Core `TextArea` widget supporting undo/redo, cursor positioning, and line wrapping.
-- [`slash`](src/slash.rs): `BUILTIN_SLASH_COMMANDS` registry, `tokenize_slash_command()`, `parse_and_resolve()`, and `SlashPopup` UI widget.
-- [`paste_burst`](src/paste_burst.rs): `PasteBurstDetector` identifying rapid terminal bracketed pastes and wrapping them into `PastedSnippetPill`.
-- [`mentions`](src/mentions.rs): `MentionsPopup` querying workspace paths and symbols.
+### 2. Slash-Command Autocompletion Popup (`slash.rs`)
+When the user types `/`, `SlashEngine` filters available commands (e.g. `/model`, `/diff`, `/vibe`, `/verify`, `/review`) using fuzzy algorithms, rendering a floating completion popup above the composer.
+
+### 3. Bracketed Paste Handling (`paste_burst.rs`)
+When pasting hundreds of lines from an IDE or browser, terminals send characters in rapid bursts. `PasteBurstNormalizer` captures bracketed paste delimiters (`\x1b[200~` ... `\x1b[201~`), sanitizes line breaks, and inserts the block as a single undoable transaction.
 
 ---
 
-## Testing
+## Key Modules & Types
+
+| Module | Key Structs / Enums | Purpose |
+| :--- | :--- | :--- |
+| [`src/textarea.rs`](src/textarea.rs) | `TextArea` | Core multiline text buffer with cursor, undo/redo, and kill buffer. |
+| [`src/slash.rs`](src/slash.rs) | `SlashEngine`, `SlashCommandCandidate` | Fuzzy filtering and ranking for slash command autocompletions. |
+| [`src/paste_burst.rs`](src/paste_burst.rs) | `PasteBurstNormalizer` | Normalizes rapid terminal paste bursts and escapes. |
+| [`src/mentions.rs`](src/mentions.rs) | `MentionResolver`, `MentionCandidate` | Resolves `@filename` and `@symbol` references in prompt text. |
+
+---
+
+## Practical Usage Example
+
+```rust
+use m31a_composer::textarea::TextArea;
+
+fn main() {
+    let mut composer = TextArea::new();
+
+    // 1. Insert text
+    composer.insert_char('H');
+    composer.insert_char('i');
+    composer.insert_newline();
+    composer.insert_str("Run cargo check and fix warnings");
+
+    println!("Current text:\n{}", composer.text());
+    println!("Cursor position: row={}, col={}", composer.cursor_row, composer.cursor_col);
+
+    // 2. Test undo
+    composer.undo();
+    println!("After undo:\n{}", composer.text());
+}
+```
+
+---
+
+## Testing & Verification
 
 ```bash
 cargo test -p m31a-composer

@@ -1,46 +1,75 @@
 # `m31a-cloud-tasks`
 
-gRPC client for remote agent fleet dispatch and scalable cloud worker execution in **M31A**.
+> gRPC-based remote task execution client, distributed agent fleet dispatch, and cloud workload offloading for M31A.
 
 ---
 
-## Overview
+## Why Does This Crate Exist?
 
-`m31a-cloud-tasks` provides client and protocol definitions for delegating compute-intensive agent workloads, large compilation matrices, long test suites, and parallel benchmarks to remote cloud runtimes over gRPC/Tonic with TLS.
+While local execution in Linux Bubblewrap sandboxes works brilliantly for normal projects, certain engineering workloads exceed local laptop resources:
+- Running heavy End-to-End integration test matrices across 10 distinct database containers.
+- Compiling massive monorepos requiring 64+ vCPUs and 128 GB of RAM.
+- Distributing speculative solution candidate benchmarks across a cluster of dedicated compute nodes.
 
----
-
-## User-Facing Capabilities
-
-- **Remote Task Offloading (`m31a cloud`)**: Enables offloading heavy builds, speculative candidate evaluations, and integration test executions to dedicated remote execution clusters.
-- **Agent Fleet Spawning**: Allows local sessions to orchestrate remote subagents seamlessly.
+`m31a-cloud-tasks` enables M31A to offload heavy compilation, testing, and agent execution to remote cloud compute fleets over authenticated gRPC.
 
 ---
 
-## Developer Guide & Architecture
+## Core Concepts & How It Works
 
-### Protocol & Key Modules
+### 1. High-Performance gRPC Transport (Tonic & Protobuf)
+Uses typed Protocol Buffers (`m31a.cloud.tasks.v1`) to stream task requests, tool inputs, and console outputs with low latency and binary compression.
 
-- [`proto`](build.rs): Compiles `proto/cloud_tasks.proto` via `tonic-build` into strongly typed RPC stubs (`m31a.cloud.tasks.v1`).
-- `CloudTasksClient`: Handles TLS endpoint configuration, token authentication, `ExecuteTaskRequest`, and `SpawnAgentRequest`.
+### 2. Enterprise Authentication & TLS
+Supports multiple enterprise security schemes:
+- Mutual TLS (mTLS) with custom CA root certificates.
+- API Key authentication.
+- Cloud Workload Identity Federation (GCP/AWS/Azure).
+- OAuth2 Bearer tokens.
 
-### Programmatic Usage
+### 3. Remote Capability Discovery
+Before dispatching a task, the client queries `GetCapabilities` on the remote worker node to verify available CPU cores, memory headroom, GPU acceleration, and installed toolchains.
+
+---
+
+## Key Types & Structs
+
+| Struct / Enum | Description |
+| :--- | :--- |
+| `CloudTasksClient` | Asynchronous Tonic gRPC client communicating with remote fleet endpoints. |
+| `CloudTasksConfig` | Endpoint URL, TLS certificates, timeouts, and authentication settings. |
+| `CloudAuth` | Auth schemes: `ApiKey`, `WorkloadIdentity`, `OAuth2`, or `None`. |
+| `ExecuteTaskRequest` | Serialized command, environment variables, working directory, and timeout. |
+
+---
+
+## Practical Usage Example
 
 ```rust
-use m31a_cloud_tasks::CloudTasksClient;
+use m31a_cloud_tasks::{CloudAuth, CloudTasksConfig};
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    let mut client = CloudTasksClient::connect("https://cloud.m31a.io:8443").await?;
-    let capabilities = client.get_capabilities().await?;
-    println!("Remote fleet available workers: {}", capabilities.available_workers);
+fn main() -> anyhow::Result<()> {
+    let config = CloudTasksConfig {
+        endpoint: "https://tasks.fleet.internal:8443".into(),
+        auth: CloudAuth::ApiKey {
+            key: "fleet-token-xyz...".into(),
+        },
+        tls_cert_path: None,
+        tls_key_path: None,
+        ca_cert_path: None,
+        timeout_seconds: 300,
+        max_retries: 3,
+    };
+
+    config.validate()?;
+    println!("Cloud Tasks client configured for: {}", config.endpoint);
     Ok(())
 }
 ```
 
 ---
 
-## Testing
+## Testing & Verification
 
 ```bash
 cargo test -p m31a-cloud-tasks

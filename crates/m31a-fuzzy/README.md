@@ -1,33 +1,64 @@
 # `m31a-fuzzy`
 
-High-performance fuzzy matching, scoring, and candidate search engine for **M31A**.
+> High-performance zero-allocation fuzzy matching, candidate ranking, and path search engine for M31A.
 
 ---
 
-## Overview
+## Why Does This Crate Exist?
 
-`m31a-fuzzy` implements optimized fuzzy string matching and ranking algorithms. It drives the universal command palette (`Ctrl+P`), workspace file scanning (`@file`), model search (`Ctrl+M`), and prompt history filtering with zero external C dependencies.
+When searching across a repository with 50,000 files in the universal command palette (`Ctrl+P`) or auto-completing slash commands in the composer, latency must be under 5 milliseconds. If fuzzy search lags, the entire interactive terminal experience feels sluggish.
 
----
-
-## User-Facing Capabilities
-
-- **Universal Command Palette (`Ctrl+P`)**: Blazing-fast interactive search across commands, tools, open files, and recent prompts.
-- **Typo-Tolerant Matching**: Scores matches by contiguous runs, prefix matches, word boundaries, and camelCase/snake_case transitions.
+`m31a-fuzzy` is an optimized fuzzy scoring engine engineered in Rust:
+- **Zero-Allocation Stack Fast-Path**: Uses fixed-size stack buffers for paths under 256 bytes (covering >99.9% of codebase paths), avoiding heap allocations entirely.
+- **SIMD-Friendly Subsequence Pre-Check**: Instantly eliminates non-matching targets in a single CPU pass before computing detailed alignment matrices.
+- **Sophisticated Scoring Heuristics**: Awards bonuses for prefix matches, word boundaries (camelCase, snake_case, kebab-case), consecutive character runs, and path segment separators (`/`).
 
 ---
 
-## Developer Guide & Architecture
+## Core Concepts & How It Works
 
-### Key Modules
+### 1. Two-Phase Matching Pipeline
+1. **Fast-Reject Pre-Check**: Checks whether the query is a subsequence of the target using case-insensitive ASCII comparison. If not, drops out immediately ($O(N)$).
+2. **Alignment & Bonus Matrix**: Computes the optimal alignment, awarding:
+   - Start of string bonus: `+35`
+   - Path separator boundary (`/` or `\`): `+30`
+   - Word boundary (`_`, `-`, `.`, camelCase shift): `+25`
+   - Consecutive match multiplier.
 
-- [`matcher`](src/matcher.rs): `fuzzy_match(pattern, text) -> Option<i32>` returning match score, and `fuzzy_match_indices()` returning exact matched character spans for UI highlighting.
-- [`file_search`](src/file_search.rs): `WorkspaceScanner` providing asynchronous, gitignore-aware directory traversal.
-- [`candidates`](src/candidates.rs): Generic `Candidate` abstraction wrapping heterogeneous search items.
+### 2. File & Symbol Search Integration (`file_search.rs`)
+Powers the `file_search` tool and palette navigation, returning ranked results with matched character indices for ANSI highlighting.
 
 ---
 
-## Testing
+## Key Modules & Functions
+
+| Module | Key Functions / Types | Purpose |
+| :--- | :--- | :--- |
+| [`src/matcher.rs`](src/matcher.rs) | `fuzzy_match_indices_ascii`, `fuzzy_score` | Core zero-allocation scoring algorithm and matched index extractor. |
+| [`src/candidates.rs`](src/candidates.rs) | `CandidateFilter`, `ScoredCandidate` | Top-K candidate ranking and score thresholding. |
+| [`src/file_search.rs`](src/file_search.rs) | `FuzzyFileSearcher` | Traverses directories and scores matching file paths in parallel. |
+
+---
+
+## Practical Usage Example
+
+```rust
+use m31a_fuzzy::matcher::fuzzy_match_indices_ascii;
+
+fn main() {
+    let query = b"mcpc";
+    let target = b"crates/m31a-mcp/src/client.rs";
+
+    if let Some((score, indices)) = fuzzy_match_indices_ascii(query, target) {
+        println!("Match found! Score: {}", score);
+        println!("Matched character indices: {:?}", indices);
+    }
+}
+```
+
+---
+
+## Testing & Verification
 
 ```bash
 cargo test -p m31a-fuzzy

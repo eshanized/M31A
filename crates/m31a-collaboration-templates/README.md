@@ -1,36 +1,65 @@
 # `m31a-collaboration-templates`
 
-Pre-configured workflow templates for pair programming, code review, debugging, and architecture design in **M31A**.
+> Pre-configured multi-agent collaboration patterns, session templates, and guided team workflow blueprints for M31A.
 
 ---
 
-## Overview
+## Why Does This Crate Exist?
 
-`m31a-collaboration-templates` provides structured session templates that initialize system prompts, security presets, tool allowances, and execution step pipelines tailored to specific software engineering workflows.
+Setting up effective multi-agent engineering workflows from scratch can be tedious. A security audit requires a completely different tool configuration, approval policy, and persona from a high-speed pair programming session or a speculative refactoring task.
 
----
-
-## User-Facing Capabilities
-
-- **Workflow Presets (`m31a template apply <template-id>`)**: Instantly switches agent configuration to pre-tested configurations for:
-  - `pair-programming`: Interactive coding with human-in-the-loop approvals.
-  - `rigorous-code-review`: Read-only security audit and blast-radius evaluation.
-  - `system-architecture`: Exploration, threat modeling, and design document drafting.
-  - `zero-babysitter-debug`: Deep root-cause isolation and test suite regression checks.
+`m31a-collaboration-templates` provides ready-to-run collaborative blueprints:
+- Pre-packaged templates for `PairProgramming`, `CodeReview`, `Debugging`, `ArchitectureDesign`, `SecurityAudit`, and `PerformanceOptimization`.
+- Defines optimal tool combinations, sandbox isolation levels, and approval presets for each workflow.
+- Structures guided multi-step processes so agents methodically progress through planning, execution, and verification.
 
 ---
 
-## Developer Guide & Architecture
+## Core Concepts & How It Works
 
-### Key Types
+### 1. Template Categories (`TemplateCategory`)
+- **`PairProgramming`**: Interactive back-and-forth session with high verbosity and instant patch verification.
+- **`CodeReview`**: Read-only exploration focusing on security, API drift, and code style.
+- **`SecurityAudit`**: Airgapped sandbox profile running taint analysis, secret scanning, and dependency legitimacy checks.
+- **`PerformanceOptimization`**: Focuses on memory profiling, benchmark generation, and hot-loop optimization.
 
-- `CollaborationTemplate`: Root struct containing template ID, description, category, tags, and step pipeline.
-- `TemplateConfig`: Bundles `SandboxPolicy`, `ApprovalPolicy`, and model temperature recommendations.
-- `TemplateStep`: Ordered steps with specialized instructions injected sequentially into agent context.
+### 2. Parameterized Blueprint Steps (`TemplateStep`)
+Each template contains sequential milestones that guide the agent through its objective without losing focus.
 
 ---
 
-## Testing
+## Key Modules & Types
+
+| Struct / Enum | Description |
+| :--- | :--- |
+| `CollaborationTemplate` | Full specification: ID, name, category, icon, step milestones, and config overrides. |
+| `TemplateCategory` | Categorization enum (`PairProgramming`, `CodeReview`, `Debugging`, etc.). |
+| `TemplateRegistry` | Central store discovering, validating, and instantiating collaboration templates. |
+| `TemplateConfig` | Custom overrides for sandbox policy, approval mode, and active tools. |
+
+---
+
+## Practical Usage Example
+
+```rust
+use m31a_collaboration_templates::{CollaborationTemplate, TemplateCategory, TemplateRegistry};
+
+fn main() -> anyhow::Result<()> {
+    let registry = TemplateRegistry::load_builtin()?;
+
+    // Find security audit templates
+    let templates = registry.find_by_category(TemplateCategory::SecurityAudit);
+    for template in templates {
+        println!("Template: {} (Steps: {})", template.name, template.steps.len());
+    }
+
+    Ok(())
+}
+```
+
+---
+
+## Testing & Verification
 
 ```bash
 cargo test -p m31a-collaboration-templates
