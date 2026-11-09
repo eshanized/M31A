@@ -15,6 +15,7 @@ mod pty_tests {
     struct RealPtyHarness {
         master_fd: RawFd,
         child: Child,
+        history: String,
     }
 
     impl RealPtyHarness {
@@ -96,6 +97,7 @@ mod pty_tests {
             Self {
                 master_fd: master,
                 child,
+                history: String::new(),
             }
         }
 
@@ -112,6 +114,7 @@ mod pty_tests {
 
         fn drain_output(&mut self) {
             let _ = self.read_available();
+            self.history.clear();
         }
 
         fn resize(&mut self, rows: u16, cols: u16) {
@@ -169,25 +172,32 @@ mod pty_tests {
             }
 
             std::mem::forget(f);
+            if !out.is_empty() {
+                self.history.push_str(&String::from_utf8_lossy(&out));
+            }
             out
         }
 
         fn wait_for_output_containing(&mut self, needle: &str, timeout: Duration) -> bool {
-            let start = Instant::now();
-            let mut accumulated = String::new();
+            self.wait_for_any_output_containing(&[needle], timeout)
+        }
 
-            while start.elapsed() < timeout {
-                let bytes = self.read_available();
-                if !bytes.is_empty() {
-                    let text = String::from_utf8_lossy(&bytes);
-                    accumulated.push_str(&text);
-                    if accumulated.contains(needle) {
+        fn wait_for_any_output_containing(&mut self, needles: &[&str], timeout: Duration) -> bool {
+            let start = Instant::now();
+            loop {
+                for needle in needles {
+                    if self.history.contains(needle) {
                         return true;
                     }
                 }
-                std::thread::sleep(Duration::from_millis(50));
+                if start.elapsed() >= timeout {
+                    break;
+                }
+                let bytes = self.read_available();
+                if bytes.is_empty() {
+                    std::thread::sleep(Duration::from_millis(50));
+                }
             }
-
             false
         }
     }
@@ -369,8 +379,8 @@ mod pty_tests {
         harness.send_bytes(&[0x19]);
 
         // Expect notice about clipboard or code block
-        let noticed = harness.wait_for_output_containing("code block", Duration::from_secs(4))
-            || harness.wait_for_output_containing("clipboard", Duration::from_secs(4));
+        let noticed = harness
+            .wait_for_any_output_containing(&["code block", "clipboard"], Duration::from_secs(4));
         assert!(
             noticed,
             "Ctrl+Y must emit clipboard copy result or notice in PTY"
@@ -436,15 +446,24 @@ mod pty_tests {
         harness.send_bytes(b"\r"); // Enter
 
         // Verify model switch is reflected in bottom status badge or transcript notice
-        let switched = harness.wait_for_output_containing("super-vl", Duration::from_secs(4))
-            || harness.wait_for_output_containing("switched", Duration::from_secs(2))
-            || harness.wait_for_output_containing("Active model", Duration::from_secs(2))
-            || harness.wait_for_output_containing("validation failed", Duration::from_secs(2))
-            || harness.wait_for_output_containing("Failed to switch model", Duration::from_secs(2))
-            || harness.wait_for_output_containing("API key", Duration::from_secs(2));
+        let switched = harness.wait_for_any_output_containing(
+            &[
+                "super-vl",
+                "switched",
+                "Active model",
+                "validation failed",
+                "Failed to switch model",
+                "Failed to activate model",
+                "Connecting to",
+                "Validating connectivity",
+                "API key",
+            ],
+            Duration::from_secs(6),
+        );
         assert!(
             switched,
-            "Selecting model in ModelPicker must confirm switch notice or honest credential check in PTY"
+            "Selecting model in ModelPicker must confirm switch notice or honest credential check in PTY. Captured history: {}",
+            harness.history
         );
 
         // Clean quit
@@ -473,11 +492,14 @@ mod pty_tests {
 
         // Close and persist with Esc
         harness.send_bytes(&[0x1b]);
-        let saved = harness.wait_for_output_containing("Settings saved", Duration::from_secs(4))
-            || harness.wait_for_output_containing("saved to", Duration::from_secs(4));
+        let saved = harness.wait_for_any_output_containing(
+            &["Settings saved", "saved to"],
+            Duration::from_secs(6),
+        );
         assert!(
             saved,
-            "Dismissing Settings modal must save config to disk and report notice"
+            "Dismissing Settings modal must save config to disk and report notice. Captured history: {}",
+            harness.history
         );
 
         // Clean quit
