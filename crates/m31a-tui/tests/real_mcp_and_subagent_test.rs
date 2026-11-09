@@ -108,9 +108,14 @@ async fn test_real_mcp_server_roundtrip_and_tool_registration() {
     // 2. Connect to local MCP server via toggle_mcp_server_sync
     app.toggle_mcp_server_sync("calc");
 
-    // Wait for async spawn & connection
+    // Wait for async spawn & connection and tool registration
     for _ in 0..60 {
-        if app.mcp_manager.is_server_connected_sync("calc") {
+        let has_tool = app
+            .tools
+            .definitions()
+            .iter()
+            .any(|d| d.function.name == "mcp__calc__add");
+        if app.mcp_manager.is_server_connected_sync("calc") && has_tool {
             break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -144,7 +149,13 @@ async fn test_real_mcp_server_roundtrip_and_tool_registration() {
     app.toggle_mcp_server_sync("calc");
 
     for _ in 0..60 {
-        if !app.mcp_manager.is_server_connected_sync("calc") {
+        let has_tool = app
+            .tools
+            .definitions()
+            .iter()
+            .any(|d| d.function.name == "mcp__calc__add");
+        let tools_empty = app.mcp_manager.get_server_tools_sync("calc").is_empty();
+        if !app.mcp_manager.is_server_connected_sync("calc") && !has_tool && tools_empty {
             break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;

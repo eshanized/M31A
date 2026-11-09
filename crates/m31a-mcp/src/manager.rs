@@ -343,9 +343,11 @@ impl McpManager {
             clients.remove(name)
         };
         if let Some(client) = client {
+            {
+                let mut specs = self.cached_tool_specs.write().await;
+                specs.retain(|_, (srv, _)| srv != name);
+            }
             client.close().await;
-            let mut specs = self.cached_tool_specs.write().await;
-            specs.retain(|_, (srv, _)| srv != name);
             true
         } else {
             false
@@ -354,11 +356,11 @@ impl McpManager {
 
     /// Closes all connected servers and drains registries.
     pub async fn shutdown_all(&self) {
+        self.cached_tool_specs.write().await.clear();
         let mut clients = self.clients.write().await;
         for (_, client) in clients.drain() {
             client.close().await;
         }
-        self.cached_tool_specs.write().await.clear();
     }
 
     /// Synchronously checks if a server is currently connected without blocking.

@@ -1749,8 +1749,8 @@ impl App {
                 let connected = mcp.is_server_connected_sync(&srv_name)
                     || mcp.list_server_names().await.contains(&srv_name);
                 if connected {
-                    mcp.disconnect_server(&srv_name).await;
                     tools_reg.unregister_server_tools(&srv_name);
+                    mcp.disconnect_server(&srv_name).await;
                     let _ = event_tx
                         .send(TuiEvent::Notice(
                             format!(
