@@ -11,6 +11,26 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
+## [0.1.15] — 2026-11-14
+
+### Added
+- **Demand-Driven Coordination & Worktree-First Execution**:
+  - Independent Git worktrees as the default execution and isolation boundary for concurrent coding tasks (`WorkspaceIsolationStrategy::Worktree`).
+  - Demand-driven coordination infrastructure activated conditionally only when shared mutable resources require concurrency control.
+  - Conflict discovery and dynamic replanning: structured conflict reports, transactional DAG updates, cycle detection (`would_create_cycle`), and automatic unblocking of ready tasks.
+  - Durable integration pipeline with content-addressed idempotent deduplication, stale base revision detection, preflight validation, and exact per-file rollbacks.
+  - SQLite database migration 18 adding `managed_worktrees`, `workflow_integrations`, and `workflow_conflicts` tables with complete recovery of active worktrees across restarts.
+  - Architectural performance evaluation benchmark suite validating ~2.7x speedup with worktree-first parallelism (40ms vs 109ms baseline).
+  - 13 comprehensive end-to-end integration tests on genuine Git repositories and file-backed SQLite verifying concurrent worktrees, conflict replanning, and verification failure rollbacks.
+- **Documentation Refactoring**:
+  - Published authoritative Demand-Driven Coordination architecture guide (`docs/architecture/DEMAND_DRIVEN_COORDINATION.md`).
+  - Streamlined and modernized user-facing specifications for TUI Approval Interaction, Model Selector, and Transcript Rendering in `docs/tui/`.
+  - Cleaned up internal audit reports across `docs/reports/` and refreshed the documentation hub index (`docs/README.md`).
+- **Version Bump**:
+  - Bumped workspace package, client protocol, installer scripts, and official TypeScript/Python SDK versions to `0.1.15`.
+
+---
+
 ## [0.1.14] — 2026-11-07
 
 ### Added
@@ -576,7 +596,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ### Added
 - Initial project genesis: single-crate architecture, kernel, and phase planning
 
-[Unreleased]: https://github.com/eshanized/M31A/compare/v0.1.14...HEAD
+[Unreleased]: https://github.com/eshanized/M31A/compare/v0.1.15...HEAD
+[0.1.15]: https://github.com/eshanized/M31A/compare/v0.1.14...v0.1.15
 [0.1.14]: https://github.com/eshanized/M31A/compare/v0.1.13...v0.1.14
 [0.1.13]: https://github.com/eshanized/M31A/compare/v0.1.12...v0.1.13
 [0.1.12]: https://github.com/eshanized/M31A/releases/tag/v0.1.12
