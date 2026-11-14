@@ -19,11 +19,14 @@ use std::process::Command;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
+use chrono::Utc;
+use m31a_core::workflow::{IntegrationLifecycleStatus, IntegrationRecord};
+use m31a_storage::{WorkflowStore, WorktreeManager, WorktreeSettings};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tracing::{error, info, warn};
+use uuid::Uuid;
 
-use m31a_storage::{WorktreeManager, WorktreeSettings};
 use m31a_verify::AutonomousVerifier;
 
 /// Static mutual exclusion lock guaranteeing serialized integration onto target workspaces.
@@ -67,6 +70,36 @@ pub struct IntegrationRequest {
     pub attempt_id: Option<u32>,
     /// Expected change-set hash for immutable binding.
     pub expected_change_set_hash: Option<String>,
+    /// Source Git branch of the child worktree, if applicable.
+    pub source_branch: Option<String>,
+    /// Base commit SHA from which the child worktree was branched.
+    pub source_base_sha: Option<String>,
+    /// Expected target repository base SHA at the time the child worktree was created.
+    pub target_base_sha: Option<String>,
+}
+
+impl Default for IntegrationRequest {
+    fn default() -> Self {
+        Self {
+            workspace_root: PathBuf::new(),
+            patch_content: String::new(),
+            source_label: String::new(),
+            commit_message: None,
+            require_approval: false,
+            is_approved: false,
+            author_role: None,
+            skip_dirty_check: false,
+            skip_verification: false,
+            verification_timeout: None,
+            workflow_id: None,
+            task_id: None,
+            attempt_id: None,
+            expected_change_set_hash: None,
+            source_branch: None,
+            source_base_sha: None,
+            target_base_sha: None,
+        }
+    }
 }
 
 /// Detailed outcome of an integration attempt.
@@ -242,17 +275,164 @@ impl FileSnapshot {
 /// Service providing unified, authoritative integration logic across direct agents,
 /// speculative candidates, and workflow execution steps.
 #[derive(Debug, Default, Clone)]
-pub struct WorkflowIntegrationService;
+pub struct WorkflowIntegrationService {
+    store: Option<WorkflowStore>,
+}
 
 impl WorkflowIntegrationService {
     pub fn new() -> Self {
-        Self
+        Self { store: None }
+    }
+
+    pub fn with_store(mut self, store: WorkflowStore) -> Self {
+        self.store = Some(store);
+        self
+    }
+
+    pub fn store(&self) -> Option<&WorkflowStore> {
+        self.store.as_ref()
+    }
+
+    /// Resolve HEAD commit SHA of a git repository directory.
+    pub fn get_current_head(&self, workspace_root: &Path) -> Result<String> {
+        let output = Command::new("git")
+            .current_dir(workspace_root)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .context("Failed running git rev-parse HEAD")?;
+        if !output.status.success() {
+            bail!("git rev-parse HEAD failed");
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    }
+
+    /// Returns list of files modified between two commit revisions.
+    pub fn get_modified_files_between(
+        &self,
+        workspace_root: &Path,
+        from_sha: &str,
+        to_sha: &str,
+    ) -> Result<Vec<PathBuf>> {
+        let output = Command::new("git")
+            .current_dir(workspace_root)
+            .args(["diff", "--name-only", &format!("{from_sha}..{to_sha}")])
+            .output()
+            .context("Failed running git diff --name-only")?;
+        if !output.status.success() {
+            bail!("git diff between revisions failed");
+        }
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let files = stdout
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .map(PathBuf::from)
+            .collect();
+        Ok(files)
+    }
+
+    /// Evaluates whether a patch diff can apply cleanly to the workspace (preflight check).
+    pub fn git_preflight_check(&self, workspace_root: &Path, patch_content: &str) -> Result<bool> {
+        if patch_content.contains("*** Begin Patch") {
+            let parsed = match m31a_tools::patch::parse_patch(patch_content) {
+                Ok(p) => p,
+                Err(_) => return Ok(false),
+            };
+            for hunk in &parsed.hunks {
+                let target_path = workspace_root.join(hunk.path());
+                match hunk {
+                    m31a_tools::patch::Hunk::UpdateFile { chunks, .. } => {
+                        if !target_path.exists() {
+                            return Ok(false);
+                        }
+                        if let Ok(file_content) = fs::read_to_string(&target_path) {
+                            for chunk in chunks {
+                                for old_line in &chunk.old_lines {
+                                    if !file_content.contains(old_line) {
+                                        return Ok(false);
+                                    }
+                                }
+                            }
+                        } else {
+                            return Ok(false);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Ok(true)
+        } else {
+            let mut child = Command::new("git")
+                .current_dir(workspace_root)
+                .args(["apply", "--check", "--ignore-whitespace", "-"])
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .context("Failed to spawn git apply --check preflight")?;
+
+            if let Some(mut stdin) = child.stdin.take() {
+                use std::io::Write;
+                let _ = stdin.write_all(patch_content.as_bytes());
+            }
+
+            let output = child.wait_with_output()?;
+            Ok(output.status.success())
+        }
+    }
+
+    /// Preserves a failed or rejected integration patch on disk and in durable storage for diagnostics.
+    fn preserve_failed_patch(&self, req: &IntegrationRequest, change_set_hash: &str, reason: &str) {
+        if let (Some(store), Some(wf_id)) = (&self.store, &req.workflow_id) {
+            let task_part = req.task_id.as_deref().unwrap_or("unknown");
+            let hash_prefix = if change_set_hash.len() >= 8 {
+                &change_set_hash[..8]
+            } else {
+                change_set_hash
+            };
+            let artifact_name = format!("failed_integration_{task_part}_{hash_prefix}.diff");
+            let _ = store.store_artifact_file(
+                &req.workspace_root,
+                wf_id,
+                req.task_id.as_deref(),
+                &artifact_name,
+                "failed_integration_patch",
+                req.patch_content.as_bytes(),
+                "text/x-diff",
+            );
+            warn!(
+                workflow_id = %wf_id,
+                task_id = ?req.task_id,
+                reason = %reason,
+                artifact = %artifact_name,
+                "Preserved failed integration patch artifact"
+            );
+        }
+    }
+
+    fn update_record_status(
+        &self,
+        id: &str,
+        status: IntegrationLifecycleStatus,
+        target_sha: Option<&str>,
+        error: Option<&str>,
+    ) {
+        if let Some(ref store) = self.store {
+            let _ = store.update_integration_status(id, status, target_sha, error);
+        }
     }
 
     /// Execute an authoritative integration workflow.
     pub async fn integrate(&self, req: &IntegrationRequest) -> Result<IntegrationOutcome> {
         let _integration_guard = INTEGRATION_LOCK.lock().await;
         let is_git = req.workspace_root.join(".git").exists();
+        let now_ms = Utc::now().timestamp_millis();
+        let integration_id = format!("integ-{}", Uuid::new_v4().simple());
+        let current_target_sha = if is_git {
+            self.get_current_head(&req.workspace_root).ok()
+        } else {
+            None
+        };
 
         // 0. Change-set hash verification
         let actual_hash = compute_change_set_hash(&req.patch_content);
@@ -278,20 +458,28 @@ impl WorkflowIntegrationService {
             });
         }
 
-        // 1. Approval gating
-        if req.require_approval && !req.is_approved {
+        // 0.1 Idempotent deduplication check: If already promoted, return success immediately
+        if let (Some(store), Some(wf_id)) = (&self.store, &req.workflow_id)
+            && let Ok(Some(promoted)) = store.find_promoted_integration_by_hash(wf_id, &actual_hash)
+        {
+            info!(
+                workflow_id = %wf_id,
+                change_set_hash = %actual_hash,
+                promoted_id = %promoted.id,
+                "Idempotent skip: change-set hash already promoted"
+            );
             return Ok(IntegrationOutcome {
-                success: false,
-                pre_check_clean: false,
-                approval_granted: false,
+                success: true,
+                pre_check_clean: true,
+                approval_granted: true,
                 patch_applied: false,
-                verification_passed: false,
-                commit_completed: false,
+                verification_passed: true,
+                commit_completed: true,
                 rollback_performed: false,
-                commit_sha: None,
-                modified_files: Vec::new(),
-                error: Some("Human approval required for integration but not granted".into()),
-                summary: "Integration blocked: pending human approval".into(),
+                commit_sha: promoted.current_target_sha,
+                modified_files: promoted.modified_files,
+                error: None,
+                summary: "Idempotent skip: change set already promoted".into(),
             });
         }
 
@@ -312,7 +500,7 @@ impl WorkflowIntegrationService {
             });
         }
 
-        // 2. Path extraction and containment verification
+        // 1. Path extraction and containment verification
         let affected_rel_paths =
             match self.extract_and_validate_paths(&req.workspace_root, &req.patch_content) {
                 Ok(paths) => paths,
@@ -333,7 +521,133 @@ impl WorkflowIntegrationService {
                 }
             };
 
-        // 3. Code review engine gate
+        // Initialize durable IntegrationRecord in SQLite (CREATED -> EXECUTING)
+        if let (Some(store), Some(wf_id), Some(task_id)) =
+            (&self.store, &req.workflow_id, &req.task_id)
+        {
+            let record = IntegrationRecord {
+                id: integration_id.clone(),
+                workflow_id: wf_id.clone(),
+                task_id: task_id.clone(),
+                attempt_id: req.attempt_id.unwrap_or(1),
+                status: IntegrationLifecycleStatus::Executing,
+                source_branch: req
+                    .source_branch
+                    .clone()
+                    .unwrap_or_else(|| "unknown".into()),
+                source_base_sha: req
+                    .source_base_sha
+                    .clone()
+                    .unwrap_or_else(|| current_target_sha.clone().unwrap_or_default()),
+                target_base_sha: req
+                    .target_base_sha
+                    .clone()
+                    .unwrap_or_else(|| current_target_sha.clone().unwrap_or_default()),
+                current_target_sha: current_target_sha.clone(),
+                change_set_hash: actual_hash.clone(),
+                patch_artifact_path: None,
+                modified_files: affected_rel_paths.clone(),
+                verification_passed: false,
+                error: None,
+                created_at_epoch_ms: now_ms,
+                updated_at_epoch_ms: now_ms,
+            };
+            let _ = store.create_integration_record(&record);
+        }
+
+        // 2. Approval gating
+        if req.require_approval && !req.is_approved {
+            self.update_record_status(
+                &integration_id,
+                IntegrationLifecycleStatus::IntegrationPending,
+                current_target_sha.as_deref(),
+                Some("Pending human approval"),
+            );
+            return Ok(IntegrationOutcome {
+                success: false,
+                pre_check_clean: false,
+                approval_granted: false,
+                patch_applied: false,
+                verification_passed: false,
+                commit_completed: false,
+                rollback_performed: false,
+                commit_sha: None,
+                modified_files: Vec::new(),
+                error: Some("Human approval required for integration but not granted".into()),
+                summary: "Integration blocked: pending human approval".into(),
+            });
+        }
+
+        // 3. Stale base revision and overlapping modification detection
+        if is_git
+            && let (Some(base_sha), Some(target_head)) =
+                (&req.source_base_sha, &current_target_sha)
+            && base_sha != target_head
+        {
+            // Target HEAD has advanced since source worktree was created!
+            let intermediate_files =
+                self.get_modified_files_between(&req.workspace_root, base_sha, target_head)?;
+            let has_overlap = affected_rel_paths
+                .iter()
+                .any(|p| intermediate_files.contains(p));
+            if has_overlap {
+                // If overlapping files were modified in target HEAD, check if git apply preflight succeeds
+                if !self.git_preflight_check(&req.workspace_root, &req.patch_content)? {
+                    let err_msg = format!(
+                        "Stale base revision: target repository advanced from {base_sha} to {target_head} with conflicting overlapping modifications"
+                    );
+                    self.preserve_failed_patch(req, &actual_hash, &err_msg);
+                    self.update_record_status(
+                        &integration_id,
+                        IntegrationLifecycleStatus::Rejected,
+                        current_target_sha.as_deref(),
+                        Some(&err_msg),
+                    );
+                    return Ok(IntegrationOutcome {
+                        success: false,
+                        pre_check_clean: true,
+                        approval_granted: true,
+                        patch_applied: false,
+                        verification_passed: false,
+                        commit_completed: false,
+                        rollback_performed: false,
+                        commit_sha: None,
+                        modified_files: affected_rel_paths,
+                        error: Some(err_msg.clone()),
+                        summary: err_msg,
+                    });
+                }
+            }
+        }
+
+        // 4. Git preflight check
+        if is_git && !self.git_preflight_check(&req.workspace_root, &req.patch_content)? {
+            let err_msg =
+                "Git preflight validation failed: child worktree diff conflicts with target HEAD"
+                    .to_string();
+            self.preserve_failed_patch(req, &actual_hash, &err_msg);
+            self.update_record_status(
+                &integration_id,
+                IntegrationLifecycleStatus::Failed,
+                current_target_sha.as_deref(),
+                Some(&err_msg),
+            );
+            return Ok(IntegrationOutcome {
+                success: false,
+                pre_check_clean: true,
+                approval_granted: true,
+                patch_applied: false,
+                verification_passed: false,
+                commit_completed: false,
+                rollback_performed: false,
+                commit_sha: None,
+                modified_files: affected_rel_paths,
+                error: Some(err_msg.clone()),
+                summary: err_msg,
+            });
+        }
+
+        // 5. Code review engine gate
         let review_report = m31a_review::ReviewEngine::analyze(&req.patch_content);
         if review_report.verdict == m31a_review::ReviewVerdict::RequestChanges {
             let reasons: Vec<String> = review_report
@@ -348,6 +662,13 @@ impl WorkflowIntegrationService {
             let err_text = format!(
                 "Integration rejected by Code Review Engine: {}",
                 reasons.join("; ")
+            );
+            self.preserve_failed_patch(req, &actual_hash, &err_text);
+            self.update_record_status(
+                &integration_id,
+                IntegrationLifecycleStatus::Rejected,
+                current_target_sha.as_deref(),
+                Some(&err_text),
             );
             return Ok(IntegrationOutcome {
                 success: false,
@@ -364,7 +685,7 @@ impl WorkflowIntegrationService {
             });
         }
 
-        // 4. Verification preflight manifest check
+        // 6. Verification preflight manifest check
         if !req.skip_verification {
             let is_rust = req.workspace_root.join("Cargo.toml").exists();
             let is_node = req.workspace_root.join("package.json").exists();
@@ -382,6 +703,12 @@ impl WorkflowIntegrationService {
             if !is_rust && !is_node && !is_python && !is_go && !is_bazel && !is_cmake && !is_gradle
             {
                 let err_msg = "VerificationIncomplete: unsupported project type; automated verification cannot prove correctness without recognized build manifest (Cargo.toml, package.json, pyproject.toml, or go.mod)".to_string();
+                self.update_record_status(
+                    &integration_id,
+                    IntegrationLifecycleStatus::Failed,
+                    current_target_sha.as_deref(),
+                    Some(&err_msg),
+                );
                 return Ok(IntegrationOutcome {
                     success: false,
                     pre_check_clean: true,
@@ -398,7 +725,7 @@ impl WorkflowIntegrationService {
             }
         }
 
-        // 5. Dirty workspace check (fail closed if target workspace contains uncommitted changes)
+        // 7. Dirty workspace check (fail closed if target workspace contains uncommitted changes)
         let is_clean = if is_git && !req.skip_dirty_check {
             let settings = WorktreeSettings::new(&req.workspace_root);
             let mgr = WorktreeManager::new(settings);
@@ -414,6 +741,13 @@ impl WorkflowIntegrationService {
         };
 
         if !is_clean {
+            let err_msg = "Target workspace contains uncommitted changes or cleanliness check failed; clean workspace required".to_string();
+            self.update_record_status(
+                &integration_id,
+                IntegrationLifecycleStatus::Failed,
+                current_target_sha.as_deref(),
+                Some(&err_msg),
+            );
             return Ok(IntegrationOutcome {
                 success: false,
                 pre_check_clean: false,
@@ -424,20 +758,24 @@ impl WorkflowIntegrationService {
                 rollback_performed: false,
                 commit_sha: None,
                 modified_files: Vec::new(),
-                error: Some(
-                    "Target workspace contains uncommitted changes or cleanliness check failed; clean workspace required"
-                        .into(),
-                ),
+                error: Some(err_msg),
                 summary: "Integration blocked: target workspace is dirty".into(),
             });
         }
 
-        // 5. Pre-integration snapshotting
+        // 8. Pre-integration snapshotting
         let mut snapshots = Vec::new();
         for rel_path in &affected_rel_paths {
             match FileSnapshot::snapshot(&req.workspace_root, rel_path) {
                 Ok(snap) => snapshots.push(snap),
                 Err(e) => {
+                    let err_msg = format!("Failed taking pre-integration snapshot: {e}");
+                    self.update_record_status(
+                        &integration_id,
+                        IntegrationLifecycleStatus::Failed,
+                        current_target_sha.as_deref(),
+                        Some(&err_msg),
+                    );
                     return Ok(IntegrationOutcome {
                         success: false,
                         pre_check_clean: true,
@@ -448,18 +786,25 @@ impl WorkflowIntegrationService {
                         rollback_performed: false,
                         commit_sha: None,
                         modified_files: Vec::new(),
-                        error: Some(format!("Failed taking pre-integration snapshot: {e}")),
+                        error: Some(err_msg),
                         summary: "Integration aborted during pre-integration snapshotting".into(),
                     });
                 }
             }
         }
 
-        // 6. Apply patch
+        // 9. Apply patch -> RESULT_READY
         let apply_result = self.apply_patch(&req.workspace_root, &req.patch_content);
         if let Err(e) = apply_result {
-            // Rollback any partial file changes made
             let rb = self.execute_exact_rollback(&snapshots);
+            let err_msg = format!("Patch application failed: {e}");
+            self.preserve_failed_patch(req, &actual_hash, &err_msg);
+            self.update_record_status(
+                &integration_id,
+                IntegrationLifecycleStatus::Failed,
+                current_target_sha.as_deref(),
+                Some(&err_msg),
+            );
             return Ok(IntegrationOutcome {
                 success: false,
                 pre_check_clean: true,
@@ -470,7 +815,7 @@ impl WorkflowIntegrationService {
                 rollback_performed: true,
                 commit_sha: None,
                 modified_files: affected_rel_paths,
-                error: Some(format!("Patch application failed: {e}")),
+                error: Some(err_msg.clone()),
                 summary: format!(
                     "Patch application failed; rolled back changes (complete={}): {e}",
                     rb.complete
@@ -478,7 +823,21 @@ impl WorkflowIntegrationService {
             });
         }
 
-        // 7. Post-integration verification gate
+        self.update_record_status(
+            &integration_id,
+            IntegrationLifecycleStatus::ResultReady,
+            current_target_sha.as_deref(),
+            None,
+        );
+
+        // 10. Post-integration verification gate -> INTEGRATION_PENDING -> VERIFIED
+        self.update_record_status(
+            &integration_id,
+            IntegrationLifecycleStatus::IntegrationPending,
+            current_target_sha.as_deref(),
+            None,
+        );
+
         if !req.skip_verification {
             let timeout = req.verification_timeout.unwrap_or(Duration::from_secs(30));
 
@@ -486,6 +845,20 @@ impl WorkflowIntegrationService {
             match AutonomousVerifier::verify_check(&req.workspace_root, timeout).await {
                 Ok(report) if !report.success => {
                     let rb = self.execute_exact_rollback(&snapshots);
+                    let err_msg = format!(
+                        "Post-integration build check failed: {}",
+                        report
+                            .self_healing_prompt
+                            .as_deref()
+                            .unwrap_or(&report.raw_output)
+                    );
+                    self.preserve_failed_patch(req, &actual_hash, &err_msg);
+                    self.update_record_status(
+                        &integration_id,
+                        IntegrationLifecycleStatus::Failed,
+                        current_target_sha.as_deref(),
+                        Some(&err_msg),
+                    );
                     return Ok(IntegrationOutcome {
                         success: false,
                         pre_check_clean: true,
@@ -496,13 +869,7 @@ impl WorkflowIntegrationService {
                         rollback_performed: true,
                         commit_sha: None,
                         modified_files: affected_rel_paths,
-                        error: Some(format!(
-                            "Post-integration build check failed: {}",
-                            report
-                                .self_healing_prompt
-                                .as_deref()
-                                .unwrap_or(&report.raw_output)
-                        )),
+                        error: Some(err_msg),
                         summary: format!(
                             "Verification failed (compiler check); exact per-file rollback executed (complete={})",
                             rb.complete
@@ -511,6 +878,14 @@ impl WorkflowIntegrationService {
                 }
                 Err(e) => {
                     let rb = self.execute_exact_rollback(&snapshots);
+                    let err_msg = format!("Failed executing post-integration check: {e}");
+                    self.preserve_failed_patch(req, &actual_hash, &err_msg);
+                    self.update_record_status(
+                        &integration_id,
+                        IntegrationLifecycleStatus::Failed,
+                        current_target_sha.as_deref(),
+                        Some(&err_msg),
+                    );
                     return Ok(IntegrationOutcome {
                         success: false,
                         pre_check_clean: true,
@@ -521,7 +896,7 @@ impl WorkflowIntegrationService {
                         rollback_performed: true,
                         commit_sha: None,
                         modified_files: affected_rel_paths,
-                        error: Some(format!("Failed executing post-integration check: {e}")),
+                        error: Some(err_msg),
                         summary: format!(
                             "Verification error during compiler check; exact per-file rollback executed (complete={})",
                             rb.complete
@@ -535,6 +910,20 @@ impl WorkflowIntegrationService {
             match AutonomousVerifier::verify_tests(&req.workspace_root, timeout).await {
                 Ok(report) if !report.success => {
                     let rb = self.execute_exact_rollback(&snapshots);
+                    let err_msg = format!(
+                        "Post-integration test suite failed: {}",
+                        report
+                            .self_healing_prompt
+                            .as_deref()
+                            .unwrap_or(&report.raw_output)
+                    );
+                    self.preserve_failed_patch(req, &actual_hash, &err_msg);
+                    self.update_record_status(
+                        &integration_id,
+                        IntegrationLifecycleStatus::Failed,
+                        current_target_sha.as_deref(),
+                        Some(&err_msg),
+                    );
                     return Ok(IntegrationOutcome {
                         success: false,
                         pre_check_clean: true,
@@ -545,13 +934,7 @@ impl WorkflowIntegrationService {
                         rollback_performed: true,
                         commit_sha: None,
                         modified_files: affected_rel_paths,
-                        error: Some(format!(
-                            "Post-integration test suite failed: {}",
-                            report
-                                .self_healing_prompt
-                                .as_deref()
-                                .unwrap_or(&report.raw_output)
-                        )),
+                        error: Some(err_msg),
                         summary: format!(
                             "Verification failed (tests); exact per-file rollback executed (complete={})",
                             rb.complete
@@ -560,6 +943,14 @@ impl WorkflowIntegrationService {
                 }
                 Err(e) => {
                     let rb = self.execute_exact_rollback(&snapshots);
+                    let err_msg = format!("Failed executing post-integration tests: {e}");
+                    self.preserve_failed_patch(req, &actual_hash, &err_msg);
+                    self.update_record_status(
+                        &integration_id,
+                        IntegrationLifecycleStatus::Failed,
+                        current_target_sha.as_deref(),
+                        Some(&err_msg),
+                    );
                     return Ok(IntegrationOutcome {
                         success: false,
                         pre_check_clean: true,
@@ -570,7 +961,7 @@ impl WorkflowIntegrationService {
                         rollback_performed: true,
                         commit_sha: None,
                         modified_files: affected_rel_paths,
-                        error: Some(format!("Failed executing post-integration tests: {e}")),
+                        error: Some(err_msg),
                         summary: format!(
                             "Verification error during test suite; exact per-file rollback executed (complete={})",
                             rb.complete
@@ -581,7 +972,14 @@ impl WorkflowIntegrationService {
             }
         }
 
-        // 8. Commit changes if working inside a Git repository
+        self.update_record_status(
+            &integration_id,
+            IntegrationLifecycleStatus::Verified,
+            current_target_sha.as_deref(),
+            None,
+        );
+
+        // 11. Commit changes to Git -> PROMOTED
         let (commit_sha, commit_completed) = if is_git {
             match self.commit_integrated_changes(
                 &req.workspace_root,
@@ -594,6 +992,14 @@ impl WorkflowIntegrationService {
                 Err(e) => {
                     warn!(err = %e, "Git commit after verification failed; triggering exact per-file rollback");
                     let rb = self.execute_exact_rollback(&snapshots);
+                    let err_msg = format!("Git commit failed: {e}");
+                    self.preserve_failed_patch(req, &actual_hash, &err_msg);
+                    self.update_record_status(
+                        &integration_id,
+                        IntegrationLifecycleStatus::Failed,
+                        current_target_sha.as_deref(),
+                        Some(&err_msg),
+                    );
                     return Ok(IntegrationOutcome {
                         success: false,
                         pre_check_clean: true,
@@ -604,7 +1010,7 @@ impl WorkflowIntegrationService {
                         rollback_performed: true,
                         commit_sha: None,
                         modified_files: affected_rel_paths,
-                        error: Some(format!("Git commit failed: {e}")),
+                        error: Some(err_msg),
                         summary: format!(
                             "Integration failed: git commit error: {e}; exact rollback executed (complete={})",
                             rb.complete
@@ -615,6 +1021,13 @@ impl WorkflowIntegrationService {
         } else {
             (None, true)
         };
+
+        self.update_record_status(
+            &integration_id,
+            IntegrationLifecycleStatus::Promoted,
+            commit_sha.as_deref(),
+            None,
+        );
 
         info!(
             source = %req.source_label,
@@ -852,6 +1265,9 @@ mod tests {
             task_id: None,
             attempt_id: None,
             expected_change_set_hash: None,
+            source_branch: None,
+            source_base_sha: None,
+            target_base_sha: None,
         };
 
         let res = svc.integrate(&req).await.unwrap();
@@ -934,6 +1350,9 @@ mod tests {
             task_id: None,
             attempt_id: None,
             expected_change_set_hash: None,
+            source_branch: None,
+            source_base_sha: None,
+            target_base_sha: None,
         };
 
         let res = svc.integrate(&req).await.unwrap();
