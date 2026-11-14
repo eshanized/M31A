@@ -42,6 +42,7 @@ pub const MAX_WORKFLOW_REPLAN_REVISIONS: u32 = 3;
 /// Configuration options for workflow execution.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkflowExecutionConfig {
+    pub execution_mode: m31a_core::workflow::ExecutionMode,
     pub max_concurrency: usize,
     pub task_timeout_seconds: u64,
     pub verify_post_wave: bool,
@@ -53,6 +54,7 @@ pub struct WorkflowExecutionConfig {
 impl Default for WorkflowExecutionConfig {
     fn default() -> Self {
         Self {
+            execution_mode: m31a_core::workflow::ExecutionMode::Standard,
             max_concurrency: 4,
             task_timeout_seconds: 120,
             verify_post_wave: true,
@@ -532,6 +534,100 @@ impl WorkflowOrchestrator {
         })?;
 
         Ok(plan)
+    }
+
+    /// Handles a structured conflict reported by an executing agent/task.
+    /// In accordance with demand-driven coordination:
+    /// - Genuine dependencies are resolved by dynamically updating the task DAG (blocks/depends_on).
+    /// - Integration conflicts defer to sequential verified integration.
+    /// - Cycles in suggested dependencies are prevented and rejected.
+    /// - Human intervention is requested when automatic DAG replanning cannot resolve the conflict safely.
+    pub fn handle_task_conflict(
+        &self,
+        report: &m31a_core::workflow::ConflictReport,
+    ) -> Result<m31a_core::workflow::ConflictResolution> {
+        use m31a_core::workflow::{ConflictKind, ConflictResolution};
+
+        // Record the incoming conflict report in durable storage
+        self.store().record_conflict(report)?;
+
+        let resolution = match report.conflict_kind {
+            ConflictKind::GenuineDependency => {
+                if let Some(ref blocker_id) = report.suggested_dependency {
+                    match self.store().replan_with_dependency(
+                        &report.workflow_id,
+                        &report.reporting_task_id,
+                        blocker_id,
+                        &report.description,
+                    ) {
+                        Ok(_) => {
+                            info!(
+                                workflow_id = %report.workflow_id,
+                                task_id = %report.reporting_task_id,
+                                blocker_id = %blocker_id,
+                                "Dynamic replanning successfully added task dependency; yielding task"
+                            );
+                            ConflictResolution::AddDependency {
+                                task_id: report.reporting_task_id.clone(),
+                                depends_on: blocker_id.clone(),
+                            }
+                        }
+                        Err(e) => {
+                            warn!(
+                                workflow_id = %report.workflow_id,
+                                err = %e,
+                                "Replanning rejected (e.g. cycle detected); escalating to human intervention"
+                            );
+                            ConflictResolution::EscalateToHuman {
+                                task_id: report.reporting_task_id.clone(),
+                                reason: format!("Cyclic or invalid dependency replanning error: {e}"),
+                            }
+                        }
+                    }
+                } else {
+                    ConflictResolution::EscalateToHuman {
+                        task_id: report.reporting_task_id.clone(),
+                        reason: "Genuine dependency reported without suggested blocker task".into(),
+                    }
+                }
+            }
+            ConflictKind::IntegrationConflict => {
+                info!(
+                    workflow_id = %report.workflow_id,
+                    task_id = %report.reporting_task_id,
+                    "Conflict classified as integration overlap; deferring to sequential verified integration"
+                );
+                ConflictResolution::DeferToIntegration {
+                    task_id: report.reporting_task_id.clone(),
+                    resource_path: report.resource_path.clone(),
+                }
+            }
+            ConflictKind::SharedResourceContention => {
+                info!(
+                    workflow_id = %report.workflow_id,
+                    task_id = %report.reporting_task_id,
+                    "Shared resource contention reported; managing via coordinated resource locks"
+                );
+                ConflictResolution::DeferToIntegration {
+                    task_id: report.reporting_task_id.clone(),
+                    resource_path: report.resource_path.clone(),
+                }
+            }
+            ConflictKind::RequiresHumanIntervention => {
+                warn!(
+                    workflow_id = %report.workflow_id,
+                    task_id = %report.reporting_task_id,
+                    "Conflict requires explicit human intervention"
+                );
+                ConflictResolution::EscalateToHuman {
+                    task_id: report.reporting_task_id.clone(),
+                    reason: report.description.clone(),
+                }
+            }
+        };
+
+        self.store().resolve_conflict(&report.id, &resolution)?;
+        Ok(resolution)
     }
 
     /// Generates a new plan revision for a failed or partially completed workflow if within budget.
@@ -1332,7 +1428,10 @@ impl WorkflowOrchestrator {
                                 safety_status = VerificationStatus::Pending;
                                 review_status = VerificationStatus::Pending;
                             } else {
-                                let svc = WorkflowIntegrationService::new();
+                                let worktree_record = self.store().get_worktree(&task_id).ok().flatten();
+                                let source_branch = worktree_record.as_ref().map(|w| w.branch.clone());
+                                let source_base_sha = worktree_record.as_ref().map(|w| w.base_sha.clone());
+                                let svc = WorkflowIntegrationService::new().with_store(self.store());
                                 let req = IntegrationRequest {
                                     workspace_root: run.workspace_root.clone(),
                                     patch_content: diff_text.clone(),
@@ -1351,6 +1450,9 @@ impl WorkflowOrchestrator {
                                     task_id: Some(task_id.clone()),
                                     attempt_id: Some(claimed_task.attempt_id),
                                     expected_change_set_hash: Some(change_set_hash),
+                                    source_branch,
+                                    source_base_sha,
+                                    target_base_sha: None,
                                 };
 
                                 let v_start = Instant::now();
@@ -1959,7 +2061,14 @@ impl WorkflowOrchestrator {
 
         info!(workflow_id = %workflow_id, "Resuming interrupted workflow");
 
-        // 1. Reconcile stale task leases
+        // 1. Recover interrupted worktrees and reconcile stale task leases
+        if let Some(ref mgr) = self.worktree_mgr {
+            let recovered = mgr.recover_interrupted_worktrees(workflow_id)?;
+            info!(workflow_id = %workflow_id, recovered_worktrees = recovered.len(), "Recovered interrupted worktrees");
+        } else {
+            let _ = self.store().recover_interrupted_worktrees(workflow_id);
+        }
+
         let now = Utc::now().timestamp_millis();
         let recovered_count = self.store().reconcile_stale_tasks(workflow_id, now)?;
         info!(workflow_id = %workflow_id, recovered_tasks = recovered_count, "Reconciled stale tasks");
@@ -2218,6 +2327,14 @@ impl WorkflowOrchestrator {
                     );
                 }
             }
+        }
+
+        // 3. Preserve interrupted worktrees and unintegrated artifacts for forensic inspection
+        if let Some(ref mgr) = self.worktree_mgr {
+            let recovered = mgr.recover_interrupted_worktrees(workflow_id)?;
+            info!(workflow_id = %workflow_id, preserved_worktrees = recovered.len(), "Preserved worktree artifacts on cancellation");
+        } else {
+            let _ = self.store().recover_interrupted_worktrees(workflow_id);
         }
 
         let now = Utc::now().timestamp_millis();
