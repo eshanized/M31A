@@ -829,8 +829,8 @@ npm test --prefix sdk/typescript
 | [**Terminal User Interface Guide**](docs/TUI_GUIDE.md) | Full guide to keyboard shortcuts, modals, slash commands, and themes. |
 | [**System Architecture**](docs/ARCHITECTURE.md) | Deep dive into turn loops, NVIDIA NIM streaming, tools, and storage. |
 | [**Autonomous Workflow Architecture**](docs/architecture/AUTONOMOUS_WORKFLOW_ARCHITECTURE.md) | DAG tasks, task kinds (`TaskKind`), phase transitions, and worker leases. |
+| [**Demand-Driven Coordination & Worktrees**](docs/architecture/DEMAND_DRIVEN_COORDINATION.md) | DAG scheduling, Git worktree isolation, dynamic replanning, and verified integration. |
 | [**Speculative Execution Architecture**](docs/architecture/SPECULATIVE_EXECUTION_ARCHITECTURE.md) | Parallel sandbox arenas, scoring heuristics, and branch merging. |
-| [**Execution Integrity Architecture (Round 2)**](docs/architecture/EXECUTION_INTEGRITY_ROUND_2.md) | Fail-closed runtime validation, hardened UDS sockets, and turn boundaries. |
 | [**CLI Command Reference**](docs/CLI_REFERENCE.md) | Comprehensive reference for all 54 subcommands, arguments, and flags. |
 | [**Configuration Guide**](docs/CONFIGURATION.md) | Complete reference for `config.toml`, profiles, and approval presets. |
 | [**App Server & JSON-RPC Protocol**](docs/APP_SERVER_RPC.md) | Specification of 40+ JSON-RPC methods and SSE streaming events. |
