@@ -27,3 +27,5 @@ benchmark*.json
 *.pyo
 .pytest_cache/
 
+.agents/
+skills-lock.json
