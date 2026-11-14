@@ -403,6 +403,7 @@ mod tests {
             "autonomous",
             None,
             Some(WorkflowExecutionConfig {
+                execution_mode: m31a_core::workflow::ExecutionMode::Standard,
                 max_concurrency: 4,
                 task_timeout_seconds: 60,
                 verify_post_wave: false,
@@ -534,6 +535,7 @@ async fn test_autonomous_workflow_orchestration_fails_closed_without_runtime() {
             "autonomous",
             None,
             Some(WorkflowExecutionConfig {
+                execution_mode: m31a_core::workflow::ExecutionMode::Standard,
                 max_concurrency: 2,
                 task_timeout_seconds: 30,
                 verify_post_wave: false,
@@ -672,6 +674,7 @@ mod tests {
             "autonomous",
             None,
             Some(WorkflowExecutionConfig {
+                execution_mode: m31a_core::workflow::ExecutionMode::Standard,
                 max_concurrency: 2,
                 task_timeout_seconds: 30,
                 verify_post_wave: false,
@@ -892,6 +895,9 @@ async fn test_approval_gated_integration_blocks_unapproved_integration() {
         task_id: None,
         attempt_id: None,
         expected_change_set_hash: None,
+        source_branch: None,
+        source_base_sha: None,
+        target_base_sha: None,
     };
 
     let outcome_unapproved = service.integrate(&req_unapproved).await.unwrap();
@@ -931,6 +937,9 @@ async fn test_approval_gated_integration_blocks_unapproved_integration() {
         task_id: None,
         attempt_id: None,
         expected_change_set_hash: None,
+        source_branch: None,
+        source_base_sha: None,
+        target_base_sha: None,
     };
 
     let outcome_approved = service
