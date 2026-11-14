@@ -505,9 +505,12 @@ impl App {
         }
 
         if let Some(ref icon_pref) = config.tui.icons {
-            crate::theme::set_icon_mode(Some(crate::icons::IconMode::parse_str(icon_pref)));
+            let requested = crate::icons::IconMode::parse_str(icon_pref);
+            let safe_mode = crate::icons::resolve_safe_icon_mode(requested);
+            crate::theme::set_icon_mode(Some(safe_mode));
         } else {
-            crate::theme::set_icon_mode(None);
+            let cap = crate::icons::detect_glyph_capability();
+            crate::theme::set_icon_mode(Some(cap.recommended_mode));
         }
 
         // Dynamically fetch models from provider endpoint in background if cache is stale (daily TTL) or empty
