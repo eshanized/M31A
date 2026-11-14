@@ -693,6 +693,9 @@ async fn test_all_agent_integrations_use_workflow() {
         task_id: None,
         attempt_id: None,
         expected_change_set_hash: None,
+        source_branch: None,
+        source_base_sha: None,
+        target_base_sha: None,
     };
 
     let outcome = svc.integrate(&req).await.unwrap();
@@ -713,6 +716,7 @@ async fn test_all_agent_integrations_use_workflow() {
 #[tokio::test]
 async fn test_config_max_concurrency_and_timeout_enforced() {
     let cfg = WorkflowExecutionConfig {
+        execution_mode: m31a_core::workflow::ExecutionMode::Standard,
         max_concurrency: 4,
         task_timeout_seconds: 45,
         verify_post_wave: true,
@@ -910,6 +914,7 @@ async fn test_task_timeout_terminates_agent_tree() {
             "autonomous",
             None,
             Some(WorkflowExecutionConfig {
+                execution_mode: m31a_core::workflow::ExecutionMode::Standard,
                 max_concurrency: 1,
                 task_timeout_seconds: 1, // 1 second timeout
                 verify_post_wave: false,
