@@ -14,6 +14,9 @@ use git2::{BranchType, Repository, WorktreeAddOptions};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn};
 
+use crate::WorkflowStore;
+use m31a_core::workflow::{WorktreeRecord, WorktreeStatus};
+
 pub const DEFAULT_WORKTREE_KEEP_COUNT: usize = 10;
 
 /// Configuration settings for the worktree manager.
@@ -55,17 +58,38 @@ pub struct ManagedWorktree {
     pub head_sha: String,
     pub source_root: PathBuf,
     pub created_at: u64,
+    #[serde(default)]
+    pub base_sha: Option<String>,
+    #[serde(default)]
+    pub workflow_id: Option<String>,
+    #[serde(default)]
+    pub task_id: Option<String>,
+    #[serde(default)]
+    pub status: WorktreeStatus,
 }
 
 /// Orchestrates creation, tracking, and pruning of isolated Git worktrees.
 #[derive(Debug, Clone)]
 pub struct WorktreeManager {
     settings: WorktreeSettings,
+    store: Option<WorkflowStore>,
 }
 
 impl WorktreeManager {
     pub fn new(settings: WorktreeSettings) -> Self {
-        Self { settings }
+        Self {
+            settings,
+            store: None,
+        }
+    }
+
+    pub fn with_store(mut self, store: WorkflowStore) -> Self {
+        self.store = Some(store);
+        self
+    }
+
+    pub fn store(&self) -> Option<&WorkflowStore> {
+        self.store.as_ref()
     }
 
     pub fn settings(&self) -> &WorktreeSettings {
@@ -75,6 +99,17 @@ impl WorktreeManager {
     /// Spawns a new isolated Git worktree for an agent thread or task.
     pub fn create_worktree(
         &self,
+        thread_id: &str,
+        base_commit_or_ref: Option<&str>,
+    ) -> Result<ManagedWorktree> {
+        self.create_task_worktree(None, None, thread_id, base_commit_or_ref)
+    }
+
+    /// Spawns a new isolated Git worktree explicitly tagged with workflow and task metadata.
+    pub fn create_task_worktree(
+        &self,
+        workflow_id: Option<&str>,
+        task_id: Option<&str>,
         thread_id: &str,
         base_commit_or_ref: Option<&str>,
     ) -> Result<ManagedWorktree> {
@@ -93,17 +128,22 @@ impl WorktreeManager {
             let head_sha = self
                 .get_head_sha(&worktree_path)
                 .unwrap_or_else(|_| "HEAD".to_string());
-            return Ok(ManagedWorktree {
+            let managed = ManagedWorktree {
                 thread_id: thread_id.to_string(),
                 worktree_path,
                 branch: format!("m31a/thread-{}", thread_id),
-                head_sha,
+                head_sha: head_sha.clone(),
                 source_root: self.settings.repo_root.clone(),
                 created_at: SystemTime::now()
                     .duration_since(SystemTime::UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_secs(),
-            });
+                base_sha: Some(head_sha),
+                workflow_id: workflow_id.map(String::from),
+                task_id: task_id.map(String::from),
+                status: WorktreeStatus::Active,
+            };
+            return Ok(managed);
         }
 
         let branch_name = format!("m31a/thread-{}", thread_id);
@@ -123,6 +163,7 @@ impl WorktreeManager {
         };
 
         let head_sha = target_commit.id().to_string();
+        let base_sha = head_sha.clone();
 
         // Create the branch if not exists
         let branch = match repo.find_branch(&branch_name, BranchType::Local) {
@@ -173,12 +214,36 @@ impl WorktreeManager {
 
         let managed = ManagedWorktree {
             thread_id: thread_id.to_string(),
-            worktree_path,
-            branch: branch_name,
-            head_sha,
+            worktree_path: worktree_path.clone(),
+            branch: branch_name.clone(),
+            head_sha: head_sha.clone(),
             source_root: self.settings.repo_root.clone(),
             created_at: now,
+            base_sha: Some(base_sha.clone()),
+            workflow_id: workflow_id.map(String::from),
+            task_id: task_id.map(String::from),
+            status: WorktreeStatus::Active,
         };
+
+        // Persist worktree record in storage if store is configured
+        if let Some(ref store) = self.store {
+            let record = WorktreeRecord {
+                id: format!("wt-{}", thread_id),
+                thread_id: thread_id.to_string(),
+                workflow_id: workflow_id.map(String::from),
+                task_id: task_id.map(String::from),
+                worktree_path: worktree_path.clone(),
+                branch: branch_name,
+                base_sha,
+                head_sha,
+                source_root: self.settings.repo_root.clone(),
+                status: WorktreeStatus::Active,
+                unintegrated_diff: None,
+                created_at_epoch_ms: (now as i64) * 1000,
+                updated_at_epoch_ms: (now as i64) * 1000,
+            };
+            let _ = store.save_worktree(&record);
+        }
 
         // Enforce LRU keep count
         let _ = self.prune_excess_worktrees();
@@ -207,6 +272,7 @@ impl WorktreeManager {
                     .unwrap_or_default()
                     .as_secs();
 
+                let head_sha_clone = head_sha.clone();
                 results.push(ManagedWorktree {
                     thread_id: name.clone(),
                     worktree_path: path,
@@ -214,11 +280,57 @@ impl WorktreeManager {
                     head_sha,
                     source_root: self.settings.repo_root.clone(),
                     created_at,
+                    base_sha: Some(head_sha_clone),
+                    workflow_id: None,
+                    task_id: None,
+                    status: WorktreeStatus::Active,
                 });
             }
         }
 
         results.sort_by_key(|w| w.created_at);
+        Ok(results)
+    }
+
+    /// Preserves an isolated worktree and its unintegrated changes for forensic investigation or recovery.
+    pub fn preserve_worktree(&self, thread_id: &str, unintegrated_diff: Option<&str>) -> Result<()> {
+        if let Some(ref store) = self.store {
+            let _ = store.update_worktree_status(thread_id, WorktreeStatus::Preserved, unintegrated_diff);
+        }
+        Ok(())
+    }
+
+    /// Recovers all active or preserved worktrees for a workflow without losing pending changes.
+    pub fn recover_interrupted_worktrees(&self, workflow_id: &str) -> Result<Vec<ManagedWorktree>> {
+        let mut results = Vec::new();
+        if let Some(ref store) = self.store {
+            let records = store.recover_interrupted_worktrees(workflow_id)?;
+            for rec in records {
+                if rec.worktree_path.exists() {
+                    let uncommitted = self
+                        .export_worktree_diff(&rec.worktree_path, &rec.base_sha)
+                        .ok();
+                    let diff_to_save = uncommitted.or(rec.unintegrated_diff.clone());
+                    let _ = store.update_worktree_status(
+                        &rec.thread_id,
+                        WorktreeStatus::Preserved,
+                        diff_to_save.as_deref(),
+                    );
+                    results.push(ManagedWorktree {
+                        thread_id: rec.thread_id,
+                        worktree_path: rec.worktree_path,
+                        branch: rec.branch,
+                        head_sha: rec.head_sha,
+                        source_root: rec.source_root,
+                        created_at: (rec.created_at_epoch_ms / 1000) as u64,
+                        base_sha: Some(rec.base_sha),
+                        workflow_id: rec.workflow_id,
+                        task_id: rec.task_id,
+                        status: WorktreeStatus::Preserved,
+                    });
+                }
+            }
+        }
         Ok(results)
     }
 
@@ -240,6 +352,10 @@ impl WorktreeManager {
 
         if worktree_path.exists() {
             let _ = fs::remove_dir_all(&worktree_path);
+        }
+
+        if let Some(ref store) = self.store {
+            let _ = store.update_worktree_status(thread_id, WorktreeStatus::CleanedUp, None);
         }
 
         Ok(())
@@ -437,6 +553,12 @@ impl WorktreeManager {
 
     /// Exports the cumulative diff produced in a child worktree against its base commit.
     pub fn export_worktree_diff(&self, worktree_path: &Path, base_sha: &str) -> Result<String> {
+        // Stage untracked files with intent-to-add so git diff includes newly created files
+        let _ = Command::new("git")
+            .current_dir(worktree_path)
+            .args(["add", "-N", "."])
+            .output();
+
         let output = Command::new("git")
             .current_dir(worktree_path)
             .args(["diff", base_sha])
