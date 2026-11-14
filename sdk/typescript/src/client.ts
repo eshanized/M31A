@@ -213,7 +213,7 @@ export class M31AClient extends EventEmitter implements TurnClientBridge, Thread
 
   // --- Core Lifecycle & Discovery RPCs ---
 
-  async initialize(clientName = 'm31a-typescript-sdk', clientVersion = '0.1.14'): Promise<InitializeResult> {
+  async initialize(clientName = 'm31a-typescript-sdk', clientVersion = '0.1.15'): Promise<InitializeResult> {
     return this.request<InitializeResult>('initialize', {
       client_name: clientName,
       client_version: clientVersion,
