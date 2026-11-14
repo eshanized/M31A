@@ -16,3 +16,5 @@ targets = [
 ]
 # Extra static files to include in release archives
 include = ["LICENSE", "README.md", "config.example.toml"]
+# Allow custom CI modifications
+allow-dirty = ["ci"]
