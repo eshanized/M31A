@@ -143,6 +143,14 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update && sudo apt-get install -y protobuf-compiler bubblewrap musl-tools
+      - name: Install macOS build dependencies
+        if: runner.os == 'macOS'
+        run: |
+          brew install protobuf
+      - name: Install Windows build dependencies
+        if: runner.os == 'Windows'
+        run: |
+          choco install protoc
       - name: Build artifacts
         run: |
           # Actually do builds and make zips and whatnot
