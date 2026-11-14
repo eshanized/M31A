@@ -646,7 +646,7 @@ impl App {
         // Initialize welcome message in transcript with clean structural separation
         let welcome = format!(
             "M31A Autonomous Software Engineering Runtime\n\
-             • Runtime:  v0.1.14\n\
+             • Runtime:  v0.1.15\n\
              • Model:    {}\n\
              • Policy:   Sandbox ({:?}) │ Approval ({:?})\n\
              • Mode:     {:?}\n\
