@@ -728,10 +728,8 @@ impl WorkflowPlan {
                 return true;
             }
             if visited.insert(curr.clone()) {
-                if let Some(nexts) = adj_list.get(&curr) {
-                    for n in nexts {
-                        stack.push(n.clone());
-                    }
+                for n in adj_list.get(&curr).into_iter().flatten() {
+                    stack.push(n.clone());
                 }
             }
         }
