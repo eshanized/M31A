@@ -150,3 +150,13 @@ Type `/` in the prompt composer to trigger fuzzy autocompletion:
 | `/doctor` | Run runtime diagnostic healthchecks |
 | `/board` | Display recent multi-agent message board messages |
 | `/exit` | Exit M31A cleanly |
+
+---
+
+## 9. Typography, Icons & Font Setup
+
+M31A incorporates the [Lucide](https://lucide.dev) iconography system with automated Unicode and ASCII fallbacks.
+
+- **Auto-detection**: If your terminal supports Lucide or Nerd Fonts, icons render natively. On clean systems or restricted terminals, M31A automatically falls back to clean Unicode geometric symbols or 7-bit ASCII without broken glyphs.
+- **Font Installation**: To install the bundled `lucide.ttf` font or configure terminal fallbacks for Kitty, WezTerm, Alacritty, iTerm2, or Windows Terminal, see the comprehensive [Font Configuration Guide](file:///home/snigdha/Desktop/M31A/docs/tui/FONT_CONFIGURATION.md).
+- **Diagnostics**: Run `m31a doctor` or `m31a doctor --json` to inspect font detection, cryptographic verification, and active icon mode.
