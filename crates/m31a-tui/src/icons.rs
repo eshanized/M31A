@@ -26,7 +26,11 @@
 use ratatui::style::Style;
 use ratatui::text::Span;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::env;
 use std::fmt;
+use std::fs;
+use std::path::{Path, PathBuf};
 use unicode_width::UnicodeWidthStr;
 
 /// Explicit rendering mode for icons across M31A interface components.
@@ -470,6 +474,438 @@ pub const ALL_ICONS: [Icon; 51] = [
     Icon::Eye,
 ];
 
+// === Font Verification, Discovery, & Automatic Fallback ===
+
+/// Pinned official Lucide static font release version.
+pub const LUCIDE_FONT_VERSION: &str = "0.460.0";
+
+/// Canonical font file name for the Lucide static TrueType font.
+pub const LUCIDE_FONT_FILE_NAME: &str = "lucide.ttf";
+
+/// Official SHA-256 checksum of `lucide.ttf` (release 0.460.0).
+pub const LUCIDE_FONT_EXPECTED_SHA256: &str =
+    "55e868f053500d4e4298fac5515f2d4f63a10aa7b263b022ff96c126cd9e95dc";
+
+/// Expected byte size of official `lucide.ttf` (release 0.460.0).
+pub const LUCIDE_FONT_EXPECTED_SIZE: u64 = 676_416;
+
+/// Comprehensive verification report for a local or bundled Lucide font file.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FontVerificationReport {
+    pub font_path: Option<PathBuf>,
+    pub file_exists: bool,
+    pub file_size_bytes: u64,
+    pub sha256_hash: String,
+    pub hash_valid: bool,
+    pub valid_truetype_header: bool,
+    pub missing_codepoints: Vec<u32>,
+    pub covered_icons_count: usize,
+    pub total_required_icons: usize,
+    pub is_usable: bool,
+}
+
+/// Discovered terminal glyph capabilities.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GlyphCapability {
+    pub supports_lucide: bool,
+    pub supports_unicode: bool,
+    pub font_detected: bool,
+    pub recommended_mode: IconMode,
+}
+
+/// Verifies raw font bytes against TrueType header, SHA-256, and cmap glyph coverage.
+pub fn verify_font_bytes(bytes: &[u8], path: Option<PathBuf>) -> FontVerificationReport {
+    let file_size_bytes = bytes.len() as u64;
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    let hash_bytes = hasher.finalize();
+    let mut sha256_hash = String::with_capacity(64);
+    for b in hash_bytes {
+        use std::fmt::Write;
+        let _ = write!(&mut sha256_hash, "{:02x}", b);
+    }
+
+    let hash_valid = sha256_hash.eq_ignore_ascii_case(LUCIDE_FONT_EXPECTED_SHA256);
+
+    let valid_truetype_header = if bytes.len() >= 12 {
+        let magic = &bytes[0..4];
+        magic == [0x00, 0x01, 0x00, 0x00] || magic == b"true" || magic == b"OTTO"
+    } else {
+        false
+    };
+
+    // Parse cmap table to verify glyph codepoint coverage
+    let mut segments = Vec::new();
+    if valid_truetype_header && bytes.len() >= 12 {
+        let num_tables = u16::from_be_bytes([bytes[4], bytes[5]]) as usize;
+        let mut cmap_offset: Option<usize> = None;
+
+        for i in 0..num_tables {
+            let entry_offset = 12 + i * 16;
+            if entry_offset + 16 <= bytes.len() {
+                let tag = &bytes[entry_offset..entry_offset + 4];
+                if tag == b"cmap" {
+                    let offset = u32::from_be_bytes([
+                        bytes[entry_offset + 8],
+                        bytes[entry_offset + 9],
+                        bytes[entry_offset + 10],
+                        bytes[entry_offset + 11],
+                    ]) as usize;
+                    cmap_offset = Some(offset);
+                    break;
+                }
+            }
+        }
+
+        if let Some(cmap_off) = cmap_offset
+            && cmap_off + 4 <= bytes.len()
+        {
+            let num_subtables =
+                u16::from_be_bytes([bytes[cmap_off + 2], bytes[cmap_off + 3]]) as usize;
+            for i in 0..num_subtables {
+                let sub_rec_off = cmap_off + 4 + i * 8;
+                if sub_rec_off + 8 <= bytes.len() {
+                    let sub_off = u32::from_be_bytes([
+                        bytes[sub_rec_off + 4],
+                        bytes[sub_rec_off + 5],
+                        bytes[sub_rec_off + 6],
+                        bytes[sub_rec_off + 7],
+                    ]) as usize;
+                    let subtable_pos = cmap_off + sub_off;
+                    if subtable_pos + 6 <= bytes.len() {
+                        let fmt =
+                            u16::from_be_bytes([bytes[subtable_pos], bytes[subtable_pos + 1]]);
+                        if fmt == 4 && subtable_pos + 14 <= bytes.len() {
+                            let seg_count_x2 = u16::from_be_bytes([
+                                bytes[subtable_pos + 6],
+                                bytes[subtable_pos + 7],
+                            ]) as usize;
+                            let seg_count = seg_count_x2 / 2;
+                            let end_code_start = subtable_pos + 14;
+                            let start_code_start = end_code_start + seg_count * 2 + 2;
+
+                            if start_code_start + seg_count * 2 <= bytes.len() {
+                                for s in 0..seg_count {
+                                    let end_c = u16::from_be_bytes([
+                                        bytes[end_code_start + s * 2],
+                                        bytes[end_code_start + s * 2 + 1],
+                                    ]) as u32;
+                                    let start_c = u16::from_be_bytes([
+                                        bytes[start_code_start + s * 2],
+                                        bytes[start_code_start + s * 2 + 1],
+                                    ]) as u32;
+                                    segments.push((start_c, end_c));
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let total_required_icons = ALL_ICONS.len();
+    let mut missing_codepoints = Vec::new();
+    let mut covered_icons_count = 0;
+
+    for icon in ALL_ICONS {
+        if let Some(first_char) = icon.lucide_glyph().chars().next() {
+            let cp = first_char as u32;
+            let covered = if !segments.is_empty() {
+                segments.iter().any(|&(s, e)| s <= cp && cp <= e)
+            } else {
+                hash_valid
+            };
+
+            if covered {
+                covered_icons_count += 1;
+            } else {
+                missing_codepoints.push(cp);
+            }
+        }
+    }
+
+    let is_usable = valid_truetype_header
+        && missing_codepoints.is_empty()
+        && (hash_valid || file_size_bytes >= 500_000);
+
+    FontVerificationReport {
+        font_path: path,
+        file_exists: true,
+        file_size_bytes,
+        sha256_hash,
+        hash_valid,
+        valid_truetype_header,
+        missing_codepoints,
+        covered_icons_count,
+        total_required_icons,
+        is_usable,
+    }
+}
+
+/// Verifies a font file on the local filesystem.
+pub fn verify_font_file(path: &Path) -> FontVerificationReport {
+    if !path.exists() || !path.is_file() {
+        return FontVerificationReport {
+            font_path: Some(path.to_path_buf()),
+            file_exists: false,
+            file_size_bytes: 0,
+            sha256_hash: String::new(),
+            hash_valid: false,
+            valid_truetype_header: false,
+            missing_codepoints: ALL_ICONS
+                .iter()
+                .filter_map(|i| i.lucide_glyph().chars().next().map(|c| c as u32))
+                .collect(),
+            covered_icons_count: 0,
+            total_required_icons: ALL_ICONS.len(),
+            is_usable: false,
+        };
+    }
+
+    match fs::read(path) {
+        Ok(bytes) => verify_font_bytes(&bytes, Some(path.to_path_buf())),
+        Err(_) => FontVerificationReport {
+            font_path: Some(path.to_path_buf()),
+            file_exists: true,
+            file_size_bytes: 0,
+            sha256_hash: String::new(),
+            hash_valid: false,
+            valid_truetype_header: false,
+            missing_codepoints: ALL_ICONS
+                .iter()
+                .filter_map(|i| i.lucide_glyph().chars().next().map(|c| c as u32))
+                .collect(),
+            covered_icons_count: 0,
+            total_required_icons: ALL_ICONS.len(),
+            is_usable: false,
+        },
+    }
+}
+
+/// Returns standard operating system and distribution font search paths for Lucide.
+pub fn get_lucide_search_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+
+    if let Ok(p) = env::var("M31A_LUCIDE_FONT_PATH") {
+        paths.push(PathBuf::from(p));
+    }
+
+    if let Some(home) = dirs::home_dir() {
+        paths.push(home.join(".local/share/fonts/lucide.ttf"));
+        paths.push(home.join(".fonts/lucide.ttf"));
+        paths.push(home.join(".local/share/fonts/truetype/lucide/lucide.ttf"));
+        paths.push(home.join("Library/Fonts/lucide.ttf"));
+    }
+
+    paths.push(PathBuf::from("/usr/local/share/fonts/lucide.ttf"));
+    paths.push(PathBuf::from("/usr/share/fonts/lucide.ttf"));
+    paths.push(PathBuf::from("/usr/share/fonts/truetype/lucide/lucide.ttf"));
+    paths.push(PathBuf::from("/usr/share/fonts/TTF/lucide.ttf"));
+    paths.push(PathBuf::from("/Library/Fonts/lucide.ttf"));
+    paths.push(PathBuf::from(
+        "/System/Library/Fonts/Supplemental/lucide.ttf",
+    ));
+
+    if let Ok(local_app_data) = env::var("LOCALAPPDATA") {
+        paths.push(PathBuf::from(local_app_data).join("Microsoft/Windows/Fonts/lucide.ttf"));
+    }
+    if let Ok(windir) = env::var("WINDIR") {
+        paths.push(PathBuf::from(windir).join("Fonts/lucide.ttf"));
+    }
+
+    if let Ok(exe) = env::current_exe()
+        && let Some(parent) = exe.parent()
+    {
+        paths.push(parent.join("resources/fonts/lucide.ttf"));
+        paths.push(parent.join("resources/lucide.ttf"));
+        paths.push(parent.join("fonts/lucide.ttf"));
+        if let Some(grandparent) = parent.parent() {
+            paths.push(grandparent.join("resources/fonts/lucide.ttf"));
+            paths.push(grandparent.join("assets/fonts/lucide.ttf"));
+        }
+    }
+
+    paths.push(PathBuf::from("assets/fonts/lucide.ttf"));
+    paths.push(PathBuf::from("crates/m31a-tui/resources/lucide.ttf"));
+
+    paths
+}
+
+/// Locates a valid, verified Lucide font file installed on the system or distributed alongside M31A.
+pub fn find_installed_lucide_font() -> Option<PathBuf> {
+    for p in get_lucide_search_paths() {
+        if p.is_file() {
+            let report = verify_font_file(&p);
+            if report.is_usable {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+/// Determines whether the current terminal and host environment can safely render Lucide glyphs.
+pub fn detect_glyph_capability() -> GlyphCapability {
+    if let Ok(val) = env::var("M31A_ICONS").or_else(|_| env::var("M31A_ICON_MODE")) {
+        match val.trim().to_lowercase().as_str() {
+            "ascii" => {
+                return GlyphCapability {
+                    supports_lucide: false,
+                    supports_unicode: false,
+                    font_detected: false,
+                    recommended_mode: IconMode::Ascii,
+                };
+            }
+            "unicode" => {
+                return GlyphCapability {
+                    supports_lucide: false,
+                    supports_unicode: true,
+                    font_detected: false,
+                    recommended_mode: IconMode::Unicode,
+                };
+            }
+            "lucide" => {
+                let font_found = find_installed_lucide_font().is_some();
+                return GlyphCapability {
+                    supports_lucide: true,
+                    supports_unicode: true,
+                    font_detected: font_found,
+                    recommended_mode: IconMode::Lucide,
+                };
+            }
+            _ => {}
+        }
+    }
+
+    if env::var("M31A_ASCII").is_ok() {
+        return GlyphCapability {
+            supports_lucide: false,
+            supports_unicode: false,
+            font_detected: false,
+            recommended_mode: IconMode::Ascii,
+        };
+    }
+
+    let term = env::var("TERM").unwrap_or_default().to_lowercase();
+    if term == "dumb" || term == "vt100" || term == "vt220" {
+        return GlyphCapability {
+            supports_lucide: false,
+            supports_unicode: false,
+            font_detected: false,
+            recommended_mode: IconMode::Ascii,
+        };
+    }
+
+    let lang = env::var("LC_ALL")
+        .or_else(|_| env::var("LC_CTYPE"))
+        .or_else(|_| env::var("LANG"))
+        .unwrap_or_default()
+        .to_lowercase();
+    let supports_unicode = lang.contains("utf-8") || lang.contains("utf8") || lang.is_empty();
+
+    if !supports_unicode {
+        return GlyphCapability {
+            supports_lucide: false,
+            supports_unicode: false,
+            font_detected: false,
+            recommended_mode: IconMode::Ascii,
+        };
+    }
+
+    let user_confirmed_nerd_font = env::var("M31A_NERD_FONTS").is_ok()
+        || env::var("M31A_LUCIDE_FONT").is_ok()
+        || env::var("NERD_FONT").is_ok();
+
+    let font_detected = find_installed_lucide_font().is_some();
+    let supports_lucide = user_confirmed_nerd_font || font_detected;
+
+    let recommended_mode = if supports_lucide {
+        IconMode::Lucide
+    } else {
+        IconMode::Unicode
+    };
+
+    GlyphCapability {
+        supports_lucide,
+        supports_unicode: true,
+        font_detected,
+        recommended_mode,
+    }
+}
+
+/// Resolves a requested [`IconMode`] to a guaranteed-safe mode considering terminal and font support.
+pub fn resolve_safe_icon_mode(requested: IconMode) -> IconMode {
+    let cap = detect_glyph_capability();
+    match requested {
+        IconMode::Lucide => {
+            if cap.supports_lucide {
+                IconMode::Lucide
+            } else if cap.supports_unicode {
+                IconMode::Unicode
+            } else {
+                IconMode::Ascii
+            }
+        }
+        IconMode::Unicode => {
+            if cap.supports_unicode {
+                IconMode::Unicode
+            } else {
+                IconMode::Ascii
+            }
+        }
+        IconMode::Ascii => IconMode::Ascii,
+    }
+}
+
+/// Helper to install a bundled Lucide font into the current user's local font library.
+pub fn install_lucide_font_to_user_fonts(font_bytes: &[u8]) -> std::io::Result<PathBuf> {
+    let report = verify_font_bytes(font_bytes, None);
+    if !report.is_usable {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "Font data failed TrueType / Lucide verification",
+        ));
+    }
+
+    let target_dir = if cfg!(target_os = "macos") {
+        dirs::home_dir()
+            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "No home dir"))?
+            .join("Library/Fonts")
+    } else if cfg!(target_os = "windows") {
+        if let Ok(app_data) = env::var("LOCALAPPDATA") {
+            PathBuf::from(app_data).join("Microsoft/Windows/Fonts")
+        } else {
+            dirs::home_dir()
+                .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "No home dir"))?
+                .join(".fonts")
+        }
+    } else {
+        if let Ok(xdg) = env::var("XDG_DATA_HOME") {
+            PathBuf::from(xdg).join("fonts")
+        } else {
+            dirs::home_dir()
+                .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "No home dir"))?
+                .join(".local/share/fonts")
+        }
+    };
+
+    fs::create_dir_all(&target_dir)?;
+    let dest_file = target_dir.join(LUCIDE_FONT_FILE_NAME);
+    fs::write(&dest_file, font_bytes)?;
+
+    #[cfg(target_os = "linux")]
+    {
+        let _ = std::process::Command::new("fc-cache")
+            .arg("-f")
+            .arg(&target_dir)
+            .output();
+    }
+
+    Ok(dest_file)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -576,5 +1012,65 @@ mod tests {
         // When use_icons is disabled, ASCII fallback is strictly used
         dark.typography.use_icons = false;
         assert_eq!(Icon::Command.render(&dark), Icon::Command.ascii_glyph());
+    }
+
+    #[test]
+    fn test_verify_bundled_lucide_font() {
+        let font_path = Path::new("resources/lucide.ttf");
+        if font_path.exists() {
+            let report = verify_font_file(font_path);
+            assert!(report.file_exists);
+            assert!(report.valid_truetype_header);
+            assert_eq!(report.sha256_hash, LUCIDE_FONT_EXPECTED_SHA256);
+            assert!(report.hash_valid);
+            assert_eq!(report.covered_icons_count, ALL_ICONS.len());
+            assert!(report.missing_codepoints.is_empty());
+            assert!(report.is_usable);
+        }
+    }
+
+    #[test]
+    fn test_font_verification_invalid_bytes() {
+        let bad_bytes = b"not a true type font";
+        let report = verify_font_bytes(bad_bytes, None);
+        assert!(!report.valid_truetype_header);
+        assert!(!report.hash_valid);
+        assert!(!report.is_usable);
+        assert!(!report.missing_codepoints.is_empty());
+    }
+
+    #[test]
+    fn test_glyph_capability_detection_and_fallback() {
+        // Test ASCII override
+        unsafe { env::set_var("M31A_ICONS", "ascii") };
+        let cap = detect_glyph_capability();
+        assert_eq!(cap.recommended_mode, IconMode::Ascii);
+        assert_eq!(resolve_safe_icon_mode(IconMode::Lucide), IconMode::Ascii);
+        assert_eq!(resolve_safe_icon_mode(IconMode::Unicode), IconMode::Ascii);
+        assert_eq!(resolve_safe_icon_mode(IconMode::Ascii), IconMode::Ascii);
+        unsafe { env::remove_var("M31A_ICONS") };
+
+        // Test Unicode override
+        unsafe { env::set_var("M31A_ICONS", "unicode") };
+        let cap = detect_glyph_capability();
+        assert_eq!(cap.recommended_mode, IconMode::Unicode);
+        assert_eq!(resolve_safe_icon_mode(IconMode::Lucide), IconMode::Unicode);
+        assert_eq!(resolve_safe_icon_mode(IconMode::Unicode), IconMode::Unicode);
+        assert_eq!(resolve_safe_icon_mode(IconMode::Ascii), IconMode::Ascii);
+        unsafe { env::remove_var("M31A_ICONS") };
+
+        // Test Dumb terminal
+        unsafe { env::set_var("TERM", "dumb") };
+        let cap = detect_glyph_capability();
+        assert_eq!(cap.recommended_mode, IconMode::Ascii);
+        assert_eq!(resolve_safe_icon_mode(IconMode::Lucide), IconMode::Ascii);
+        unsafe { env::remove_var("TERM") };
+    }
+
+    #[test]
+    fn test_font_install_helper_validation() {
+        let invalid_bytes = b"corrupt font bytes";
+        let res = install_lucide_font_to_user_fonts(invalid_bytes);
+        assert!(res.is_err());
     }
 }
