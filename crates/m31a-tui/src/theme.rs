@@ -495,6 +495,12 @@ pub fn effective_icon_mode(theme: &Theme) -> crate::icons::IconMode {
     }
 }
 
+/// Computes effective safe icon mode considering terminal and font capability.
+pub fn effective_safe_icon_mode(theme: &Theme) -> crate::icons::IconMode {
+    let mode = effective_icon_mode(theme);
+    crate::icons::resolve_safe_icon_mode(mode)
+}
+
 /// Initialize or switch global theme from config or command
 pub fn init_theme(variant: ThemeVariant) {
     let val = match variant {
