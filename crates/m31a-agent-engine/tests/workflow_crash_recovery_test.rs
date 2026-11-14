@@ -191,6 +191,7 @@ mod tests {
                 "autonomous",
                 None,
                 Some(WorkflowExecutionConfig {
+                    execution_mode: m31a_core::workflow::ExecutionMode::Standard,
                     max_concurrency: 1,
                     task_timeout_seconds: 60,
                     verify_post_wave: false,
