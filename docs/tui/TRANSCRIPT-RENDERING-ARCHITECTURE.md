@@ -7,19 +7,18 @@
 
 ---
 
-## 1. Architectural Problem Statement & Root Cause
+## 1. Architectural Overview & Design Principles
 
-In terminal UI virtualizers, visual glitches occur whenever the measurement algorithm calculating viewport dimensions diverges from the projection algorithm rendering terminal rows.
+In terminal UI virtualizers, rendering accuracy requires that the measurement algorithm calculating viewport dimensions matches the projection algorithm rendering terminal rows.
 
-Prior to this correction:
-1. `measure_cell_rendered_height` estimated row counts using logical line splits (`\n`), ignoring Ratatui paragraph wrapping and terminal boundary constraints.
-2. `render_virtualized` sliced content by logical items, while Ratatui's renderer expanded those items into visual rows at draw time.
-3. Multi-byte UTF-8, ANSI escape sequences, CJK fullwidth characters, emoji sequences, and long unbreakable tokens (file paths, git hashes, UUIDs) caused measurement mismatches.
-4. Symptoms:
-   - Trailing rows of assistant responses hidden beneath viewport borders.
-   - Phantom blank rows inside reasoning bubbles.
-   - Scroll offsets jumping unexpectedly during auto-scrolling and token streaming.
-   - Mouse click hit-testing misidentifying the selected cell or line.
+M31A implements a unified visual-row pipeline that guarantees:
+1. **Accurate Line Wrapping:** Paragraph wrapping and terminal boundary constraints are evaluated identically in measurement and rendering.
+2. **Unified Virtualization:** Multi-byte UTF-8, ANSI escape sequences, CJK fullwidth characters, emoji sequences, and long tokens (file paths, git hashes, UUIDs) are calculated with Unicode-standard column widths.
+3. **Smooth Viewport Virtualization:**
+   - Assistant responses, tool cards, and reasoning blocks fit viewports without hidden trailing rows.
+   - Elimination of phantom blank rows inside reasoning bubbles.
+   - Stable auto-scrolling during continuous streaming token generation.
+   - Precise mouse hit-testing for copying, expanding, and folding blocks.
 
 ---
 
