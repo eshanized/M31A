@@ -19,7 +19,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   - Published comprehensive specifications and architecture documentation for autonomous workflow orchestration and speculative execution (`docs/architecture/AUTONOMOUS_WORKFLOW_ARCHITECTURE.md`, `docs/architecture/SPECULATIVE_EXECUTION_ARCHITECTURE.md`, `docs/specs/SPECULATIVE_EVALUATION_MODEL.md`).
 - **Execution Integrity Architecture (Rounds 2 & 3)**:
   - Implemented Round 2 Execution Integrity Architecture establishing fail-closed validation, hardened UDS socket binding, and turn boundary isolation.
-  - Published Round 3 Baseline Audit report documenting execution integrity gaps, implementation specification, and verification roadmap (`docs/reports/ROUND_3_BASELINE_AUDIT.md`, `docs/reports/ROUND_3_IMPLEMENTATION_REPORT.md`, `docs/reports/ROUND_3_VERIFICATION_REPORT.md`).
+  - Published Execution Integrity Contract and Demand-Driven Coordination architecture (`docs/architecture/DEMAND_DRIVEN_COORDINATION.md`, `docs/architecture/EXECUTION_INTEGRITY_CONTRACT.md`).
   - Added structured verification records and evidence grounding for continuous learning.
 - **Production Installer & Uninstaller Suite**:
   - Added official Linux installer script (`install.sh`, `scripts/install.sh`) supporting terminal progress bar rendering, SHA-256 checksum verification, system-wide (`/usr/local/bin`) or user-local (`~/.m31a/bin`) installation, local binary installation, and source builds.
