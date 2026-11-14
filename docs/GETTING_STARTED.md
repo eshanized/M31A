@@ -49,7 +49,7 @@ curl -fsSL https://raw.githubusercontent.com/eshanized/M31A/master/install.sh | 
 
 Or install a specific version using the local installer:
 ```bash
-./install.sh --version 0.1.14
+./install.sh --version 0.1.15
 ```
 
 ### Option B: Install via Cargo
