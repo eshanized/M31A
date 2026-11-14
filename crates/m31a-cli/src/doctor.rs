@@ -142,6 +142,18 @@ pub struct SecurityPresetCheck {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FontCheck {
+    pub configured_icon_mode: String,
+    pub effective_icon_mode: String,
+    pub supports_lucide: bool,
+    pub supports_unicode: bool,
+    pub lucide_font_installed: bool,
+    pub detected_font_path: Option<String>,
+    pub status: String,
+    pub recommendation: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DoctorReport {
     pub timestamp: String,
     pub version: String,
@@ -159,6 +171,7 @@ pub struct DoctorReport {
     pub plugin_directory: PluginDirectoryCheck,
     pub features: FeatureFlagsCheck,
     pub security: SecurityPresetCheck,
+    pub font_support: FontCheck,
 }
 
 pub struct Doctor;
@@ -179,6 +192,7 @@ impl Doctor {
         let plugin_directory = Self::check_plugin_directory();
         let features = Self::check_features();
         let security = Self::check_security(config);
+        let font_support = Self::check_fonts(config);
 
         DoctorReport {
             timestamp: chrono::Utc::now().to_rfc3339(),
@@ -197,6 +211,7 @@ impl Doctor {
             plugin_directory,
             features,
             security,
+            font_support,
         }
     }
 
@@ -721,6 +736,52 @@ impl Doctor {
         }
     }
 
+    fn check_fonts(config: &Config) -> FontCheck {
+        let configured = config
+            .tui
+            .icons
+            .clone()
+            .unwrap_or_else(|| "unicode".to_string());
+        let cap = m31a_tui::icons::detect_glyph_capability();
+        let font_path = m31a_tui::icons::find_installed_lucide_font();
+        let lucide_font_installed = font_path.is_some();
+        let detected_font_path = font_path.map(|p| p.display().to_string());
+
+        let req_mode = m31a_tui::icons::IconMode::parse_str(&configured);
+        let eff_mode = m31a_tui::icons::resolve_safe_icon_mode(req_mode);
+
+        let (status, recommendation) =
+            if req_mode == m31a_tui::icons::IconMode::Lucide && !lucide_font_installed {
+                (
+                    "Degraded to Unicode (Lucide font not installed)".to_string(),
+                    Some(
+                        "Install lucide.ttf in ~/.local/share/fonts/ or configure terminal font"
+                            .to_string(),
+                    ),
+                )
+            } else if eff_mode == m31a_tui::icons::IconMode::Ascii
+                && req_mode != m31a_tui::icons::IconMode::Ascii
+            {
+                (
+                    "Degraded to ASCII (Restricted terminal environment)".to_string(),
+                    Some("Enable UTF-8 locale or use modern terminal emulator".to_string()),
+                )
+            } else {
+                ("Operational".to_string(), None)
+            };
+
+        FontCheck {
+            configured_icon_mode: configured,
+            effective_icon_mode: eff_mode.to_string(),
+            supports_lucide: cap.supports_lucide,
+            supports_unicode: cap.supports_unicode,
+            lucide_font_installed,
+            detected_font_path,
+            status,
+            recommendation,
+        }
+    }
+
     pub fn render_human(report: &DoctorReport) {
         println!(
             "{}",
@@ -1107,6 +1168,47 @@ impl Doctor {
             "   Available Presets: {}",
             report.security.available_presets.join(", ").dimmed()
         );
+
+        // 14. Icon Font & Terminal Glyph Coverage
+        println!(
+            "\n{}",
+            "14. Icon Font & Terminal Glyph Coverage".bold().underline()
+        );
+        println!(
+            "   Configured Mode: {} | Effective Mode: {}",
+            report.font_support.configured_icon_mode.cyan(),
+            report.font_support.effective_icon_mode.green().bold()
+        );
+        println!(
+            "   Lucide Font Installed: {}",
+            if report.font_support.lucide_font_installed {
+                "Yes (Verified)".green().bold()
+            } else {
+                "No (System/User font paths checked)".yellow()
+            }
+        );
+        if let Some(ref p) = report.font_support.detected_font_path {
+            println!("   Font Path: {}", p.dimmed());
+        }
+        println!(
+            "   Unicode Symbol Support: {}",
+            if report.font_support.supports_unicode {
+                "Yes (UTF-8)".green()
+            } else {
+                "No (ASCII fallback required)".red()
+            }
+        );
+        println!(
+            "   Glyph Status: {}",
+            if report.font_support.status == "Operational" {
+                report.font_support.status.green().bold()
+            } else {
+                report.font_support.status.yellow().bold()
+            }
+        );
+        if let Some(ref rec) = report.font_support.recommendation {
+            println!("   Recommendation: {}", rec.dimmed());
+        }
 
         println!(
             "\n{}",
