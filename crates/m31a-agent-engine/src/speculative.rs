@@ -887,6 +887,9 @@ impl SpeculativeArena {
                         task_id: None,
                         attempt_id: None,
                         expected_change_set_hash: None,
+                        source_branch: None,
+                        source_base_sha: None,
+                        target_base_sha: None,
                     };
 
                     let outcome = svc.integrate(&req).await.unwrap_or_else(|e| {
