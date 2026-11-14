@@ -169,7 +169,7 @@ impl DeploymentReadinessGate {
             total_gates,
             passed_gates,
             checks,
-            release_version: Some("v0.1.14".to_string()),
+            release_version: Some("v0.1.15".to_string()),
             certificate_markdown: md,
         }
     }
