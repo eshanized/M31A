@@ -340,24 +340,21 @@ impl WorkflowIntegrationService {
             };
             for hunk in &parsed.hunks {
                 let target_path = workspace_root.join(hunk.path());
-                match hunk {
-                    m31a_tools::patch::Hunk::UpdateFile { chunks, .. } => {
-                        if !target_path.exists() {
-                            return Ok(false);
-                        }
-                        if let Ok(file_content) = fs::read_to_string(&target_path) {
-                            for chunk in chunks {
-                                for old_line in &chunk.old_lines {
-                                    if !file_content.contains(old_line) {
-                                        return Ok(false);
-                                    }
+                if let m31a_tools::patch::Hunk::UpdateFile { chunks, .. } = hunk {
+                    if !target_path.exists() {
+                        return Ok(false);
+                    }
+                    if let Ok(file_content) = fs::read_to_string(&target_path) {
+                        for chunk in chunks {
+                            for old_line in &chunk.old_lines {
+                                if !file_content.contains(old_line) {
+                                    return Ok(false);
                                 }
                             }
-                        } else {
-                            return Ok(false);
                         }
+                    } else {
+                        return Ok(false);
                     }
-                    _ => {}
                 }
             }
             Ok(true)
