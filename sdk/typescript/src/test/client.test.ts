@@ -14,7 +14,7 @@ describe('M31AClient', () => {
 
     transport.registerHandler('initialize', () => ({
       server_name: 'm31a-app-server',
-      version: '0.1.14',
+      version: '0.1.15',
       protocol_version: '2.0',
       capabilities: { threads: true, turns: true, code_mode: true, guardian_review: true },
     }));
