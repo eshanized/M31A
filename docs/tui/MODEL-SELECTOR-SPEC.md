@@ -7,19 +7,19 @@
 
 ---
 
-## 1. Architectural Problem Statement & Root Cause
+## 1. Architectural Overview & Design Principles
 
-Prior to this unified implementation, model selection was fragmented across three disparate surfaces:
-1. **BottomPane Popup (`BottomPaneMode::ModelSelectorPopup`):** Floating autocomplete popup in prompt bar.
+The M31A Terminal User Interface provides a unified, stateful model selection system across three cohesive interaction surfaces:
+1. **BottomPane Popup (`BottomPaneMode::ModelSelectorPopup`):** Floating inline autocomplete popup in the prompt composer.
 2. **Modal Picker (`ModalState::ModelPicker`):** Centered floating dialog launched via `/model` or `Ctrl+M` / `F2`.
-3. **Dedicated Models Screen (`Screen::Models`):** Full-screen catalog reached via `F3` or Tab cycling.
+3. **Dedicated Models Screen (`Screen::Models`):** Full-screen catalog with detailed inspector reached via `F3` or Tab cycling.
 
-Defects previously present:
-- **Viewport Overflow:** The list items rendered 3 lines per entry (name, description, badges) while the virtualizer set `viewport_height` based on container lines. A 150-model catalog rendered 30 lines inside a 10-line container, overflowing boundaries and breaking mouse hit-testing.
-- **State Drift:** `ModalState::ModelPicker` reconstructed a temporary, stateless `ModelListState` every frame, discarding search queries and scroll positions.
-- **Mouse Coordinate Decoupling:** Mouse click hit-testing divided vertical offsets by 3 (`(row - y) / 3`), which failed when items scrolled or when padding varied.
-- **Fragmented Navigation:** Modal picker lacked `PageUp`, `PageDown`, `Home`, `End`, and live search filtering.
-- **Single-Pane Models Screen:** The dedicated models screen rendered only a flat list without a detail inspector.
+### Core Viewport & Interaction Invariants
+- **Strict Row Mapping:** Exactly 1 selectable model entry maps to 1 terminal row; visible entries never exceed container inner height.
+- **Persistent State:** Search queries, selected indices, and scroll offsets persist cleanly across modal open/close cycles via `ModelListState`.
+- **Direct Coordinate Mapping:** Mouse click hit-testing directly maps terminal row coordinates to model list items with zero vertical offset divergence.
+- **Rich Keyboard Navigation:** Full support for `Up`, `Down`, `PageUp`, `PageDown`, `Home`, `End`, and real-time substring filtering.
+- **Split-View Catalog Screen:** Two-pane layout with model list on the left and comprehensive capability inspector (context length, cost, provider, tags) on the right.
 
 ---
 
