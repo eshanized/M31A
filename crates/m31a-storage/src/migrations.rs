@@ -513,6 +513,68 @@ pub const BUILTIN_MIGRATIONS: &[Migration] = &[
         CREATE INDEX IF NOT EXISTS idx_workflow_approvals_wf_status ON workflow_approvals(workflow_id, status);
         "#,
     ),
+    Migration::new(
+        18,
+        "demand_driven_orchestration_and_worktrees",
+        r#"
+        CREATE TABLE IF NOT EXISTS managed_worktrees (
+            id TEXT PRIMARY KEY,
+            thread_id TEXT NOT NULL,
+            workflow_id TEXT,
+            task_id TEXT,
+            worktree_path TEXT NOT NULL,
+            branch TEXT NOT NULL,
+            base_sha TEXT NOT NULL,
+            head_sha TEXT NOT NULL,
+            source_root TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'preserved', 'reconciled', 'cleaned_up')),
+            unintegrated_diff TEXT,
+            created_at_epoch_ms INTEGER NOT NULL,
+            updated_at_epoch_ms INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS workflow_integrations (
+            id TEXT PRIMARY KEY,
+            workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+            task_id TEXT NOT NULL,
+            attempt_id INTEGER NOT NULL,
+            status TEXT NOT NULL CHECK(status IN ('created', 'executing', 'result_ready', 'integration_pending', 'verified', 'promoted', 'failed', 'cancelled', 'rejected', 'retry_pending')),
+            source_branch TEXT NOT NULL,
+            source_base_sha TEXT NOT NULL,
+            target_base_sha TEXT NOT NULL,
+            current_target_sha TEXT,
+            change_set_hash TEXT NOT NULL,
+            patch_artifact_path TEXT,
+            modified_files_json TEXT NOT NULL DEFAULT '[]',
+            verification_passed INTEGER NOT NULL DEFAULT 0,
+            error_details TEXT,
+            created_at_epoch_ms INTEGER NOT NULL,
+            updated_at_epoch_ms INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS workflow_conflicts (
+            id TEXT PRIMARY KEY,
+            workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+            reporting_task_id TEXT NOT NULL,
+            conflicting_task_id TEXT,
+            resource_path TEXT NOT NULL,
+            conflict_kind TEXT NOT NULL CHECK(conflict_kind IN ('genuine_dependency', 'integration_conflict', 'shared_resource_contention', 'requires_human_intervention')),
+            description TEXT NOT NULL,
+            suggested_dependency TEXT,
+            resolution_json TEXT,
+            reported_at_epoch_ms INTEGER NOT NULL,
+            resolved_at_epoch_ms INTEGER
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_managed_worktrees_thread ON managed_worktrees(thread_id);
+        CREATE INDEX IF NOT EXISTS idx_managed_worktrees_wf_task ON managed_worktrees(workflow_id, task_id);
+        CREATE INDEX IF NOT EXISTS idx_managed_worktrees_status ON managed_worktrees(status);
+        CREATE INDEX IF NOT EXISTS idx_workflow_integrations_wf_task ON workflow_integrations(workflow_id, task_id, attempt_id);
+        CREATE INDEX IF NOT EXISTS idx_workflow_integrations_hash ON workflow_integrations(change_set_hash);
+        CREATE INDEX IF NOT EXISTS idx_workflow_integrations_status ON workflow_integrations(status);
+        CREATE INDEX IF NOT EXISTS idx_workflow_conflicts_wf_task ON workflow_conflicts(workflow_id, reporting_task_id);
+        "#,
+    ),
 ];
 
 /// Migration engine responsible for running and validating SQLite migrations.
