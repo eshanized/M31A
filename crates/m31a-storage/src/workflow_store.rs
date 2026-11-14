@@ -4,10 +4,10 @@
 use anyhow::{Context, Result, anyhow, bail};
 use chrono::Utc;
 use m31a_core::workflow::{
-    ConflictKind, ConflictReport, ConflictResolution, IntegrationLifecycleStatus, IntegrationRecord,
-    WorkflowApprovalRequest, WorkflowApprovalStatus, WorkflowArtifact, WorkflowEvent,
-    WorkflowEventType, WorkflowPlan, WorkflowRun, WorkflowState, WorkflowTask, WorkflowTaskStatus,
-    WorkspaceIsolationStrategy, WorktreeRecord, WorktreeStatus,
+    ConflictKind, ConflictReport, ConflictResolution, IntegrationLifecycleStatus,
+    IntegrationRecord, WorkflowApprovalRequest, WorkflowApprovalStatus, WorkflowArtifact,
+    WorkflowEvent, WorkflowEventType, WorkflowPlan, WorkflowRun, WorkflowState, WorkflowTask,
+    WorkflowTaskStatus, WorkspaceIsolationStrategy, WorktreeRecord, WorktreeStatus,
 };
 use rusqlite::{Connection, params};
 use sha2::{Digest, Sha256};
@@ -2952,8 +2952,7 @@ mod tests {
         assert_eq!(t2_db.status, WorkflowTaskStatus::Blocked);
 
         // Attempting to add a cyclic dependency (t1 depends on t2) is rejected transactionally
-        let cyclic_res =
-            store.replan_with_dependency(wf_id, "t1", "t2", "invalid cycle addition");
+        let cyclic_res = store.replan_with_dependency(wf_id, "t1", "t2", "invalid cycle addition");
         assert!(cyclic_res.is_err());
     }
 }

@@ -580,7 +580,9 @@ impl WorkflowOrchestrator {
                             );
                             ConflictResolution::EscalateToHuman {
                                 task_id: report.reporting_task_id.clone(),
-                                reason: format!("Cyclic or invalid dependency replanning error: {e}"),
+                                reason: format!(
+                                    "Cyclic or invalid dependency replanning error: {e}"
+                                ),
                             }
                         }
                     }
@@ -1428,10 +1430,14 @@ impl WorkflowOrchestrator {
                                 safety_status = VerificationStatus::Pending;
                                 review_status = VerificationStatus::Pending;
                             } else {
-                                let worktree_record = self.store().get_worktree(&task_id).ok().flatten();
-                                let source_branch = worktree_record.as_ref().map(|w| w.branch.clone());
-                                let source_base_sha = worktree_record.as_ref().map(|w| w.base_sha.clone());
-                                let svc = WorkflowIntegrationService::new().with_store(self.store());
+                                let worktree_record =
+                                    self.store().get_worktree(&task_id).ok().flatten();
+                                let source_branch =
+                                    worktree_record.as_ref().map(|w| w.branch.clone());
+                                let source_base_sha =
+                                    worktree_record.as_ref().map(|w| w.base_sha.clone());
+                                let svc =
+                                    WorkflowIntegrationService::new().with_store(self.store());
                                 let req = IntegrationRequest {
                                     workspace_root: run.workspace_root.clone(),
                                     patch_content: diff_text.clone(),

@@ -293,9 +293,17 @@ impl WorktreeManager {
     }
 
     /// Preserves an isolated worktree and its unintegrated changes for forensic investigation or recovery.
-    pub fn preserve_worktree(&self, thread_id: &str, unintegrated_diff: Option<&str>) -> Result<()> {
+    pub fn preserve_worktree(
+        &self,
+        thread_id: &str,
+        unintegrated_diff: Option<&str>,
+    ) -> Result<()> {
         if let Some(ref store) = self.store {
-            let _ = store.update_worktree_status(thread_id, WorktreeStatus::Preserved, unintegrated_diff);
+            let _ = store.update_worktree_status(
+                thread_id,
+                WorktreeStatus::Preserved,
+                unintegrated_diff,
+            );
         }
         Ok(())
     }

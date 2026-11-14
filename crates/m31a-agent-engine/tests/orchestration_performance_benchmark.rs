@@ -88,7 +88,12 @@ edition = "2024"
     String::from_utf8_lossy(&head_out.stdout).trim().to_string()
 }
 
-fn make_bench_run(wf_id: &str, root: &Path, objective: &str, cfg: &WorkflowExecutionConfig) -> WorkflowRun {
+fn make_bench_run(
+    wf_id: &str,
+    root: &Path,
+    objective: &str,
+    cfg: &WorkflowExecutionConfig,
+) -> WorkflowRun {
     let now = Utc::now().timestamp_millis();
     WorkflowRun {
         id: wf_id.to_string(),
@@ -185,10 +190,14 @@ async fn benchmark_mode_1_sequential(repo_root: &Path, storage: &Storage) -> Ben
     // Execute sequentially one-by-one
     for task in &tasks {
         let worker_id = format!("worker-{}", task.id);
-        let _ = store.claim_task(&wf_id, &task.id, &worker_id, 30_000).unwrap();
+        let _ = store
+            .claim_task(&wf_id, &task.id, &worker_id, 30_000)
+            .unwrap();
         // Emulate task execution payload
         tokio::time::sleep(Duration::from_millis(15)).await;
-        store.update_task_status(&wf_id, &task.id, WorkflowTaskStatus::Completed, None).unwrap();
+        store
+            .update_task_status(&wf_id, &task.id, WorkflowTaskStatus::Completed, None)
+            .unwrap();
     }
 
     let total_time_ms = start_all.elapsed().as_millis() as u64;
@@ -211,10 +220,15 @@ async fn benchmark_mode_1_sequential(repo_root: &Path, storage: &Storage) -> Ben
 }
 
 /// Mode 2: Worktree-First DAG Execution (Standard Mode)
-async fn benchmark_mode_2_worktree_first(repo_root: &Path, base_sha: &str, storage: &Storage) -> BenchmarkResult {
+async fn benchmark_mode_2_worktree_first(
+    repo_root: &Path,
+    base_sha: &str,
+    storage: &Storage,
+) -> BenchmarkResult {
     let start_all = Instant::now();
     let store = storage.workflow_store();
-    let wt_mgr = Arc::new(WorktreeManager::new(WorktreeSettings::new(repo_root)).with_store(store.clone()));
+    let wt_mgr =
+        Arc::new(WorktreeManager::new(WorktreeSettings::new(repo_root)).with_store(store.clone()));
     let wf_id = format!("wf-bench-wt-{}", Uuid::new_v4().simple());
 
     let mut cfg = WorkflowExecutionConfig::default();
@@ -256,20 +270,21 @@ async fn benchmark_mode_2_worktree_first(repo_root: &Path, base_sha: &str, stora
 
         join_set.spawn(async move {
             let worker = format!("worker-{}", task.id);
-            let _ = store_c.claim_task(&wf_c, &task.id, &worker, 30_000).unwrap();
-            let wt = wt_mgr_c.create_task_worktree(
-                Some(&wf_c),
-                Some(&task.id),
-                &worker,
-                Some(&base_c),
-            ).unwrap();
+            let _ = store_c
+                .claim_task(&wf_c, &task.id, &worker, 30_000)
+                .unwrap();
+            let wt = wt_mgr_c
+                .create_task_worktree(Some(&wf_c), Some(&task.id), &worker, Some(&base_c))
+                .unwrap();
 
             // Perform file edit in isolated worktree
             let f = wt.worktree_path.join(format!("src/module_{}.rs", task.id));
             fs::write(&f, format!("pub fn run_{}() -> bool {{ true }}\n", task.id)).unwrap();
 
             tokio::time::sleep(Duration::from_millis(15)).await;
-            store_c.update_task_status(&wf_c, &task.id, WorkflowTaskStatus::Completed, None).unwrap();
+            store_c
+                .update_task_status(&wf_c, &task.id, WorkflowTaskStatus::Completed, None)
+                .unwrap();
             let _ = wt_mgr_c.cleanup_worktree(&worker);
         });
     }
@@ -298,14 +313,18 @@ async fn benchmark_mode_2_worktree_first(repo_root: &Path, base_sha: &str, stora
 }
 
 /// Mode 3: Worktree-First with Dynamic Replanning
-async fn benchmark_mode_3_dynamic_replanning(repo_root: &Path, storage: &Storage) -> BenchmarkResult {
+async fn benchmark_mode_3_dynamic_replanning(
+    repo_root: &Path,
+    storage: &Storage,
+) -> BenchmarkResult {
     let start_all = Instant::now();
     let store = storage.workflow_store();
     let wt_mgr = Arc::new(WorktreeManager::new(WorktreeSettings::new(repo_root)));
     let tools = ToolRegistry::new();
     let exec_policy = ExecPolicy::standard();
-    let orch = WorkflowOrchestrator::new(storage.clone(), None, None, Some(tools), Some(exec_policy))
-        .with_worktree_manager(wt_mgr);
+    let orch =
+        WorkflowOrchestrator::new(storage.clone(), None, None, Some(tools), Some(exec_policy))
+            .with_worktree_manager(wt_mgr);
     let wf_id = format!("wf-bench-replan-{}", Uuid::new_v4().simple());
     let cfg = WorkflowExecutionConfig::default();
 
@@ -352,14 +371,25 @@ async fn benchmark_mode_3_dynamic_replanning(repo_root: &Path, storage: &Storage
     let res = orch.handle_task_conflict(&conflict).unwrap();
     let replan_time_ms = replan_start.elapsed().as_millis() as u64;
 
-    assert!(matches!(res, m31a_core::workflow::ConflictResolution::AddDependency { .. }));
+    assert!(matches!(
+        res,
+        m31a_core::workflow::ConflictResolution::AddDependency { .. }
+    ));
 
     // Complete remaining tasks
-    store.update_task_status(&wf_id, "replan-task-1", WorkflowTaskStatus::Completed, None).unwrap();
+    store
+        .update_task_status(&wf_id, "replan-task-1", WorkflowTaskStatus::Completed, None)
+        .unwrap();
     // Task 3 is now unblocked and ready
-    store.update_task_status(&wf_id, "replan-task-3", WorkflowTaskStatus::Completed, None).unwrap();
-    store.update_task_status(&wf_id, "replan-task-2", WorkflowTaskStatus::Completed, None).unwrap();
-    store.update_task_status(&wf_id, "replan-task-4", WorkflowTaskStatus::Completed, None).unwrap();
+    store
+        .update_task_status(&wf_id, "replan-task-3", WorkflowTaskStatus::Completed, None)
+        .unwrap();
+    store
+        .update_task_status(&wf_id, "replan-task-2", WorkflowTaskStatus::Completed, None)
+        .unwrap();
+    store
+        .update_task_status(&wf_id, "replan-task-4", WorkflowTaskStatus::Completed, None)
+        .unwrap();
 
     let total_time_ms = start_all.elapsed().as_millis() as u64;
     let throughput = if total_time_ms > 0 {
@@ -423,7 +453,9 @@ async fn benchmark_mode_4_coordinated(repo_root: &Path, storage: &Storage) -> Be
             match store.claim_task(&wf_id, &task.id, &worker, 30_000).unwrap() {
                 Some(_) => {
                     tokio::time::sleep(Duration::from_millis(10)).await;
-                    store.update_task_status(&wf_id, &task.id, WorkflowTaskStatus::Completed, None).unwrap();
+                    store
+                        .update_task_status(&wf_id, &task.id, WorkflowTaskStatus::Completed, None)
+                        .unwrap();
                     break;
                 }
                 None => {
@@ -473,7 +505,9 @@ async fn run_comparative_orchestration_benchmarks() {
 
     let results = vec![r1, r2, r3, r4];
 
-    println!("| Mode | Total Time (ms) | Throughput (tasks/s) | Sched Overhead (ms) | Conflict Rate (%) | Retries | Recovery (ms) | Verif Fails |");
+    println!(
+        "| Mode | Total Time (ms) | Throughput (tasks/s) | Sched Overhead (ms) | Conflict Rate (%) | Retries | Recovery (ms) | Verif Fails |"
+    );
     println!("| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |");
     for r in &results {
         println!(
@@ -488,11 +522,14 @@ async fn run_comparative_orchestration_benchmarks() {
             r.verification_failures
         );
     }
-    println!("\n================================================================================\n");
+    println!(
+        "\n================================================================================\n"
+    );
 
     // Key architectural verification: Worktree-first parallel throughput must exceed sequential mode!
     assert!(
-        results[1].parallel_throughput_tasks_per_sec >= results[0].parallel_throughput_tasks_per_sec,
+        results[1].parallel_throughput_tasks_per_sec
+            >= results[0].parallel_throughput_tasks_per_sec,
         "Worktree-first parallel throughput ({:.1} tasks/s) should match or exceed sequential ({:.1} tasks/s)",
         results[1].parallel_throughput_tasks_per_sec,
         results[0].parallel_throughput_tasks_per_sec

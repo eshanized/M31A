@@ -747,7 +747,9 @@ impl WorkflowPlan {
         rationale: &str,
     ) -> Result<WorkflowPlan> {
         if self.would_create_cycle(task_id, depends_on) {
-            bail!("Adding dependency from '{task_id}' to '{depends_on}' would introduce a dependency cycle");
+            bail!(
+                "Adding dependency from '{task_id}' to '{depends_on}' would introduce a dependency cycle"
+            );
         }
 
         let mut new_tasks = self.tasks.clone();
@@ -1001,24 +1003,16 @@ pub struct ConflictReport {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ConflictResolution {
     /// Resolved by adding an explicit DAG dependency and replanning/yielding.
-    AddDependency {
-        task_id: String,
-        depends_on: String,
-    },
+    AddDependency { task_id: String, depends_on: String },
     /// Marked as an integration-time concern; concurrent worktree execution continues safely.
     DeferToIntegration {
         task_id: String,
         resource_path: PathBuf,
     },
     /// Requires human intervention or approval.
-    EscalateToHuman {
-        task_id: String,
-        reason: String,
-    },
+    EscalateToHuman { task_id: String, reason: String },
     /// Rejected as invalid or circular dependency.
-    Rejected {
-        reason: String,
-    },
+    Rejected { reason: String },
 }
 
 /// Durable lifecycle status for an integration request or record.
@@ -1090,7 +1084,10 @@ impl IntegrationLifecycleStatus {
                 Self::ResultReady | Self::Failed | Self::Cancelled | Self::RetryPending
             ),
             Self::ResultReady => {
-                matches!(next, Self::IntegrationPending | Self::Failed | Self::Cancelled)
+                matches!(
+                    next,
+                    Self::IntegrationPending | Self::Failed | Self::Cancelled
+                )
             }
             Self::IntegrationPending => matches!(
                 next,

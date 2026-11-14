@@ -21,10 +21,9 @@ use chrono::Utc;
 use m31a_agent_engine::integration::{IntegrationRequest, WorkflowIntegrationService};
 use m31a_agent_engine::workflow::{WorkflowExecutionConfig, WorkflowOrchestrator};
 use m31a_core::workflow::{
-    ConflictKind, ConflictReport, ConflictResolution,
-    IntegrationLifecycleStatus, WorkflowPlan, WorkflowRun, WorkflowState,
-    WorkflowTask, WorkflowTaskKind, WorkflowTaskStatus, WorkspaceIsolationStrategy,
-    WorktreeStatus,
+    ConflictKind, ConflictReport, ConflictResolution, IntegrationLifecycleStatus, WorkflowPlan,
+    WorkflowRun, WorkflowState, WorkflowTask, WorkflowTaskKind, WorkflowTaskStatus,
+    WorkspaceIsolationStrategy, WorktreeStatus,
 };
 use m31a_execpolicy::ExecPolicy;
 use m31a_storage::db::Storage;
@@ -202,37 +201,50 @@ async fn test_1_independent_agents_modifying_identical_paths_execute_concurrentl
     store.save_workflow_plan(&plan).unwrap();
 
     // Both tasks can be claimed CONCURRENTLY because isolation is Worktree!
-    let claimed_a = store.claim_task(&wf_id, &task_a.id, "worker-a", 30_000).unwrap();
+    let claimed_a = store
+        .claim_task(&wf_id, &task_a.id, "worker-a", 30_000)
+        .unwrap();
     assert!(claimed_a.is_some(), "Task A should be claimed");
 
-    let claimed_b = store.claim_task(&wf_id, &task_b.id, "worker-b", 30_000).unwrap();
-    assert!(claimed_b.is_some(), "Task B should also be claimed concurrently despite overlapping declared path");
+    let claimed_b = store
+        .claim_task(&wf_id, &task_b.id, "worker-b", 30_000)
+        .unwrap();
+    assert!(
+        claimed_b.is_some(),
+        "Task B should also be claimed concurrently despite overlapping declared path"
+    );
 
     // Spawn real isolated worktrees on filesystem
-    let wt_a = wt_mgr.create_task_worktree(
-        Some(&wf_id),
-        Some(&task_a.id),
-        "worker-a",
-        Some(&base_sha),
-    ).unwrap();
+    let wt_a = wt_mgr
+        .create_task_worktree(Some(&wf_id), Some(&task_a.id), "worker-a", Some(&base_sha))
+        .unwrap();
 
-    let wt_b = wt_mgr.create_task_worktree(
-        Some(&wf_id),
-        Some(&task_b.id),
-        "worker-b",
-        Some(&base_sha),
-    ).unwrap();
+    let wt_b = wt_mgr
+        .create_task_worktree(Some(&wf_id), Some(&task_b.id), "worker-b", Some(&base_sha))
+        .unwrap();
 
     // Modify identical relative paths concurrently in isolated worktrees
     let lib_a = wt_a.worktree_path.join("src/lib.rs");
     let lib_b = wt_b.worktree_path.join("src/lib.rs");
 
-    fs::write(&lib_a, "pub fn base_function() -> i32 { 42 }\npub fn feat_a() -> i32 { 100 }\n").unwrap();
-    fs::write(&lib_b, "pub fn base_function() -> i32 { 42 }\npub fn feat_b() -> i32 { 200 }\n").unwrap();
+    fs::write(
+        &lib_a,
+        "pub fn base_function() -> i32 { 42 }\npub fn feat_a() -> i32 { 100 }\n",
+    )
+    .unwrap();
+    fs::write(
+        &lib_b,
+        "pub fn base_function() -> i32 { 42 }\npub fn feat_b() -> i32 { 200 }\n",
+    )
+    .unwrap();
 
     // Both export valid diffs against base commit
-    let diff_a = wt_mgr.export_worktree_diff(&wt_a.worktree_path, &base_sha).unwrap();
-    let diff_b = wt_mgr.export_worktree_diff(&wt_b.worktree_path, &base_sha).unwrap();
+    let diff_a = wt_mgr
+        .export_worktree_diff(&wt_a.worktree_path, &base_sha)
+        .unwrap();
+    let diff_b = wt_mgr
+        .export_worktree_diff(&wt_b.worktree_path, &base_sha)
+        .unwrap();
 
     assert!(diff_a.contains("feat_a"));
     assert!(diff_b.contains("feat_b"));
@@ -290,7 +302,11 @@ async fn test_2_overlapping_modifications_detected_during_integration() {
     };
 
     let outcome_1 = svc.integrate(&req_1).await.unwrap();
-    assert!(outcome_1.success, "Task 1 integration must succeed: {:?}", outcome_1.error);
+    assert!(
+        outcome_1.success,
+        "Task 1 integration must succeed: {:?}",
+        outcome_1.error
+    );
 
     // Now target workspace HEAD has advanced.
     // Task 2 was developed against stale base_sha and conflicts on the exact same line!
@@ -322,16 +338,26 @@ async fn test_2_overlapping_modifications_detected_during_integration() {
     };
 
     let outcome_2 = svc.integrate(&req_2).await.unwrap();
-    assert!(!outcome_2.success, "Task 2 integration must fail due to conflicting overlap on stale base");
+    assert!(
+        !outcome_2.success,
+        "Task 2 integration must fail due to conflicting overlap on stale base"
+    );
 
     // Verify durable record status is Rejected
     let records = store.list_integrations(&wf_id).unwrap();
-    let rec_2 = records.iter().find(|r| r.task_id == "task-2").expect("record for task-2");
+    let rec_2 = records
+        .iter()
+        .find(|r| r.task_id == "task-2")
+        .expect("record for task-2");
     assert_eq!(rec_2.status, IntegrationLifecycleStatus::Rejected);
 
     // Verify failed integration patch artifact was preserved
     let artifacts = store.list_artifacts(&wf_id).unwrap();
-    assert!(artifacts.iter().any(|a| a.name.starts_with("failed_integration_task-2")));
+    assert!(
+        artifacts
+            .iter()
+            .any(|a| a.name.starts_with("failed_integration_task-2"))
+    );
 }
 
 // =========================================================================
@@ -345,7 +371,11 @@ async fn test_3_shared_workspace_overlapping_writes_safely_serialized() {
     let store = storage.workflow_store();
 
     let wf_id = format!("wf-{}", Uuid::new_v4().simple());
-    let run = make_test_run(&wf_id, Path::new("/tmp/dummy"), "Shared workspace serialization");
+    let run = make_test_run(
+        &wf_id,
+        Path::new("/tmp/dummy"),
+        "Shared workspace serialization",
+    );
     store.create_workflow(&run).unwrap();
 
     let task_shared_1 = make_test_task(
@@ -374,19 +404,38 @@ async fn test_3_shared_workspace_overlapping_writes_safely_serialized() {
     store.save_workflow_plan(&plan).unwrap();
 
     // 1. Worker 1 claims shared-1
-    let claimed_1 = store.claim_task(&wf_id, &task_shared_1.id, "worker-1", 30_000).unwrap();
+    let claimed_1 = store
+        .claim_task(&wf_id, &task_shared_1.id, "worker-1", 30_000)
+        .unwrap();
     assert!(claimed_1.is_some());
 
     // 2. Worker 2 attempts to claim shared-2 concurrently while shared-1 is claimed on same path
-    let claimed_2 = store.claim_task(&wf_id, &task_shared_2.id, "worker-2", 30_000).unwrap();
-    assert!(claimed_2.is_none(), "Shared workspace overlapping write must NOT be claimed concurrently");
+    let claimed_2 = store
+        .claim_task(&wf_id, &task_shared_2.id, "worker-2", 30_000)
+        .unwrap();
+    assert!(
+        claimed_2.is_none(),
+        "Shared workspace overlapping write must NOT be claimed concurrently"
+    );
 
     // 3. Worker 1 completes shared-1
-    store.update_task_status(&wf_id, &task_shared_1.id, WorkflowTaskStatus::Completed, None).unwrap();
+    store
+        .update_task_status(
+            &wf_id,
+            &task_shared_1.id,
+            WorkflowTaskStatus::Completed,
+            None,
+        )
+        .unwrap();
 
     // 4. Now Worker 2 can safely claim shared-2
-    let claimed_2_retry = store.claim_task(&wf_id, &task_shared_2.id, "worker-2", 30_000).unwrap();
-    assert!(claimed_2_retry.is_some(), "Once shared-1 completes, shared-2 can claim cleanly");
+    let claimed_2_retry = store
+        .claim_task(&wf_id, &task_shared_2.id, "worker-2", 30_000)
+        .unwrap();
+    assert!(
+        claimed_2_retry.is_some(),
+        "Once shared-1 completes, shared-2 can claim cleanly"
+    );
 }
 
 // =========================================================================
@@ -401,7 +450,9 @@ async fn test_4_agents_discover_conflicts_and_create_dependent_tasks() {
     let _base_sha = init_git_repo(repo_temp.path());
     let storage = Storage::open(&db_path).unwrap();
     let store = storage.workflow_store();
-    let wt_mgr = Arc::new(WorktreeManager::new(WorktreeSettings::new(repo_temp.path())));
+    let wt_mgr = Arc::new(WorktreeManager::new(WorktreeSettings::new(
+        repo_temp.path(),
+    )));
     let orch = create_test_orchestrator(storage.clone(), wt_mgr);
 
     let wf_id = format!("wf-{}", Uuid::new_v4().simple());
@@ -434,7 +485,9 @@ async fn test_4_agents_discover_conflicts_and_create_dependent_tasks() {
     store.save_workflow_plan(&plan).unwrap();
 
     // Populate task claims and discovers schema is missing
-    let _ = store.claim_task(&wf_id, &task_populate.id, "worker-pop", 30_000).unwrap();
+    let _ = store
+        .claim_task(&wf_id, &task_populate.id, "worker-pop", 30_000)
+        .unwrap();
 
     let conflict = ConflictReport {
         id: format!("conf-{}", Uuid::new_v4().simple()),
@@ -450,7 +503,10 @@ async fn test_4_agents_discover_conflicts_and_create_dependent_tasks() {
 
     let resolution = orch.handle_task_conflict(&conflict).unwrap();
     match resolution {
-        ConflictResolution::AddDependency { task_id, depends_on } => {
+        ConflictResolution::AddDependency {
+            task_id,
+            depends_on,
+        } => {
             assert_eq!(task_id, "task-populate");
             assert_eq!(depends_on, "task-schema");
         }
@@ -460,15 +516,22 @@ async fn test_4_agents_discover_conflicts_and_create_dependent_tasks() {
     // Verify task-populate yielded and is now Blocked
     let t_pop = store.get_task(&wf_id, "task-populate").unwrap().unwrap();
     assert_eq!(t_pop.status, WorkflowTaskStatus::Blocked);
-    assert!(t_pop.worker_id.is_none(), "Worker lease should be cleared on yield");
+    assert!(
+        t_pop.worker_id.is_none(),
+        "Worker lease should be cleared on yield"
+    );
 
     // Verify plan revision was incremented
     let updated_run = store.get_workflow(&wf_id).unwrap().unwrap();
     assert_eq!(updated_run.plan_revision, 2);
 
     // Complete task-schema
-    let _ = store.claim_task(&wf_id, "task-schema", "worker-sch", 30_000).unwrap();
-    store.update_task_status(&wf_id, "task-schema", WorkflowTaskStatus::Completed, None).unwrap();
+    let _ = store
+        .claim_task(&wf_id, "task-schema", "worker-sch", 30_000)
+        .unwrap();
+    store
+        .update_task_status(&wf_id, "task-schema", WorkflowTaskStatus::Completed, None)
+        .unwrap();
 
     // Now task-populate is unblocked and promoted to Ready
     let t_pop_after = store.get_task(&wf_id, "task-populate").unwrap().unwrap();
@@ -492,8 +555,20 @@ async fn test_5_dag_revisions_persist_across_process_restarts() {
         let run = make_test_run(&wf_id, Path::new("/tmp"), "Persistence across restarts");
         store_a.create_workflow(&run).unwrap();
 
-        let t1 = make_test_task(&wf_id, "t1", "T1", WorkspaceIsolationStrategy::Worktree, vec![]);
-        let t2 = make_test_task(&wf_id, "t2", "T2", WorkspaceIsolationStrategy::Worktree, vec![]);
+        let t1 = make_test_task(
+            &wf_id,
+            "t1",
+            "T1",
+            WorkspaceIsolationStrategy::Worktree,
+            vec![],
+        );
+        let t2 = make_test_task(
+            &wf_id,
+            "t2",
+            "T2",
+            WorkspaceIsolationStrategy::Worktree,
+            vec![],
+        );
 
         let plan_v1 = WorkflowPlan {
             workflow_id: wf_id.clone(),
@@ -505,7 +580,9 @@ async fn test_5_dag_revisions_persist_across_process_restarts() {
         store_a.save_workflow_plan(&plan_v1).unwrap();
 
         // Transactionally replan with dependency: t2 depends on t1
-        store_a.replan_with_dependency(&wf_id, "t2", "t1", "t2 requires t1 output").unwrap();
+        store_a
+            .replan_with_dependency(&wf_id, "t2", "t1", "t2 requires t1 output")
+            .unwrap();
     } // Instance A dropped
 
     // INSTANCE B: Opens same file-backed SQLite database from disk
@@ -514,7 +591,10 @@ async fn test_5_dag_revisions_persist_across_process_restarts() {
         let store_b = storage_b.workflow_store();
 
         let run_b = store_b.get_workflow(&wf_id).unwrap().unwrap();
-        assert_eq!(run_b.plan_revision, 2, "Workflow plan revision must be 2 after restart");
+        assert_eq!(
+            run_b.plan_revision, 2,
+            "Workflow plan revision must be 2 after restart"
+        );
 
         let plan_v2 = store_b.get_workflow_plan(&wf_id, Some(2)).unwrap().unwrap();
         assert_eq!(plan_v2.revision, 2);
@@ -544,23 +624,48 @@ async fn test_6_cyclic_dependencies_rejected() {
         revision: 1,
         rationale: "Initial A -> B -> C".into(),
         tasks: vec![
-            make_test_task(&wf_id, "A", "A", WorkspaceIsolationStrategy::Worktree, vec![]),
-            make_test_task(&wf_id, "B", "B", WorkspaceIsolationStrategy::Worktree, vec![]),
-            make_test_task(&wf_id, "C", "C", WorkspaceIsolationStrategy::Worktree, vec![]),
+            make_test_task(
+                &wf_id,
+                "A",
+                "A",
+                WorkspaceIsolationStrategy::Worktree,
+                vec![],
+            ),
+            make_test_task(
+                &wf_id,
+                "B",
+                "B",
+                WorkspaceIsolationStrategy::Worktree,
+                vec![],
+            ),
+            make_test_task(
+                &wf_id,
+                "C",
+                "C",
+                WorkspaceIsolationStrategy::Worktree,
+                vec![],
+            ),
         ],
         created_at_epoch_ms: Utc::now().timestamp_millis(),
     };
     store.save_workflow_plan(&plan).unwrap();
 
     // Establish A -> B -> C
-    store.replan_with_dependency(&wf_id, "B", "A", "B depends on A").unwrap();
-    store.replan_with_dependency(&wf_id, "C", "B", "C depends on B").unwrap();
+    store
+        .replan_with_dependency(&wf_id, "B", "A", "B depends on A")
+        .unwrap();
+    store
+        .replan_with_dependency(&wf_id, "C", "B", "C depends on B")
+        .unwrap();
 
     // Attempting C -> A would create a cycle A -> B -> C -> A
     let cycle_err = store.replan_with_dependency(&wf_id, "A", "C", "Cycle attempt");
     assert!(cycle_err.is_err(), "Cyclic dependency must be rejected");
     let err_str = cycle_err.err().unwrap().to_string();
-    assert!(err_str.contains("cyclic dependency detected"), "Error should explain cycle: {err_str}");
+    assert!(
+        err_str.contains("cyclic dependency detected"),
+        "Error should explain cycle: {err_str}"
+    );
 
     // Verify plan revision was not incremented by failed replanning
     let current_run = store.get_workflow(&wf_id).unwrap().unwrap();
@@ -610,7 +715,10 @@ async fn test_7_dynamically_spawned_agents_cannot_bypass_ownership_policies() {
     };
 
     let outcome = svc.integrate(&req).await.unwrap();
-    assert!(!outcome.success, "Unauthorized traversal attempt must be rejected");
+    assert!(
+        !outcome.success,
+        "Unauthorized traversal attempt must be rejected"
+    );
     assert!(outcome.error.unwrap().contains("traversal"));
 }
 
@@ -628,7 +736,13 @@ async fn test_8_expired_workers_cannot_publish_stale_results() {
     let run = make_test_run(&wf_id, Path::new("/tmp"), "Lease expiration and fencing");
     store.create_workflow(&run).unwrap();
 
-    let task = make_test_task(&wf_id, "task-fenced", "Fenced Task", WorkspaceIsolationStrategy::Worktree, vec![]);
+    let task = make_test_task(
+        &wf_id,
+        "task-fenced",
+        "Fenced Task",
+        WorkspaceIsolationStrategy::Worktree,
+        vec![],
+    );
 
     let plan = WorkflowPlan {
         workflow_id: wf_id.clone(),
@@ -640,7 +754,10 @@ async fn test_8_expired_workers_cannot_publish_stale_results() {
     store.save_workflow_plan(&plan).unwrap();
 
     // 1. Worker 1 claims task with 1ms lease
-    let claimed_1 = store.claim_task(&wf_id, "task-fenced", "worker-1", 1).unwrap().unwrap();
+    let claimed_1 = store
+        .claim_task(&wf_id, "task-fenced", "worker-1", 1)
+        .unwrap()
+        .unwrap();
     assert_eq!(claimed_1.attempt_id, 1);
 
     // Sleep to ensure lease expires
@@ -652,7 +769,10 @@ async fn test_8_expired_workers_cannot_publish_stale_results() {
     assert_eq!(reconciled, 1);
 
     // 3. Worker 2 claims the task -> attempt_id becomes 2
-    let claimed_2 = store.claim_task(&wf_id, "task-fenced", "worker-2", 30_000).unwrap().unwrap();
+    let claimed_2 = store
+        .claim_task(&wf_id, "task-fenced", "worker-2", 30_000)
+        .unwrap()
+        .unwrap();
     assert_eq!(claimed_2.attempt_id, 2);
 
     // 4. Stale Worker 1 attempts to publish completion using attempt_id 1
@@ -665,9 +785,15 @@ async fn test_8_expired_workers_cannot_publish_stale_results() {
         None,
         None,
     );
-    assert!(stale_err.is_err(), "Stale worker completion must fail closed");
+    assert!(
+        stale_err.is_err(),
+        "Stale worker completion must fail closed"
+    );
     let err_str = stale_err.err().unwrap().to_string();
-    assert!(err_str.contains("Fencing violation") || err_str.contains("stale lease"), "Should report fencing token mismatch: {err_str}");
+    assert!(
+        err_str.contains("Fencing violation") || err_str.contains("stale lease"),
+        "Should report fencing token mismatch: {err_str}"
+    );
 }
 
 // =========================================================================
@@ -723,7 +849,11 @@ async fn test_9_integration_retries_are_idempotent() {
     // Second attempt (exact same request): detects already promoted change-set hash and returns success cleanly
     let outcome_2 = svc.integrate(&req).await.unwrap();
     assert!(outcome_2.success);
-    assert!(outcome_2.summary.contains("Idempotent skip"), "Summary should indicate idempotent skip: {}", outcome_2.summary);
+    assert!(
+        outcome_2.summary.contains("Idempotent skip"),
+        "Summary should indicate idempotent skip: {}",
+        outcome_2.summary
+    );
 }
 
 // =========================================================================
@@ -748,16 +878,22 @@ async fn test_10_interrupted_worktrees_recover_without_losing_pending_changes() 
     );
 
     // Create a worktree for task-crash
-    let wt = wt_mgr.create_task_worktree(
-        Some(&wf_id),
-        Some("task-crash"),
-        "thread-crash-1",
-        Some(&base_sha),
-    ).unwrap();
+    let wt = wt_mgr
+        .create_task_worktree(
+            Some(&wf_id),
+            Some("task-crash"),
+            "thread-crash-1",
+            Some(&base_sha),
+        )
+        .unwrap();
 
     // Agent writes uncommitted file in worktree
     let uncommitted_file = wt.worktree_path.join("src/recovery.rs");
-    fs::write(&uncommitted_file, "pub fn recovered_work() -> &'static str { \"safe\" }\n").unwrap();
+    fs::write(
+        &uncommitted_file,
+        "pub fn recovered_work() -> &'static str { \"safe\" }\n",
+    )
+    .unwrap();
 
     // Process crashes and restarts -> invoke recover_interrupted_worktrees
     let recovered = wt_mgr.recover_interrupted_worktrees(&wf_id).unwrap();
@@ -768,8 +904,14 @@ async fn test_10_interrupted_worktrees_recover_without_losing_pending_changes() 
     let db_records = store.list_worktrees_for_workflow(&wf_id).unwrap();
     assert_eq!(db_records.len(), 1);
     assert_eq!(db_records[0].status, WorktreeStatus::Preserved);
-    let diff = db_records[0].unintegrated_diff.as_ref().expect("unintegrated diff must be preserved");
-    assert!(diff.contains("recovered_work"), "Diff must capture uncommitted changes: {diff}");
+    let diff = db_records[0]
+        .unintegrated_diff
+        .as_ref()
+        .expect("unintegrated diff must be preserved");
+    assert!(
+        diff.contains("recovered_work"),
+        "Diff must capture uncommitted changes: {diff}"
+    );
 }
 
 // =========================================================================
@@ -795,24 +937,35 @@ async fn test_11_cancellation_does_not_destroy_unreconciled_artifacts() {
     let orch = create_test_orchestrator(storage.clone(), wt_mgr.clone());
 
     // Create an active worktree with unreconciled work
-    let wt = wt_mgr.create_task_worktree(
-        Some(&wf_id),
-        Some("task-cancel"),
-        "thread-cancel-1",
-        Some(&base_sha),
-    ).unwrap();
+    let wt = wt_mgr
+        .create_task_worktree(
+            Some(&wf_id),
+            Some("task-cancel"),
+            "thread-cancel-1",
+            Some(&base_sha),
+        )
+        .unwrap();
 
-    fs::write(wt.worktree_path.join("src/cancel_artifact.rs"), "// forensic evidence").unwrap();
+    fs::write(
+        wt.worktree_path.join("src/cancel_artifact.rs"),
+        "// forensic evidence",
+    )
+    .unwrap();
 
     // Cancel workflow
-    orch.cancel_workflow(&wf_id, "User aborted operation").await.unwrap();
+    orch.cancel_workflow(&wf_id, "User aborted operation")
+        .await
+        .unwrap();
 
     // Verify workflow state is Cancelled
     let updated_run = store.get_workflow(&wf_id).unwrap().unwrap();
     assert_eq!(updated_run.state, WorkflowState::Cancelled);
 
     // Verify unreconciled worktree artifact still exists on disk for forensic inspection
-    assert!(wt.worktree_path.exists(), "Worktree directory must NOT be deleted upon cancellation");
+    assert!(
+        wt.worktree_path.exists(),
+        "Worktree directory must NOT be deleted upon cancellation"
+    );
     assert!(wt.worktree_path.join("src/cancel_artifact.rs").exists());
 
     // Verify worktree record in SQLite was marked Preserved
@@ -851,8 +1004,16 @@ fn test_12_independent_tasks_not_unnecessarily_serialized() {
 
     let waves = plan.partition_into_waves().unwrap();
     // Both independent tasks with Worktree isolation MUST stay in Wave 1 together
-    assert_eq!(waves.len(), 1, "Worktree isolated tasks must NOT be split into separate waves");
-    assert_eq!(waves[0].len(), 2, "Both tasks must execute concurrently in Wave 1");
+    assert_eq!(
+        waves.len(),
+        1,
+        "Worktree isolated tasks must NOT be split into separate waves"
+    );
+    assert_eq!(
+        waves[0].len(),
+        2,
+        "Both tasks must execute concurrently in Wave 1"
+    );
 }
 
 // =========================================================================
@@ -903,9 +1064,15 @@ async fn test_13_verification_failures_prevent_promotion() {
     };
 
     let outcome = svc.integrate(&req).await.unwrap();
-    assert!(!outcome.success, "Breaking patch must fail verification and reject integration");
+    assert!(
+        !outcome.success,
+        "Breaking patch must fail verification and reject integration"
+    );
     assert!(!outcome.verification_passed);
-    assert!(outcome.rollback_performed, "Exact rollback must be executed on verification failure");
+    assert!(
+        outcome.rollback_performed,
+        "Exact rollback must be executed on verification failure"
+    );
 
     // Primary workspace content must be restored exactly to original base state
     let restored_content = fs::read_to_string(repo_temp.path().join("src/lib.rs")).unwrap();
@@ -918,10 +1085,16 @@ async fn test_13_verification_failures_prevent_promotion() {
         .output()
         .unwrap();
     let current_sha = String::from_utf8_lossy(&head_out.stdout).trim().to_string();
-    assert_eq!(current_sha, base_sha, "HEAD commit must not advance when verification fails");
+    assert_eq!(
+        current_sha, base_sha,
+        "HEAD commit must not advance when verification fails"
+    );
 
     // Integration status in SQLite must be Failed
     let records = store.list_integrations(&wf_id).unwrap();
-    let rec = records.iter().find(|r| r.task_id == "breaking-task").unwrap();
+    let rec = records
+        .iter()
+        .find(|r| r.task_id == "breaking-task")
+        .unwrap();
     assert_eq!(rec.status, IntegrationLifecycleStatus::Failed);
 }

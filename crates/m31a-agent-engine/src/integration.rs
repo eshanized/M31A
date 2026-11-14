@@ -580,8 +580,7 @@ impl WorkflowIntegrationService {
 
         // 3. Stale base revision and overlapping modification detection
         if is_git
-            && let (Some(base_sha), Some(target_head)) =
-                (&req.source_base_sha, &current_target_sha)
+            && let (Some(base_sha), Some(target_head)) = (&req.source_base_sha, &current_target_sha)
             && base_sha != target_head
         {
             // Target HEAD has advanced since source worktree was created!
