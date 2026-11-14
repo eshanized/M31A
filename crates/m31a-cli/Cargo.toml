@@ -76,3 +76,4 @@ required-features = ["live-nvidia-tests"]
 
 [dev-dependencies]
 tempfile.workspace = true
+sha2.workspace = true
