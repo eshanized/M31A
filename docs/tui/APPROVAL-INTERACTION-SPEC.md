@@ -9,13 +9,13 @@
 ## 1. Executive Summary
 
 Autonomous execution requires an unambiguous, secure, and resilient user approval system. 
-Prior to this specification:
-1. Multiple disparate approval widgets coexisted with slightly varying options.
-2. Modal dimensions for rendering were hardcoded independently of mouse hit-testing routines.
-3. Backdrop clicks outside the modal could accidentally pop or dismiss a critical pending approval, leaving the engine stranded.
-4. Single-keystroke action shortcuts did not dynamically correspond to the available options (e.g., prefix rule approval when no command existed).
+M31A provides a unified, modal approval interface with synchronized visual geometry, dynamic hotkey bindings, and fail-safe mouse interaction across all mutating tool calls.
 
-This specification establishes **exactly one authoritative approval interface** with unified geometry, dynamic single-keystroke action bindings, and fail-safe mouse interaction.
+Key Design Principles:
+1. **Single Authoritative Approval Interface**: Exactly one approval modal widget with consistent layout across all execution modes.
+2. **Synchronized Hit-Testing & Layout**: Modal dimensions and mouse hit-testing routines use identical coordinate calculations.
+3. **Fail-Safe Backdrop Guarding**: Backdrop clicks outside the modal cannot inadvertently dismiss pending approvals; explicit choices (`y`, `n`, `Esc`) are required.
+4. **Context-Sensitive Hotkeys**: Single-keystroke action shortcuts dynamically adapt to the active tool call (e.g., prefix rule approval only appears when command prefixes exist).
 
 ---
 
