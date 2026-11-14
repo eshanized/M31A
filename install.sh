@@ -9,7 +9,7 @@ set -euo pipefail
 
 APP="m31a"
 REPO="eshanized/M31A"
-DEFAULT_VERSION="0.1.14"
+DEFAULT_VERSION="0.1.15"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.m31a/bin}"
 
 # ANSI color codes
@@ -60,7 +60,7 @@ Usage: install.sh [options]
 
 Options:
     -h, --help              Display this help message
-    -v, --version <version> Install a specific version (e.g. 0.1.14 or latest)
+    -v, --version <version> Install a specific version (e.g. 0.1.15 or latest)
     -b, --binary <path>     Install from an existing local binary instead of downloading
     -d, --dir <path>        Custom installation directory (default: ~/.m31a/bin)
         --build             Build from local source using Cargo
@@ -70,7 +70,7 @@ Options:
 
 Examples:
     curl -fsSL https://raw.githubusercontent.com/eshanized/M31A/master/install.sh | bash
-    ./install.sh --version 0.1.14
+    ./install.sh --version 0.1.15
     ./install.sh --binary ./target/release/m31a
     ./install.sh --no-modify-path
     ./install.sh --uninstall
