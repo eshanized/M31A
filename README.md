@@ -5,7 +5,7 @@
   <p><em>Codex-grade multi-file patch synthesis, continuous vibe coding auto-healing, and speculative parallel execution — powered by NVIDIA NIM frontier intelligence.</em></p>
 
   <p align="center">
-    <a href="https://github.com/eshanized/M31A/releases/latest"><img src="https://img.shields.io/badge/Release-v0.1.14-blue.svg?style=for-the-badge" alt="Version 0.1.14" /></a>
+    <a href="https://github.com/eshanized/M31A/releases/latest"><img src="https://img.shields.io/badge/Release-v0.1.15-blue.svg?style=for-the-badge" alt="Version 0.1.15" /></a>
     <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Rust-2024%20Edition%20(1.85+)-orange.svg?style=for-the-badge&logo=rust" alt="Rust 2024 Edition" /></a>
     <a href="https://build.nvidia.com/"><img src="https://img.shields.io/badge/Powered%20By-NVIDIA%20NIM-76B900.svg?style=for-the-badge&logo=nvidia" alt="NVIDIA NIM" /></a>
     <a href="https://github.com/bubblewrap/bubblewrap"><img src="https://img.shields.io/badge/Sandbox-Bubblewrap%20Linux-lightgrey.svg?style=for-the-badge" alt="Linux Bubblewrap Sandbox" /></a>
@@ -258,7 +258,7 @@ curl -fsSL https://raw.githubusercontent.com/eshanized/M31A/master/install.sh | 
 
 To install a specific version or from a local binary:
 ```bash
-./install.sh --version 0.1.14
+./install.sh --version 0.1.15
 ./install.sh --binary ./target/release/m31a
 ```
 
@@ -846,7 +846,7 @@ npm test --prefix sdk/typescript
 
 ## 🗺️ Roadmap & Vision
 
-- [x] **Phase 1: Baseline Architecture & Release Readiness (v0.1.0 - v0.1.14)**: Modular 39-crate monorepo, NVIDIA NIM frontier models, Ratatui TUI, 4-tier fuzzy patch engine, Bubblewrap sandbox, Vibe coding auto-healing loop, Speculative reality arena, and official TypeScript & Python SDKs.
+- [x] **Phase 1: Baseline Architecture & Release Readiness (v0.1.0 - v0.1.15)**: Modular 39-crate monorepo, NVIDIA NIM frontier models, Ratatui TUI, 4-tier fuzzy patch engine, Bubblewrap sandbox, Vibe coding auto-healing loop, Speculative reality arena, and official TypeScript & Python SDKs.
 - [ ] **Phase 2: IDE Ecosystem & Native Integrations (v0.2.0)**: Official VS Code and Cursor extensions, JetBrains plugin suite, bidirectional Language Server Protocol (LSP) bridge, and cross-session vector-indexed memory graphs.
 - [ ] **Phase 3: Multi-Modal Verification & Extended Sandboxing (v0.3.0)**: Visual regression TDD v2 with diff heatmaps, eBPF-based kernel execution auditing, macOS seatbelt sandboxing, and Windows AppContainer isolation.
 - [ ] **Phase 4: Sovereign Repository Stewardship (v1.0.0+)**: Autonomous continuous dependency migrations, formal proof engine integration (Kani, Coq), and enterprise fleet policy federations.
