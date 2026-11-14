@@ -4,9 +4,10 @@
 use anyhow::{Context, Result, anyhow, bail};
 use chrono::Utc;
 use m31a_core::workflow::{
+    ConflictKind, ConflictReport, ConflictResolution, IntegrationLifecycleStatus, IntegrationRecord,
     WorkflowApprovalRequest, WorkflowApprovalStatus, WorkflowArtifact, WorkflowEvent,
     WorkflowEventType, WorkflowPlan, WorkflowRun, WorkflowState, WorkflowTask, WorkflowTaskStatus,
-    WorkspaceIsolationStrategy,
+    WorkspaceIsolationStrategy, WorktreeRecord, WorktreeStatus,
 };
 use rusqlite::{Connection, params};
 use sha2::{Digest, Sha256};
@@ -545,6 +546,27 @@ impl WorkflowStore {
             ],
         )?;
 
+        // When a task completes, promote any pending or blocked tasks whose dependencies are now satisfied to 'ready'
+        if status == WorkflowTaskStatus::Completed {
+            tx.execute(
+                r#"
+                UPDATE workflow_tasks
+                SET status = 'ready'
+                WHERE workflow_id = ?1
+                  AND status IN ('pending', 'blocked')
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM workflow_task_dependencies d
+                      JOIN workflow_tasks dep ON dep.workflow_id = d.workflow_id AND dep.id = d.depends_on_task_id
+                      WHERE d.workflow_id = ?1
+                        AND d.task_id = workflow_tasks.id
+                        AND dep.status != 'completed'
+                  )
+                "#,
+                params![workflow_id],
+            )?;
+        }
+
         tx.commit()?;
         Ok(())
     }
@@ -696,14 +718,14 @@ impl WorkflowStore {
             ));
         }
 
-        // When a task completes, promote any pending tasks whose dependencies are now satisfied to 'ready'
+        // When a task completes, promote any pending or blocked tasks whose dependencies are now satisfied to 'ready'
         if status == WorkflowTaskStatus::Completed {
             tx.execute(
                 r#"
                 UPDATE workflow_tasks
                 SET status = 'ready'
                 WHERE workflow_id = ?1
-                  AND status = 'pending'
+                  AND status IN ('pending', 'blocked')
                   AND NOT EXISTS (
                       SELECT 1
                       FROM workflow_task_dependencies d
@@ -1456,6 +1478,618 @@ impl WorkflowStore {
         self.save_artifact(&artifact)?;
         Ok(artifact)
     }
+
+    /// Persists or updates metadata for a managed Git worktree.
+    pub fn save_worktree(&self, record: &WorktreeRecord) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            r#"
+            INSERT INTO managed_worktrees (
+                id, thread_id, workflow_id, task_id, worktree_path,
+                branch, base_sha, head_sha, source_root, status,
+                unintegrated_diff, created_at_epoch_ms, updated_at_epoch_ms
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+            ON CONFLICT(id) DO UPDATE SET
+                thread_id = excluded.thread_id,
+                workflow_id = COALESCE(excluded.workflow_id, managed_worktrees.workflow_id),
+                task_id = COALESCE(excluded.task_id, managed_worktrees.task_id),
+                worktree_path = excluded.worktree_path,
+                branch = excluded.branch,
+                base_sha = excluded.base_sha,
+                head_sha = excluded.head_sha,
+                source_root = excluded.source_root,
+                status = excluded.status,
+                unintegrated_diff = COALESCE(excluded.unintegrated_diff, managed_worktrees.unintegrated_diff),
+                updated_at_epoch_ms = excluded.updated_at_epoch_ms
+            "#,
+            params![
+                record.id,
+                record.thread_id,
+                record.workflow_id,
+                record.task_id,
+                record.worktree_path.to_string_lossy().to_string(),
+                record.branch,
+                record.base_sha,
+                record.head_sha,
+                record.source_root.to_string_lossy().to_string(),
+                record.status.as_str(),
+                record.unintegrated_diff,
+                record.created_at_epoch_ms,
+                record.updated_at_epoch_ms,
+            ],
+        )
+        .context("Failed saving managed worktree to SQLite")?;
+        Ok(())
+    }
+
+    /// Fetches a managed worktree record by thread ID or worktree ID.
+    pub fn get_worktree(&self, id_or_thread_id: &str) -> Result<Option<WorktreeRecord>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT id, thread_id, workflow_id, task_id, worktree_path,
+                   branch, base_sha, head_sha, source_root, status,
+                   unintegrated_diff, created_at_epoch_ms, updated_at_epoch_ms
+            FROM managed_worktrees
+            WHERE id = ?1 OR thread_id = ?1
+            LIMIT 1
+            "#,
+        )?;
+        let mut rows = stmt.query(params![id_or_thread_id])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(Self::parse_worktree_row(row)?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Lists active or preserved managed worktrees for a workflow.
+    pub fn list_worktrees_for_workflow(&self, workflow_id: &str) -> Result<Vec<WorktreeRecord>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT id, thread_id, workflow_id, task_id, worktree_path,
+                   branch, base_sha, head_sha, source_root, status,
+                   unintegrated_diff, created_at_epoch_ms, updated_at_epoch_ms
+            FROM managed_worktrees
+            WHERE workflow_id = ?1
+            ORDER BY created_at_epoch_ms ASC
+            "#,
+        )?;
+        let rows = stmt.query_map(params![workflow_id], |row| {
+            Self::parse_worktree_row(row)
+                .map_err(|e| rusqlite::Error::ToSqlConversionFailure(e.into()))
+        })?;
+        let mut list = Vec::new();
+        for r in rows {
+            list.push(r?);
+        }
+        Ok(list)
+    }
+
+    /// Updates worktree status and optional unintegrated diff.
+    pub fn update_worktree_status(
+        &self,
+        thread_id: &str,
+        status: WorktreeStatus,
+        unintegrated_diff: Option<&str>,
+    ) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let now = Utc::now().timestamp_millis();
+        conn.execute(
+            r#"
+            UPDATE managed_worktrees
+            SET status = ?1,
+                unintegrated_diff = COALESCE(?2, unintegrated_diff),
+                updated_at_epoch_ms = ?3
+            WHERE id = ?4 OR thread_id = ?4
+            "#,
+            params![status.as_str(), unintegrated_diff, now, thread_id],
+        )?;
+        Ok(())
+    }
+
+    /// Recovers all active or preserved worktrees for a workflow after process interruption.
+    pub fn recover_interrupted_worktrees(&self, workflow_id: &str) -> Result<Vec<WorktreeRecord>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT id, thread_id, workflow_id, task_id, worktree_path,
+                   branch, base_sha, head_sha, source_root, status,
+                   unintegrated_diff, created_at_epoch_ms, updated_at_epoch_ms
+            FROM managed_worktrees
+            WHERE workflow_id = ?1 AND status IN ('active', 'preserved')
+            ORDER BY created_at_epoch_ms ASC
+            "#,
+        )?;
+        let rows = stmt.query_map(params![workflow_id], |row| {
+            Self::parse_worktree_row(row)
+                .map_err(|e| rusqlite::Error::ToSqlConversionFailure(e.into()))
+        })?;
+        let mut list = Vec::new();
+        for r in rows {
+            list.push(r?);
+        }
+        Ok(list)
+    }
+
+    fn parse_worktree_row(row: &rusqlite::Row) -> Result<WorktreeRecord> {
+        let path_str: String = row.get(4)?;
+        let root_str: String = row.get(8)?;
+        let status_str: String = row.get(9)?;
+        let status = WorktreeStatus::from_str(&status_str).unwrap_or(WorktreeStatus::Active);
+        Ok(WorktreeRecord {
+            id: row.get(0)?,
+            thread_id: row.get(1)?,
+            workflow_id: row.get(2)?,
+            task_id: row.get(3)?,
+            worktree_path: PathBuf::from(path_str),
+            branch: row.get(5)?,
+            base_sha: row.get(6)?,
+            head_sha: row.get(7)?,
+            source_root: PathBuf::from(root_str),
+            status,
+            unintegrated_diff: row.get(10)?,
+            created_at_epoch_ms: row.get(11)?,
+            updated_at_epoch_ms: row.get(12)?,
+        })
+    }
+
+    /// Persists a new integration record in the durable integration pipeline.
+    pub fn create_integration_record(&self, record: &IntegrationRecord) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let files_json = serde_json::to_string(&record.modified_files)?;
+        let path_str = record
+            .patch_artifact_path
+            .as_ref()
+            .map(|p| p.to_string_lossy().to_string());
+        conn.execute(
+            r#"
+            INSERT INTO workflow_integrations (
+                id, workflow_id, task_id, attempt_id, status,
+                source_branch, source_base_sha, target_base_sha, current_target_sha,
+                change_set_hash, patch_artifact_path, modified_files_json,
+                verification_passed, error_details, created_at_epoch_ms, updated_at_epoch_ms
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
+            ON CONFLICT(id) DO UPDATE SET
+                status = excluded.status,
+                current_target_sha = COALESCE(excluded.current_target_sha, workflow_integrations.current_target_sha),
+                verification_passed = excluded.verification_passed,
+                error_details = excluded.error_details,
+                updated_at_epoch_ms = excluded.updated_at_epoch_ms
+            "#,
+            params![
+                record.id,
+                record.workflow_id,
+                record.task_id,
+                record.attempt_id,
+                record.status.as_str(),
+                record.source_branch,
+                record.source_base_sha,
+                record.target_base_sha,
+                record.current_target_sha,
+                record.change_set_hash,
+                path_str,
+                files_json,
+                if record.verification_passed { 1 } else { 0 },
+                record.error,
+                record.created_at_epoch_ms,
+                record.updated_at_epoch_ms,
+            ],
+        )
+        .context("Failed inserting workflow integration record into SQLite")?;
+        Ok(())
+    }
+
+    /// Fetches an integration record by ID.
+    pub fn get_integration_record(&self, id: &str) -> Result<Option<IntegrationRecord>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT id, workflow_id, task_id, attempt_id, status,
+                   source_branch, source_base_sha, target_base_sha, current_target_sha,
+                   change_set_hash, patch_artifact_path, modified_files_json,
+                   verification_passed, error_details, created_at_epoch_ms, updated_at_epoch_ms
+            FROM workflow_integrations
+            WHERE id = ?1
+            "#,
+        )?;
+        let mut rows = stmt.query(params![id])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(Self::parse_integration_row(row)?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Fetches an integration record for a specific task attempt.
+    pub fn get_integration_by_task(
+        &self,
+        workflow_id: &str,
+        task_id: &str,
+        attempt_id: u32,
+    ) -> Result<Option<IntegrationRecord>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT id, workflow_id, task_id, attempt_id, status,
+                   source_branch, source_base_sha, target_base_sha, current_target_sha,
+                   change_set_hash, patch_artifact_path, modified_files_json,
+                   verification_passed, error_details, created_at_epoch_ms, updated_at_epoch_ms
+            FROM workflow_integrations
+            WHERE workflow_id = ?1 AND task_id = ?2 AND attempt_id = ?3
+            ORDER BY created_at_epoch_ms DESC
+            LIMIT 1
+            "#,
+        )?;
+        let mut rows = stmt.query(params![workflow_id, task_id, attempt_id])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(Self::parse_integration_row(row)?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Finds any previously PROMOTED integration with identical change-set hash for idempotent deduplication.
+    pub fn find_promoted_integration_by_hash(
+        &self,
+        workflow_id: &str,
+        change_set_hash: &str,
+    ) -> Result<Option<IntegrationRecord>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT id, workflow_id, task_id, attempt_id, status,
+                   source_branch, source_base_sha, target_base_sha, current_target_sha,
+                   change_set_hash, patch_artifact_path, modified_files_json,
+                   verification_passed, error_details, created_at_epoch_ms, updated_at_epoch_ms
+            FROM workflow_integrations
+            WHERE workflow_id = ?1 AND change_set_hash = ?2 AND status = 'promoted'
+            LIMIT 1
+            "#,
+        )?;
+        let mut rows = stmt.query(params![workflow_id, change_set_hash])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(Self::parse_integration_row(row)?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Updates integration lifecycle status, target sha, and error details.
+    pub fn update_integration_status(
+        &self,
+        id: &str,
+        status: IntegrationLifecycleStatus,
+        current_target_sha: Option<&str>,
+        error: Option<&str>,
+    ) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let now = Utc::now().timestamp_millis();
+        let verif_passed = if status == IntegrationLifecycleStatus::Verified
+            || status == IntegrationLifecycleStatus::Promoted
+        {
+            1
+        } else {
+            0
+        };
+        conn.execute(
+            r#"
+            UPDATE workflow_integrations
+            SET status = ?1,
+                current_target_sha = COALESCE(?2, current_target_sha),
+                verification_passed = CASE WHEN ?3 = 1 THEN 1 ELSE verification_passed END,
+                error_details = COALESCE(?4, error_details),
+                updated_at_epoch_ms = ?5
+            WHERE id = ?6
+            "#,
+            params![
+                status.as_str(),
+                current_target_sha,
+                verif_passed,
+                error,
+                now,
+                id
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Lists all integrations for a workflow.
+    pub fn list_integrations(&self, workflow_id: &str) -> Result<Vec<IntegrationRecord>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT id, workflow_id, task_id, attempt_id, status,
+                   source_branch, source_base_sha, target_base_sha, current_target_sha,
+                   change_set_hash, patch_artifact_path, modified_files_json,
+                   verification_passed, error_details, created_at_epoch_ms, updated_at_epoch_ms
+            FROM workflow_integrations
+            WHERE workflow_id = ?1
+            ORDER BY created_at_epoch_ms ASC
+            "#,
+        )?;
+        let rows = stmt.query_map(params![workflow_id], |row| {
+            Self::parse_integration_row(row)
+                .map_err(|e| rusqlite::Error::ToSqlConversionFailure(e.into()))
+        })?;
+        let mut list = Vec::new();
+        for r in rows {
+            list.push(r?);
+        }
+        Ok(list)
+    }
+
+    fn parse_integration_row(row: &rusqlite::Row) -> Result<IntegrationRecord> {
+        let status_str: String = row.get(4)?;
+        let status = IntegrationLifecycleStatus::from_str(&status_str)
+            .unwrap_or(IntegrationLifecycleStatus::Created);
+        let path_str: Option<String> = row.get(10)?;
+        let files_str: String = row.get(11)?;
+        let files: Vec<PathBuf> = serde_json::from_str(&files_str).unwrap_or_default();
+        let verif_int: i64 = row.get(12)?;
+        Ok(IntegrationRecord {
+            id: row.get(0)?,
+            workflow_id: row.get(1)?,
+            task_id: row.get(2)?,
+            attempt_id: row.get(3)?,
+            status,
+            source_branch: row.get(5)?,
+            source_base_sha: row.get(6)?,
+            target_base_sha: row.get(7)?,
+            current_target_sha: row.get(8)?,
+            change_set_hash: row.get(9)?,
+            patch_artifact_path: path_str.map(PathBuf::from),
+            modified_files: files,
+            verification_passed: verif_int != 0,
+            error: row.get(13)?,
+            created_at_epoch_ms: row.get(14)?,
+            updated_at_epoch_ms: row.get(15)?,
+        })
+    }
+
+    /// Records a newly discovered execution or resource conflict.
+    pub fn record_conflict(&self, report: &ConflictReport) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            r#"
+            INSERT INTO workflow_conflicts (
+                id, workflow_id, reporting_task_id, conflicting_task_id,
+                resource_path, conflict_kind, description, suggested_dependency,
+                resolution_json, reported_at_epoch_ms, resolved_at_epoch_ms
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+            "#,
+            params![
+                report.id,
+                report.workflow_id,
+                report.reporting_task_id,
+                report.conflicting_task_id,
+                report.resource_path.to_string_lossy().to_string(),
+                report.conflict_kind.as_str(),
+                report.description,
+                report.suggested_dependency,
+                None::<String>,
+                report.reported_at_epoch_ms,
+                None::<i64>,
+            ],
+        )
+        .context("Failed inserting workflow conflict record into SQLite")?;
+        Ok(())
+    }
+
+    /// Fetches a conflict report by ID.
+    pub fn get_conflict(&self, id: &str) -> Result<Option<ConflictReport>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT id, workflow_id, reporting_task_id, conflicting_task_id,
+                   resource_path, conflict_kind, description, suggested_dependency,
+                   reported_at_epoch_ms
+            FROM workflow_conflicts
+            WHERE id = ?1
+            "#,
+        )?;
+        let mut rows = stmt.query(params![id])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(Self::parse_conflict_row(row)?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Lists all conflicts reported for a workflow.
+    pub fn list_conflicts(&self, workflow_id: &str) -> Result<Vec<ConflictReport>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT id, workflow_id, reporting_task_id, conflicting_task_id,
+                   resource_path, conflict_kind, description, suggested_dependency,
+                   reported_at_epoch_ms
+            FROM workflow_conflicts
+            WHERE workflow_id = ?1
+            ORDER BY reported_at_epoch_ms ASC
+            "#,
+        )?;
+        let rows = stmt.query_map(params![workflow_id], |row| {
+            Self::parse_conflict_row(row)
+                .map_err(|e| rusqlite::Error::ToSqlConversionFailure(e.into()))
+        })?;
+        let mut list = Vec::new();
+        for r in rows {
+            list.push(r?);
+        }
+        Ok(list)
+    }
+
+    /// Resolves a conflict report with structured resolution.
+    pub fn resolve_conflict(
+        &self,
+        conflict_id: &str,
+        resolution: &ConflictResolution,
+    ) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let now = Utc::now().timestamp_millis();
+        let res_json = serde_json::to_string(resolution)?;
+        conn.execute(
+            r#"
+            UPDATE workflow_conflicts
+            SET resolution_json = ?1,
+                resolved_at_epoch_ms = ?2
+            WHERE id = ?3
+            "#,
+            params![res_json, now, conflict_id],
+        )?;
+        Ok(())
+    }
+
+    /// Transactionally updates the task DAG when a genuine dependency is discovered,
+    /// validating cycles, persisting the new revision, updating task dependencies,
+    /// yielding the dependent task, and recording audit events.
+    pub fn replan_with_dependency(
+        &self,
+        workflow_id: &str,
+        task_id: &str,
+        depends_on_task_id: &str,
+        rationale: &str,
+    ) -> Result<WorkflowPlan> {
+        let current_plan = self
+            .get_workflow_plan(workflow_id, None)?
+            .ok_or_else(|| anyhow!("Workflow '{workflow_id}' has no plan"))?;
+
+        // 1. Cycle validation
+        if current_plan.would_create_cycle(task_id, depends_on_task_id) {
+            bail!(
+                "Cannot add dependency from '{task_id}' to '{depends_on_task_id}': cyclic dependency detected in task DAG"
+            );
+        }
+
+        // 2. Generate new revision
+        let new_plan =
+            current_plan.with_added_dependency(task_id, depends_on_task_id, rationale)?;
+
+        // 3. Transactionally persist new plan and update task state
+        {
+            let mut conn = self.conn.lock().unwrap();
+            let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            let now = Utc::now().timestamp_millis();
+
+            // Insert new plan header
+            tx.execute(
+                r#"
+                INSERT INTO workflow_plans (workflow_id, revision, rationale, created_at_epoch_ms)
+                VALUES (?1, ?2, ?3, ?4)
+                "#,
+                params![
+                    new_plan.workflow_id,
+                    new_plan.revision,
+                    new_plan.rationale,
+                    now
+                ],
+            )?;
+
+            // Update workflow run plan revision
+            tx.execute(
+                r#"
+                UPDATE workflows
+                SET plan_revision = ?1, updated_at_epoch_ms = ?2
+                WHERE id = ?3
+                "#,
+                params![new_plan.revision, now, workflow_id],
+            )?;
+
+            // Insert new/updated dependency
+            tx.execute(
+                r#"
+                INSERT OR IGNORE INTO workflow_task_dependencies (workflow_id, task_id, depends_on_task_id)
+                VALUES (?1, ?2, ?3)
+                "#,
+                params![workflow_id, task_id, depends_on_task_id],
+            )?;
+
+            // Update all tasks in this workflow to the new plan revision
+            tx.execute(
+                "UPDATE workflow_tasks SET plan_revision = ?1 WHERE workflow_id = ?2",
+                params![new_plan.revision, workflow_id],
+            )?;
+
+            // Yield current task: transition to 'blocked' if it was running/claimed/ready
+            tx.execute(
+                r#"
+                UPDATE workflow_tasks
+                SET status = 'blocked',
+                    plan_revision = ?1,
+                    worker_id = NULL,
+                    lease_expires_at_epoch_ms = NULL,
+                    dependencies_json = (
+                        SELECT json_group_array(depends_on_task_id)
+                        FROM workflow_task_dependencies
+                        WHERE workflow_id = ?2 AND task_id = ?3
+                    )
+                WHERE workflow_id = ?2 AND id = ?3
+                "#,
+                params![new_plan.revision, workflow_id, task_id],
+            )?;
+
+            // Promote any pending tasks whose dependencies are satisfied
+            tx.execute(
+                r#"
+                UPDATE workflow_tasks
+                SET status = 'ready'
+                WHERE workflow_id = ?1
+                  AND status IN ('pending', 'blocked')
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM workflow_task_dependencies d
+                      JOIN workflow_tasks dep ON dep.workflow_id = d.workflow_id AND dep.id = d.depends_on_task_id
+                      WHERE d.workflow_id = ?1
+                        AND d.task_id = workflow_tasks.id
+                        AND dep.status != 'completed'
+                  )
+                "#,
+                params![workflow_id],
+            )?;
+
+            tx.commit()?;
+        }
+
+        // Record plan revised event
+        self.record_event(&WorkflowEvent {
+            id: format!("evt-replan-{}", Uuid::new_v4().simple()),
+            workflow_id: workflow_id.to_string(),
+            task_id: Some(task_id.to_string()),
+            agent_id: None,
+            event_type: WorkflowEventType::PlanRevised,
+            timestamp_epoch_ms: Utc::now().timestamp_millis(),
+            correlation_id: None,
+            payload_json: serde_json::json!({
+                "revision": new_plan.revision,
+                "task_id": task_id,
+                "added_dependency": depends_on_task_id,
+                "rationale": rationale,
+            })
+            .to_string(),
+            schema_version: 1,
+        })?;
+
+        Ok(new_plan)
+    }
+
+    fn parse_conflict_row(row: &rusqlite::Row) -> Result<ConflictReport> {
+        let path_str: String = row.get(4)?;
+        let kind_str: String = row.get(5)?;
+        let kind = ConflictKind::from_str(&kind_str).unwrap_or(ConflictKind::GenuineDependency);
+        Ok(ConflictReport {
+            id: row.get(0)?,
+            workflow_id: row.get(1)?,
+            reporting_task_id: row.get(2)?,
+            conflicting_task_id: row.get(3)?,
+            resource_path: PathBuf::from(path_str),
+            conflict_kind: kind,
+            description: row.get(6)?,
+            suggested_dependency: row.get(7)?,
+            reported_at_epoch_ms: row.get(8)?,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -2056,5 +2690,270 @@ mod tests {
         // 3. Third claim returns None because task-s2 is still in write conflict with task-s1
         let claim3 = store.claim_ready_task(wf_id, "worker-3", 10_000).unwrap();
         assert!(claim3.is_none());
+    }
+
+    #[test]
+    fn test_managed_worktree_persistence_and_recovery() {
+        let (store, _) = setup_test_db();
+        let wt = WorktreeRecord {
+            id: "wt-agent-1".into(),
+            thread_id: "agent-1".into(),
+            workflow_id: Some("wf-rec".into()),
+            task_id: Some("task-1".into()),
+            worktree_path: PathBuf::from("/tmp/wt1"),
+            branch: "m31a/thread-agent-1".into(),
+            base_sha: "abc1234".into(),
+            head_sha: "abc1234".into(),
+            source_root: PathBuf::from("/workspace"),
+            status: WorktreeStatus::Active,
+            unintegrated_diff: None,
+            created_at_epoch_ms: 1000,
+            updated_at_epoch_ms: 1000,
+        };
+
+        store.save_worktree(&wt).unwrap();
+
+        let fetched = store.get_worktree("agent-1").unwrap().unwrap();
+        assert_eq!(fetched.id, "wt-agent-1");
+        assert_eq!(fetched.status, WorktreeStatus::Active);
+
+        let list = store.list_worktrees_for_workflow("wf-rec").unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].thread_id, "agent-1");
+
+        // Update status and save unintegrated diff
+        store
+            .update_worktree_status(
+                "agent-1",
+                WorktreeStatus::Preserved,
+                Some("diff --git a/file.rs b/file.rs"),
+            )
+            .unwrap();
+
+        let recovered = store.recover_interrupted_worktrees("wf-rec").unwrap();
+        assert_eq!(recovered.len(), 1);
+        assert_eq!(recovered[0].status, WorktreeStatus::Preserved);
+        assert_eq!(
+            recovered[0].unintegrated_diff.as_deref(),
+            Some("diff --git a/file.rs b/file.rs")
+        );
+    }
+
+    #[test]
+    fn test_integration_record_lifecycle_and_deduplication() {
+        let (store, _) = setup_test_db();
+        let wf_id = "wf-integ";
+        let run = WorkflowRun {
+            id: wf_id.to_string(),
+            thread_id: None,
+            workspace_root: PathBuf::from("/workspace"),
+            objective: "Integration pipeline test".into(),
+            workflow_type: "autonomous".into(),
+            state: WorkflowState::Running,
+            plan_revision: 1,
+            configuration_json: "{}".into(),
+            created_at_epoch_ms: 1000,
+            updated_at_epoch_ms: 1000,
+            started_at_epoch_ms: Some(1000),
+            completed_at_epoch_ms: None,
+            cancellation_reason: None,
+            overall_result_json: None,
+            resource_usage_json: None,
+        };
+        store.create_workflow(&run).unwrap();
+
+        let rec = IntegrationRecord {
+            id: "integ-1".into(),
+            workflow_id: wf_id.into(),
+            task_id: "task-integ".into(),
+            attempt_id: 1,
+            status: IntegrationLifecycleStatus::Created,
+            source_branch: "m31a/thread-1".into(),
+            source_base_sha: "base111".into(),
+            target_base_sha: "base111".into(),
+            current_target_sha: None,
+            change_set_hash: "hash_abcdef".into(),
+            patch_artifact_path: Some(PathBuf::from("/artifacts/patch.diff")),
+            modified_files: vec![PathBuf::from("src/lib.rs")],
+            verification_passed: false,
+            error: None,
+            created_at_epoch_ms: 1000,
+            updated_at_epoch_ms: 1000,
+        };
+
+        store.create_integration_record(&rec).unwrap();
+
+        let fetched = store.get_integration_record("integ-1").unwrap().unwrap();
+        assert_eq!(fetched.status, IntegrationLifecycleStatus::Created);
+
+        // Progress status
+        store
+            .update_integration_status(
+                "integ-1",
+                IntegrationLifecycleStatus::Verified,
+                Some("base222"),
+                None,
+            )
+            .unwrap();
+
+        let updated = store
+            .get_integration_by_task(wf_id, "task-integ", 1)
+            .unwrap()
+            .unwrap();
+        assert_eq!(updated.status, IntegrationLifecycleStatus::Verified);
+        assert!(updated.verification_passed);
+
+        // Progress to Promoted
+        store
+            .update_integration_status(
+                "integ-1",
+                IntegrationLifecycleStatus::Promoted,
+                Some("commit_333"),
+                None,
+            )
+            .unwrap();
+
+        let deduplicated = store
+            .find_promoted_integration_by_hash(wf_id, "hash_abcdef")
+            .unwrap();
+        assert!(deduplicated.is_some());
+        assert_eq!(deduplicated.unwrap().id, "integ-1");
+    }
+
+    #[test]
+    fn test_conflict_recording_and_dynamic_replanning() {
+        let (store, _) = setup_test_db();
+        let wf_id = "wf-dyn";
+        let run = WorkflowRun {
+            id: wf_id.to_string(),
+            thread_id: None,
+            workspace_root: PathBuf::from("/workspace"),
+            objective: "Dynamic replan test".into(),
+            workflow_type: "autonomous".into(),
+            state: WorkflowState::Running,
+            plan_revision: 1,
+            configuration_json: "{}".into(),
+            created_at_epoch_ms: 1000,
+            updated_at_epoch_ms: 1000,
+            started_at_epoch_ms: Some(1000),
+            completed_at_epoch_ms: None,
+            cancellation_reason: None,
+            overall_result_json: None,
+            resource_usage_json: None,
+        };
+        store.create_workflow(&run).unwrap();
+
+        let task_1 = WorkflowTask {
+            id: "t1".into(),
+            workflow_id: wf_id.into(),
+            plan_revision: 1,
+            task_kind: m31a_core::workflow::WorkflowTaskKind::Implementation,
+            name: "Task 1".into(),
+            description: "Test".into(),
+            assigned_role: "Dev".into(),
+            assigned_agent_id: None,
+            priority: 10,
+            wave_index: 1,
+            dependencies: vec![],
+            acceptance_criteria: vec![],
+            required_verification: vec![],
+            declared_read_paths: vec![],
+            declared_write_paths: vec![PathBuf::from("src/a.rs")],
+            workspace_isolation: WorkspaceIsolationStrategy::Worktree,
+            status: WorkflowTaskStatus::Ready,
+            retry_count: 0,
+            max_retries: 2,
+            attempt_id: 1,
+            started_at_epoch_ms: None,
+            completed_at_epoch_ms: None,
+            worker_id: None,
+            lease_expires_at_epoch_ms: None,
+            error_details: None,
+            input_artifacts: vec![],
+            output_artifacts: vec![],
+            verification_result_json: None,
+            execution_result_json: None,
+        };
+
+        let task_2 = WorkflowTask {
+            id: "t2".into(),
+            workflow_id: wf_id.into(),
+            plan_revision: 1,
+            task_kind: m31a_core::workflow::WorkflowTaskKind::Implementation,
+            name: "Task 2".into(),
+            description: "Test".into(),
+            assigned_role: "Dev".into(),
+            assigned_agent_id: None,
+            priority: 10,
+            wave_index: 1,
+            dependencies: vec![],
+            acceptance_criteria: vec![],
+            required_verification: vec![],
+            declared_read_paths: vec![],
+            declared_write_paths: vec![PathBuf::from("src/b.rs")],
+            workspace_isolation: WorkspaceIsolationStrategy::Worktree,
+            status: WorkflowTaskStatus::Ready,
+            retry_count: 0,
+            max_retries: 2,
+            attempt_id: 1,
+            started_at_epoch_ms: None,
+            completed_at_epoch_ms: None,
+            worker_id: None,
+            lease_expires_at_epoch_ms: None,
+            error_details: None,
+            input_artifacts: vec![],
+            output_artifacts: vec![],
+            verification_result_json: None,
+            execution_result_json: None,
+        };
+
+        let plan = WorkflowPlan {
+            workflow_id: wf_id.into(),
+            revision: 1,
+            rationale: "Initial plan".into(),
+            created_at_epoch_ms: 1000,
+            tasks: vec![task_1, task_2],
+        };
+        store.save_workflow_plan(&plan).unwrap();
+
+        // Agent executing t2 discovers that it requires unfinished output from t1!
+        let conflict = ConflictReport {
+            id: "cnf-1".into(),
+            workflow_id: wf_id.into(),
+            reporting_task_id: "t2".into(),
+            conflicting_task_id: Some("t1".into()),
+            resource_path: PathBuf::from("src/shared.rs"),
+            conflict_kind: ConflictKind::GenuineDependency,
+            description: "t2 depends on types exported by t1".into(),
+            suggested_dependency: Some("t1".into()),
+            reported_at_epoch_ms: 2000,
+        };
+        store.record_conflict(&conflict).unwrap();
+
+        let conflict_list = store.list_conflicts(wf_id).unwrap();
+        assert_eq!(conflict_list.len(), 1);
+
+        // Orchestrator resolves genuine dependency by adding explicit DAG dependency: t2 depends on t1
+        let new_plan = store
+            .replan_with_dependency(
+                wf_id,
+                "t2",
+                "t1",
+                "t2 dynamically yielded to wait for t1 completion",
+            )
+            .unwrap();
+
+        assert_eq!(new_plan.revision, 2);
+        let t2_updated = new_plan.tasks.iter().find(|t| t.id == "t2").unwrap();
+        assert_eq!(t2_updated.dependencies, vec!["t1".to_string()]);
+
+        // In storage, t2 is now blocked waiting for t1!
+        let t2_db = store.get_task(wf_id, "t2").unwrap().unwrap();
+        assert_eq!(t2_db.status, WorkflowTaskStatus::Blocked);
+
+        // Attempting to add a cyclic dependency (t1 depends on t2) is rejected transactionally
+        let cyclic_res =
+            store.replan_with_dependency(wf_id, "t1", "t2", "invalid cycle addition");
+        assert!(cyclic_res.is_err());
     }
 }
