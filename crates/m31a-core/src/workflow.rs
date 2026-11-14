@@ -2,9 +2,43 @@
 //! for autonomous workflow orchestration (`m31a-core::workflow`).
 
 use anyhow::{Result, anyhow, bail};
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+
+/// Execution mode governing runtime coordination overhead.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionMode {
+    /// DAG + isolated worktrees + verified integration.
+    /// Independent tasks execute concurrently in isolated Git worktrees without file-level runtime locks.
+    /// Integration is serialized, verified, and idempotent.
+    #[default]
+    Standard,
+    /// DAG + isolated worktrees + demand-driven shared-resource coordination.
+    /// Activated only when agents must concurrently mutate shared unisolated state
+    /// or require exclusive resource ownership.
+    Coordinated,
+}
+
+impl ExecutionMode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Standard => "standard",
+            Self::Coordinated => "coordinated",
+        }
+    }
+
+    #[allow(clippy::should_implement_trait)]
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "standard" => Some(Self::Standard),
+            "coordinated" => Some(Self::Coordinated),
+            _ => None,
+        }
+    }
+}
 
 /// High-level lifecycle state of an autonomous workflow run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -666,6 +700,77 @@ impl WorkflowPlan {
         wave_assignments.insert(task_id.to_string(), wave);
         Ok(wave)
     }
+
+    /// Validates whether adding a dependency where `task_id` depends on `depends_on` would introduce a cycle.
+    pub fn would_create_cycle(&self, task_id: &str, depends_on: &str) -> bool {
+        if task_id == depends_on {
+            return true;
+        }
+        let mut adj_list: HashMap<String, Vec<String>> = HashMap::new();
+        for task in &self.tasks {
+            for dep in &task.dependencies {
+                adj_list
+                    .entry(dep.clone())
+                    .or_default()
+                    .push(task.id.clone());
+            }
+        }
+        adj_list
+            .entry(depends_on.to_string())
+            .or_default()
+            .push(task_id.to_string());
+
+        // Cycle check: can task_id reach depends_on?
+        let mut visited = HashSet::new();
+        let mut stack = vec![task_id.to_string()];
+        while let Some(curr) = stack.pop() {
+            if curr == depends_on {
+                return true;
+            }
+            if visited.insert(curr.clone()) {
+                if let Some(nexts) = adj_list.get(&curr) {
+                    for n in nexts {
+                        stack.push(n.clone());
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// Creates a new revision of the plan with an explicit dependency added.
+    /// Returns Err if a cycle would be introduced.
+    pub fn with_added_dependency(
+        &self,
+        task_id: &str,
+        depends_on: &str,
+        rationale: &str,
+    ) -> Result<WorkflowPlan> {
+        if self.would_create_cycle(task_id, depends_on) {
+            bail!("Adding dependency from '{task_id}' to '{depends_on}' would introduce a dependency cycle");
+        }
+
+        let mut new_tasks = self.tasks.clone();
+        let task = new_tasks
+            .iter_mut()
+            .find(|t| t.id == task_id)
+            .ok_or_else(|| anyhow!("Task '{task_id}' not found in plan"))?;
+
+        if !task.dependencies.contains(&depends_on.to_string()) {
+            task.dependencies.push(depends_on.to_string());
+        }
+
+        let new_plan = WorkflowPlan {
+            workflow_id: self.workflow_id.clone(),
+            revision: self.revision + 1,
+            rationale: rationale.to_string(),
+            created_at_epoch_ms: Utc::now().timestamp_millis(),
+            tasks: new_tasks,
+        };
+
+        new_plan.validate()?;
+        Ok(new_plan)
+    }
 }
 
 /// Durable, top-level workflow run record.
@@ -839,6 +944,240 @@ pub struct WorkflowApprovalRequest {
     pub decision_reason: Option<String>,
 }
 
+/// Classification of a conflict discovered by an agent during execution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConflictKind {
+    /// Agent discovered that its work strictly requires changes/outputs from another task.
+    /// Resolved by transforming coordination into DAG scheduling (adding blocks/depends_on).
+    GenuineDependency,
+    /// Agent discovered concurrent overlapping modifications in independent worktrees.
+    /// Resolved at integration time (concurrent execution is safe; integration is serialized).
+    IntegrationConflict,
+    /// Shared mutable resource contention that cannot be resolved by DAG scheduling alone.
+    /// Requires demand-driven runtime lock or human intervention.
+    SharedResourceContention,
+    /// Unresolvable conflict or circular contention requiring human approval.
+    RequiresHumanIntervention,
+}
+
+impl ConflictKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::GenuineDependency => "genuine_dependency",
+            Self::IntegrationConflict => "integration_conflict",
+            Self::SharedResourceContention => "shared_resource_contention",
+            Self::RequiresHumanIntervention => "requires_human_intervention",
+        }
+    }
+
+    #[allow(clippy::should_implement_trait)]
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "genuine_dependency" => Some(Self::GenuineDependency),
+            "integration_conflict" => Some(Self::IntegrationConflict),
+            "shared_resource_contention" => Some(Self::SharedResourceContention),
+            "requires_human_intervention" => Some(Self::RequiresHumanIntervention),
+            _ => None,
+        }
+    }
+}
+
+/// Structured report generated when an agent discovers an execution or resource conflict.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConflictReport {
+    pub id: String,
+    pub workflow_id: String,
+    pub reporting_task_id: String,
+    pub conflicting_task_id: Option<String>,
+    pub resource_path: PathBuf,
+    pub conflict_kind: ConflictKind,
+    pub description: String,
+    pub suggested_dependency: Option<String>,
+    pub reported_at_epoch_ms: i64,
+}
+
+/// Resolution determined by the orchestrator for a reported conflict.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ConflictResolution {
+    /// Resolved by adding an explicit DAG dependency and replanning/yielding.
+    AddDependency {
+        task_id: String,
+        depends_on: String,
+    },
+    /// Marked as an integration-time concern; concurrent worktree execution continues safely.
+    DeferToIntegration {
+        task_id: String,
+        resource_path: PathBuf,
+    },
+    /// Requires human intervention or approval.
+    EscalateToHuman {
+        task_id: String,
+        reason: String,
+    },
+    /// Rejected as invalid or circular dependency.
+    Rejected {
+        reason: String,
+    },
+}
+
+/// Durable lifecycle status for an integration request or record.
+/// CREATED → EXECUTING → RESULT_READY → INTEGRATION_PENDING → VERIFIED → PROMOTED
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum IntegrationLifecycleStatus {
+    #[default]
+    Created,
+    Executing,
+    ResultReady,
+    IntegrationPending,
+    Verified,
+    Promoted,
+    Failed,
+    Cancelled,
+    Rejected,
+    RetryPending,
+}
+
+impl IntegrationLifecycleStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Created => "created",
+            Self::Executing => "executing",
+            Self::ResultReady => "result_ready",
+            Self::IntegrationPending => "integration_pending",
+            Self::Verified => "verified",
+            Self::Promoted => "promoted",
+            Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+            Self::Rejected => "rejected",
+            Self::RetryPending => "retry_pending",
+        }
+    }
+
+    #[allow(clippy::should_implement_trait)]
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "created" => Some(Self::Created),
+            "executing" => Some(Self::Executing),
+            "result_ready" => Some(Self::ResultReady),
+            "integration_pending" => Some(Self::IntegrationPending),
+            "verified" => Some(Self::Verified),
+            "promoted" => Some(Self::Promoted),
+            "failed" => Some(Self::Failed),
+            "cancelled" => Some(Self::Cancelled),
+            "rejected" => Some(Self::Rejected),
+            "retry_pending" => Some(Self::RetryPending),
+            _ => None,
+        }
+    }
+
+    pub fn is_terminal(&self) -> bool {
+        matches!(
+            self,
+            Self::Promoted | Self::Failed | Self::Cancelled | Self::Rejected
+        )
+    }
+
+    pub fn can_transition_to(&self, next: &IntegrationLifecycleStatus) -> bool {
+        if self == next {
+            return true;
+        }
+        match self {
+            Self::Created => matches!(next, Self::Executing | Self::Cancelled | Self::Failed),
+            Self::Executing => matches!(
+                next,
+                Self::ResultReady | Self::Failed | Self::Cancelled | Self::RetryPending
+            ),
+            Self::ResultReady => {
+                matches!(next, Self::IntegrationPending | Self::Failed | Self::Cancelled)
+            }
+            Self::IntegrationPending => matches!(
+                next,
+                Self::Verified | Self::Rejected | Self::Failed | Self::Cancelled
+            ),
+            Self::Verified => matches!(
+                next,
+                Self::Promoted | Self::Rejected | Self::Failed | Self::Cancelled
+            ),
+            Self::RetryPending => matches!(next, Self::Executing | Self::Cancelled | Self::Failed),
+            Self::Promoted | Self::Failed | Self::Cancelled | Self::Rejected => false,
+        }
+    }
+}
+
+/// Durable record of an integration attempt in the unified integration pipeline.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IntegrationRecord {
+    pub id: String,
+    pub workflow_id: String,
+    pub task_id: String,
+    pub attempt_id: u32,
+    pub status: IntegrationLifecycleStatus,
+    pub source_branch: String,
+    pub source_base_sha: String,
+    pub target_base_sha: String,
+    pub current_target_sha: Option<String>,
+    pub change_set_hash: String,
+    pub patch_artifact_path: Option<PathBuf>,
+    pub modified_files: Vec<PathBuf>,
+    pub verification_passed: bool,
+    pub error: Option<String>,
+    pub created_at_epoch_ms: i64,
+    pub updated_at_epoch_ms: i64,
+}
+
+/// Lifecycle status of a managed Git worktree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum WorktreeStatus {
+    #[default]
+    Active,
+    Preserved,
+    Reconciled,
+    CleanedUp,
+}
+
+impl WorktreeStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Preserved => "preserved",
+            Self::Reconciled => "reconciled",
+            Self::CleanedUp => "cleaned_up",
+        }
+    }
+
+    #[allow(clippy::should_implement_trait)]
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "active" => Some(Self::Active),
+            "preserved" => Some(Self::Preserved),
+            "reconciled" => Some(Self::Reconciled),
+            "cleaned_up" => Some(Self::CleanedUp),
+            _ => None,
+        }
+    }
+}
+
+/// Persistent metadata for a managed Git worktree session.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorktreeRecord {
+    pub id: String,
+    pub thread_id: String,
+    pub workflow_id: Option<String>,
+    pub task_id: Option<String>,
+    pub worktree_path: PathBuf,
+    pub branch: String,
+    pub base_sha: String,
+    pub head_sha: String,
+    pub source_root: PathBuf,
+    pub status: WorktreeStatus,
+    pub unintegrated_diff: Option<String>,
+    pub created_at_epoch_ms: i64,
+    pub updated_at_epoch_ms: i64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1009,5 +1348,179 @@ mod tests {
         assert!(WorkflowState::Running.can_transition_to(&WorkflowState::Completed));
         // Completed cannot transition
         assert!(!WorkflowState::Completed.can_transition_to(&WorkflowState::Running));
+    }
+
+    #[test]
+    fn test_dynamic_plan_dependency_addition_and_cycle_prevention() {
+        let t1 = WorkflowTask {
+            id: "t1".into(),
+            workflow_id: "wf-1".into(),
+            plan_revision: 1,
+            task_kind: WorkflowTaskKind::Implementation,
+            name: "Task 1".into(),
+            description: "Desc".into(),
+            assigned_role: "Role".into(),
+            assigned_agent_id: None,
+            priority: 0,
+            wave_index: 0,
+            dependencies: vec![],
+            acceptance_criteria: vec![],
+            required_verification: vec![],
+            declared_read_paths: vec![],
+            declared_write_paths: vec![],
+            workspace_isolation: WorkspaceIsolationStrategy::Worktree,
+            status: WorkflowTaskStatus::Ready,
+            retry_count: 0,
+            max_retries: 3,
+            attempt_id: 1,
+            started_at_epoch_ms: None,
+            completed_at_epoch_ms: None,
+            worker_id: None,
+            lease_expires_at_epoch_ms: None,
+            error_details: None,
+            input_artifacts: vec![],
+            output_artifacts: vec![],
+            verification_result_json: None,
+            execution_result_json: None,
+        };
+
+        let t2 = WorkflowTask {
+            id: "t2".into(),
+            workflow_id: "wf-1".into(),
+            plan_revision: 1,
+            task_kind: WorkflowTaskKind::Implementation,
+            name: "Task 2".into(),
+            description: "Desc".into(),
+            assigned_role: "Role".into(),
+            assigned_agent_id: None,
+            priority: 0,
+            wave_index: 0,
+            dependencies: vec!["t1".into()],
+            acceptance_criteria: vec![],
+            required_verification: vec![],
+            declared_read_paths: vec![],
+            declared_write_paths: vec![],
+            workspace_isolation: WorkspaceIsolationStrategy::Worktree,
+            status: WorkflowTaskStatus::Pending,
+            retry_count: 0,
+            max_retries: 3,
+            attempt_id: 1,
+            started_at_epoch_ms: None,
+            completed_at_epoch_ms: None,
+            worker_id: None,
+            lease_expires_at_epoch_ms: None,
+            error_details: None,
+            input_artifacts: vec![],
+            output_artifacts: vec![],
+            verification_result_json: None,
+            execution_result_json: None,
+        };
+
+        let plan = WorkflowPlan {
+            workflow_id: "wf-1".into(),
+            revision: 1,
+            rationale: "Original".into(),
+            created_at_epoch_ms: 1000,
+            tasks: vec![t1, t2],
+        };
+
+        // Adding t1 -> depends_on t2 would create a cycle because t2 depends on t1!
+        assert!(plan.would_create_cycle("t1", "t2"));
+        assert!(
+            plan.with_added_dependency("t1", "t2", "conflict resolved")
+                .is_err()
+        );
+
+        // Self-dependency would create a cycle
+        assert!(plan.would_create_cycle("t1", "t1"));
+
+        // Adding independent t3 and making t3 depend on t2 is valid
+        let t3 = WorkflowTask {
+            id: "t3".into(),
+            workflow_id: "wf-1".into(),
+            plan_revision: 1,
+            task_kind: WorkflowTaskKind::Verification,
+            name: "Task 3".into(),
+            description: "Desc".into(),
+            assigned_role: "Role".into(),
+            assigned_agent_id: None,
+            priority: 0,
+            wave_index: 0,
+            dependencies: vec![],
+            acceptance_criteria: vec![],
+            required_verification: vec![],
+            declared_read_paths: vec![],
+            declared_write_paths: vec![],
+            workspace_isolation: WorkspaceIsolationStrategy::Worktree,
+            status: WorkflowTaskStatus::Ready,
+            retry_count: 0,
+            max_retries: 3,
+            attempt_id: 1,
+            started_at_epoch_ms: None,
+            completed_at_epoch_ms: None,
+            worker_id: None,
+            lease_expires_at_epoch_ms: None,
+            error_details: None,
+            input_artifacts: vec![],
+            output_artifacts: vec![],
+            verification_result_json: None,
+            execution_result_json: None,
+        };
+
+        let plan3 = WorkflowPlan {
+            workflow_id: "wf-1".into(),
+            revision: 1,
+            rationale: "Three tasks".into(),
+            created_at_epoch_ms: 1000,
+            tasks: vec![plan.tasks[0].clone(), plan.tasks[1].clone(), t3],
+        };
+
+        assert!(!plan3.would_create_cycle("t3", "t2"));
+        let plan4 = plan3
+            .with_added_dependency("t3", "t2", "t3 now depends on t2")
+            .unwrap();
+        assert_eq!(plan4.revision, 2);
+        assert_eq!(
+            plan4
+                .tasks
+                .iter()
+                .find(|t| t.id == "t3")
+                .unwrap()
+                .dependencies,
+            vec!["t2".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_integration_lifecycle_transitions() {
+        use IntegrationLifecycleStatus::*;
+        assert!(Created.can_transition_to(&Executing));
+        assert!(Executing.can_transition_to(&ResultReady));
+        assert!(ResultReady.can_transition_to(&IntegrationPending));
+        assert!(IntegrationPending.can_transition_to(&Verified));
+        assert!(Verified.can_transition_to(&Promoted));
+        assert!(IntegrationPending.can_transition_to(&Rejected));
+        assert!(Verified.can_transition_to(&Failed));
+
+        // Terminal states cannot transition
+        assert!(!Promoted.can_transition_to(&Executing));
+        assert!(!Failed.can_transition_to(&Executing));
+        assert!(!Cancelled.can_transition_to(&Executing));
+        assert!(!Rejected.can_transition_to(&Executing));
+    }
+
+    #[test]
+    fn test_execution_mode_defaults() {
+        assert_eq!(ExecutionMode::default(), ExecutionMode::Standard);
+        assert_eq!(ExecutionMode::Standard.as_str(), "standard");
+        assert_eq!(ExecutionMode::Coordinated.as_str(), "coordinated");
+        assert_eq!(
+            ExecutionMode::from_str("standard"),
+            Some(ExecutionMode::Standard)
+        );
+        assert_eq!(
+            ExecutionMode::from_str("coordinated"),
+            Some(ExecutionMode::Coordinated)
+        );
     }
 }
