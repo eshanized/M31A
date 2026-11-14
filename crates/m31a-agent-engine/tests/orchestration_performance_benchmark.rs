@@ -231,8 +231,10 @@ async fn benchmark_mode_2_worktree_first(
         Arc::new(WorktreeManager::new(WorktreeSettings::new(repo_root)).with_store(store.clone()));
     let wf_id = format!("wf-bench-wt-{}", Uuid::new_v4().simple());
 
-    let mut cfg = WorkflowExecutionConfig::default();
-    cfg.execution_mode = ExecutionMode::Standard;
+    let cfg = WorkflowExecutionConfig {
+        execution_mode: ExecutionMode::Standard,
+        ..Default::default()
+    };
 
     let run = make_bench_run(&wf_id, repo_root, "Worktree-first benchmark", &cfg);
     store.create_workflow(&run).unwrap();
@@ -416,8 +418,10 @@ async fn benchmark_mode_4_coordinated(repo_root: &Path, storage: &Storage) -> Be
     let store = storage.workflow_store();
     let wf_id = format!("wf-bench-coord-{}", Uuid::new_v4().simple());
 
-    let mut cfg = WorkflowExecutionConfig::default();
-    cfg.execution_mode = ExecutionMode::Coordinated;
+    let cfg = WorkflowExecutionConfig {
+        execution_mode: ExecutionMode::Coordinated,
+        ..Default::default()
+    };
 
     let run = make_bench_run(&wf_id, repo_root, "Coordinated mode benchmark", &cfg);
     store.create_workflow(&run).unwrap();
