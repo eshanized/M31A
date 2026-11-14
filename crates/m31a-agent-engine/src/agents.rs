@@ -1188,7 +1188,8 @@ impl AgentRuntime for EngineAgentRuntime {
         let default_msg = format!("feat(agent): integrate changes from agent {}", agent_id);
         let msg = commit_message.unwrap_or(&default_msg);
 
-        let svc = crate::integration::WorkflowIntegrationService::new();
+        let svc = crate::integration::WorkflowIntegrationService::new()
+            .with_store(self.storage.workflow_store());
         let req = crate::integration::IntegrationRequest {
             workspace_root: self.cwd.clone(),
             patch_content: diff,
@@ -1204,6 +1205,9 @@ impl AgentRuntime for EngineAgentRuntime {
             task_id: None,
             attempt_id: None,
             expected_change_set_hash: None,
+            source_branch: Some(child_wt.branch.clone()),
+            source_base_sha: child_wt.base_sha.clone(),
+            target_base_sha: None,
         };
 
         let outcome = svc.integrate(&req).await?;
