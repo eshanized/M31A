@@ -27,7 +27,7 @@ The M31A terminal window is divided into three primary functional areas:
 
 ```
 +-----------------------------------------------------------------------+
-|  M31A v0.1.14  |  Thread: #0194...  |  Model: nemotron-3.5-lightning   |
+|  M31A v0.1.15  |  Thread: #0194...  |  Model: nemotron-3.5-lightning   |
 +-----------------------------------------------------------------------+
 |                                                                       |
 |  [Transcript Stream Area]                                             |
