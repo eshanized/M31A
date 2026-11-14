@@ -11,7 +11,7 @@ class TestSyncClient(unittest.TestCase):
             "initialize",
             lambda p: {
                 "server_name": "m31a-app-server",
-                "version": "0.1.14",
+                "version": "0.1.15",
                 "protocol_version": "2.0",
                 "capabilities": {"threads": True, "turns": True},
             },
