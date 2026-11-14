@@ -218,9 +218,9 @@ mod tests {
     #[test]
     fn test_build_info_banner() {
         let build = BuildInfo::get();
-        assert_eq!(build.version, "0.1.14");
+        assert_eq!(build.version, "0.1.15");
         let banner = build.format_banner();
-        assert!(banner.contains("M31A v0.1.14"));
+        assert!(banner.contains("M31A v0.1.15"));
         assert!(banner.contains("commit:"));
     }
 }
