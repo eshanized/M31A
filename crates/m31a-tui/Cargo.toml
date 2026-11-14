@@ -47,6 +47,8 @@ shlex.workspace = true
 base64 = "0.22"
 unicode-width.workspace = true
 unicode-segmentation.workspace = true
+sha2.workspace = true
+dirs.workspace = true
 
 [features]
 default = []
