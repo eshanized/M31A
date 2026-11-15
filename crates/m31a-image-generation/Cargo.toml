@@ -10,7 +10,7 @@ description = "Image generation extension for M31A"
 anyhow = { workspace = true }
 base64 = { version = "0.22", features = ["std"] }
 m31a-core = { path = "../m31a-core" }
-rand = { version = "0.8", features = ["std"] }
+rand = { version = "0.10", features = ["std"] }
 reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
