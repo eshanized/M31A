@@ -2554,6 +2554,18 @@ impl Storage {
         )?;
         Ok(affected > 0)
     }
+
+    pub fn repo_index_store(&self) -> crate::repo_index_store::RepoIndexStore {
+        crate::repo_index_store::RepoIndexStore::new(self.conn.clone())
+    }
+
+    pub fn save_repo_index(&self, index: &m31a_ast::AstCodebaseIndex) -> Result<()> {
+        self.repo_index_store().save_index(index)
+    }
+
+    pub fn load_repo_index(&self, root: &Path) -> Result<Option<m31a_ast::AstCodebaseIndex>> {
+        self.repo_index_store().load_index(root)
+    }
 }
 
 #[cfg(test)]

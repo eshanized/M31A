@@ -30,6 +30,7 @@ which.workspace = true
 shlex.workspace = true
 reqwest.workspace = true
 semver.workspace = true
+m31a-ast = { path = "../m31a-ast" }
 
 [dev-dependencies]
 tempfile.workspace = true

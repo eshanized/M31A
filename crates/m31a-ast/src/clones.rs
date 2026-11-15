@@ -272,29 +272,22 @@ mod tests {
 
         let mut index = AstCodebaseIndex::new();
 
-        let dead_fn = AstSymbol {
-            name: "unused_private_helper".to_string(),
-            kind: AstSymbolKind::Function,
-            file_path: PathBuf::from("src/foo.rs"),
-            range: SourceRange::new(10, 15, 1, 1),
-            signature: "fn unused_private_helper()".to_string(),
-            doc_comment: None,
-            parent_scope: None,
-            is_public: false,
-            children: Vec::new(),
-        };
+        let mut dead_fn = AstSymbol::new(
+            "unused_private_helper",
+            AstSymbolKind::Function,
+            PathBuf::from("src/foo.rs"),
+            SourceRange::new(10, 15, 1, 1),
+            "fn unused_private_helper()",
+        );
+        dead_fn.is_public = false;
 
-        let live_pub_fn = AstSymbol {
-            name: "public_api".to_string(),
-            kind: AstSymbolKind::Function,
-            file_path: PathBuf::from("src/foo.rs"),
-            range: SourceRange::new(1, 5, 1, 1),
-            signature: "pub fn public_api()".to_string(),
-            doc_comment: None,
-            parent_scope: None,
-            is_public: true,
-            children: Vec::new(),
-        };
+        let live_pub_fn = AstSymbol::new(
+            "public_api",
+            AstSymbolKind::Function,
+            PathBuf::from("src/foo.rs"),
+            SourceRange::new(1, 5, 1, 1),
+            "pub fn public_api()",
+        );
 
         index.insert_symbol(dead_fn);
         index.insert_symbol(live_pub_fn);

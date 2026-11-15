@@ -278,22 +278,13 @@ mod tests {
     fn test_impact_analysis_scoring() {
         let mut index = AstCodebaseIndex::new();
         // Register symbols manually
-        let sym = AstSymbol {
-            name: "calculate_tax".to_string(),
-            kind: AstSymbolKind::Function,
-            file_path: PathBuf::from("crates/billing/src/tax.rs"),
-            range: SourceRange {
-                start_line: 10,
-                start_col: 1,
-                end_line: 20,
-                end_col: 1,
-            },
-            doc_comment: None,
-            parent_scope: None,
-            is_public: true,
-            signature: "pub fn calculate_tax()".to_string(),
-            children: Vec::new(),
-        };
+        let sym = AstSymbol::new(
+            "calculate_tax",
+            AstSymbolKind::Function,
+            PathBuf::from("crates/billing/src/tax.rs"),
+            SourceRange::new(10, 20, 1, 1),
+            "pub fn calculate_tax()",
+        );
         index.insert_symbol(sym);
 
         let report = SemanticImpactAnalyzer::analyze_impact(
@@ -310,22 +301,13 @@ mod tests {
     #[test]
     fn test_transitive_callers_and_safety_gating() {
         let mut index = AstCodebaseIndex::new();
-        let sym = AstSymbol {
-            name: "core_dispatch".to_string(),
-            kind: AstSymbolKind::Function,
-            file_path: PathBuf::from("crates/core/src/dispatch.rs"),
-            range: SourceRange {
-                start_line: 1,
-                start_col: 1,
-                end_line: 10,
-                end_col: 1,
-            },
-            doc_comment: None,
-            parent_scope: None,
-            is_public: true,
-            signature: "pub fn core_dispatch()".to_string(),
-            children: Vec::new(),
-        };
+        let sym = AstSymbol::new(
+            "core_dispatch",
+            AstSymbolKind::Function,
+            PathBuf::from("crates/core/src/dispatch.rs"),
+            SourceRange::new(1, 10, 1, 1),
+            "pub fn core_dispatch()",
+        );
         index.insert_symbol(sym);
 
         // Pre-edit check with low threshold allows safe edits or warns

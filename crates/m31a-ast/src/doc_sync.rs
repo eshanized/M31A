@@ -380,17 +380,15 @@ mod tests {
     use crate::types::{AstSymbolKind, SourceRange};
 
     fn make_test_sym(name: &str, sig: &str, doc: Option<&str>) -> AstSymbol {
-        AstSymbol {
-            name: name.to_string(),
-            kind: AstSymbolKind::Function,
-            file_path: PathBuf::from("src/lib.rs"),
-            range: SourceRange::new(1, 10, 1, 1),
-            signature: sig.to_string(),
-            doc_comment: doc.map(|s| s.to_string()),
-            parent_scope: None,
-            is_public: true,
-            children: Vec::new(),
-        }
+        let mut sym = AstSymbol::new(
+            name,
+            AstSymbolKind::Function,
+            PathBuf::from("src/lib.rs"),
+            SourceRange::new(1, 10, 1, 1),
+            sig,
+        );
+        sym.doc_comment = doc.map(|s| s.to_string());
+        sym
     }
 
     #[test]

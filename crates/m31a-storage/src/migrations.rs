@@ -575,6 +575,79 @@ pub const BUILTIN_MIGRATIONS: &[Migration] = &[
         CREATE INDEX IF NOT EXISTS idx_workflow_conflicts_wf_task ON workflow_conflicts(workflow_id, reporting_task_id);
         "#,
     ),
+    Migration::new(
+        19,
+        "repository_intelligence_index",
+        r#"
+        CREATE TABLE IF NOT EXISTS repo_indexes (
+            repo_id TEXT PRIMARY KEY,
+            root_path TEXT NOT NULL,
+            repo_name TEXT NOT NULL,
+            git_branch TEXT,
+            git_head_sha TEXT,
+            status TEXT NOT NULL,
+            is_monorepo INTEGER NOT NULL DEFAULT 0,
+            files_indexed INTEGER NOT NULL DEFAULT 0,
+            symbols_indexed INTEGER NOT NULL DEFAULT 0,
+            updated_at_epoch_ms INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS repo_indexed_files (
+            id TEXT PRIMARY KEY,
+            repo_id TEXT NOT NULL REFERENCES repo_indexes(repo_id) ON DELETE CASCADE,
+            path TEXT NOT NULL,
+            relative_path TEXT NOT NULL,
+            content_hash TEXT NOT NULL,
+            language TEXT NOT NULL,
+            size_bytes INTEGER NOT NULL,
+            is_test INTEGER NOT NULL DEFAULT 0,
+            package_id TEXT,
+            updated_at_epoch_ms INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS repo_symbols (
+            id TEXT PRIMARY KEY,
+            repo_id TEXT NOT NULL REFERENCES repo_indexes(repo_id) ON DELETE CASCADE,
+            file_path TEXT NOT NULL,
+            name TEXT NOT NULL,
+            qualified_name TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            language TEXT NOT NULL,
+            start_line INTEGER NOT NULL,
+            end_line INTEGER NOT NULL,
+            signature TEXT NOT NULL,
+            parent_scope TEXT,
+            package_id TEXT,
+            visibility TEXT NOT NULL,
+            is_public INTEGER NOT NULL,
+            doc_comment TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS repo_relationships (
+            id TEXT PRIMARY KEY,
+            repo_id TEXT NOT NULL REFERENCES repo_indexes(repo_id) ON DELETE CASCADE,
+            source_id TEXT NOT NULL,
+            target_id TEXT,
+            source_symbol TEXT NOT NULL,
+            target_symbol TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            file_path TEXT NOT NULL,
+            line INTEGER NOT NULL,
+            status TEXT NOT NULL,
+            confidence REAL NOT NULL,
+            provenance TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_repo_files_repo ON repo_indexed_files(repo_id);
+        CREATE INDEX IF NOT EXISTS idx_repo_files_path ON repo_indexed_files(repo_id, path);
+        CREATE INDEX IF NOT EXISTS idx_repo_symbols_repo ON repo_symbols(repo_id);
+        CREATE INDEX IF NOT EXISTS idx_repo_symbols_name ON repo_symbols(name);
+        CREATE INDEX IF NOT EXISTS idx_repo_symbols_file ON repo_symbols(repo_id, file_path);
+        CREATE INDEX IF NOT EXISTS idx_repo_rel_repo ON repo_relationships(repo_id);
+        CREATE INDEX IF NOT EXISTS idx_repo_rel_target ON repo_relationships(target_symbol);
+        CREATE INDEX IF NOT EXISTS idx_repo_rel_source ON repo_relationships(source_symbol);
+        "#,
+    ),
 ];
 
 /// Migration engine responsible for running and validating SQLite migrations.

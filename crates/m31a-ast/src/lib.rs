@@ -6,12 +6,17 @@ pub mod clones;
 pub mod data_flow;
 pub mod doc_sync;
 pub mod drift;
+pub mod graph;
 pub mod impact;
 pub mod index;
+pub mod language;
 pub mod parser;
+pub mod retrieval;
 pub mod semver;
 pub mod syntax_validator;
+pub mod test_discovery;
 pub mod types;
+pub mod workspace;
 
 pub use architecture::{
     ArchitecturalComplexityAnalyzer, ArchitectureAuditReport, ComplexityRisk, ComplexitySmell,
@@ -25,17 +30,32 @@ pub use doc_sync::{
     ProseDocSynchronizer, ProseSyncReport, StaleDocItem,
 };
 pub use drift::{CodebaseDriftDetector, DriftCategory, DriftCounts, DriftElement, DriftResult};
+pub use graph::{ModuleGraph, ModuleNode, PackageGraph, PackageNode, SymbolGraph, SymbolGraphNode};
 pub use impact::{
     BlastRadiusReport, DependentConsumer, ImpactRiskLevel, SemanticImpactAnalyzer, SymbolImpact,
 };
 pub use index::{AstCodebaseIndex, CallGraphNode};
+pub use language::{
+    CLikeAdapter, GoAdapter, LanguageAdapter, LanguageAdapterRegistry, ParseResult, PythonAdapter,
+    RustAdapter, TypeScriptAdapter,
+};
 pub use parser::AstParser;
+pub use retrieval::{ContextPacket, RetrievalQuery, RetrievedSymbolContext, SemanticRetriever};
 pub use semver::{
     BreakingChange, DependencyAuditReport, DependencyIssue, DependencySeverity,
     ManifestDependencyAuditor, SemverAuditReport, SemverDriftDetector, SemverImpact,
 };
 pub use syntax_validator::{SyntaxValidationError, SyntaxValidator};
-pub use types::{AstSymbol, AstSymbolKind, CallReference, SemanticChunk, SourceRange};
+pub use test_discovery::{RelatedTestTarget, TestDiscoveryEngine, TestSelectionRationale};
+pub use types::{
+    AstSymbol, AstSymbolKind, CallReference, CallSite, DiagnosticSeverity, ExportItem, ImportItem,
+    IndexStatus, LanguageCapabilities, LanguageId, ParserDiagnostic, RelationshipKind,
+    ResolutionStatus, SemanticChunk, SourceRange, SymbolRelationship, SymbolVisibility,
+};
+pub use workspace::{
+    DiscoveredManifest, ManifestKind, PackageDependency, ScannedFile, TraversalOptions,
+    TraversalReport, TraversalSkip, WorkspaceDiscovery, WorkspaceInventory, WorkspacePackage,
+};
 
 #[cfg(test)]
 mod tests {

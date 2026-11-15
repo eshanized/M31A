@@ -807,7 +807,8 @@ impl AppServer {
                     "guardian_review": true,
                     "message_board": true,
                     "skills": true,
-                    "sandbox": true
+                    "sandbox": true,
+                    "repository_intelligence": true
                 }
             })),
 
@@ -856,6 +857,97 @@ impl AppServer {
             "tools/list" => {
                 let defs = self.tools.definitions();
                 Ok(serde_json::to_value(defs)?)
+            }
+
+            "repo/overview" => {
+                let cwd = params.get("cwd")
+                    .and_then(|v| v.as_str())
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+                let res = self.tools.execute("repository_overview", &params.to_string(), &cwd, m31a_core::SandboxPolicy::ReadOnly).await?;
+                let val: serde_json::Value = serde_json::from_str(&res)?;
+                Ok(val)
+            }
+
+            "repo/status" => {
+                let cwd = params.get("cwd")
+                    .and_then(|v| v.as_str())
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+                let res = self.tools.execute("repository_index_status", &params.to_string(), &cwd, m31a_core::SandboxPolicy::ReadOnly).await?;
+                let val: serde_json::Value = serde_json::from_str(&res)?;
+                Ok(val)
+            }
+
+            "repo/symbols/search" => {
+                let cwd = params.get("cwd")
+                    .and_then(|v| v.as_str())
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+                let res = self.tools.execute("symbol_search", &params.to_string(), &cwd, m31a_core::SandboxPolicy::ReadOnly).await?;
+                let val: serde_json::Value = serde_json::from_str(&res)?;
+                Ok(val)
+            }
+
+            "repo/symbols/references" => {
+                let cwd = params.get("cwd")
+                    .and_then(|v| v.as_str())
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+                let res = self.tools.execute("symbol_references", &params.to_string(), &cwd, m31a_core::SandboxPolicy::ReadOnly).await?;
+                let val: serde_json::Value = serde_json::from_str(&res)?;
+                Ok(val)
+            }
+
+            "repo/graph" => {
+                let cwd = params.get("cwd")
+                    .and_then(|v| v.as_str())
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+                let res = self.tools.execute("dependency_graph", &params.to_string(), &cwd, m31a_core::SandboxPolicy::ReadOnly).await?;
+                let val: serde_json::Value = serde_json::from_str(&res)?;
+                Ok(val)
+            }
+
+            "repo/impact" => {
+                let cwd = params.get("cwd")
+                    .and_then(|v| v.as_str())
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+                let res = self.tools.execute("analyze_change_impact", &params.to_string(), &cwd, m31a_core::SandboxPolicy::ReadOnly).await?;
+                let val: serde_json::Value = serde_json::from_str(&res)?;
+                Ok(val)
+            }
+
+            "repo/tests/related" => {
+                let cwd = params.get("cwd")
+                    .and_then(|v| v.as_str())
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+                let res = self.tools.execute("related_tests", &params.to_string(), &cwd, m31a_core::SandboxPolicy::ReadOnly).await?;
+                let val: serde_json::Value = serde_json::from_str(&res)?;
+                Ok(val)
+            }
+
+            "repo/architecture" => {
+                let cwd = params.get("cwd")
+                    .and_then(|v| v.as_str())
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+                let res = self.tools.execute("architecture_report", &params.to_string(), &cwd, m31a_core::SandboxPolicy::ReadOnly).await?;
+                let val: serde_json::Value = serde_json::from_str(&res)?;
+                Ok(val)
+            }
+
+            "repo/context" => {
+                let cwd = params.get("cwd")
+                    .and_then(|v| v.as_str())
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+                let res = self.tools.execute("retrieve_repository_context", &params.to_string(), &cwd, m31a_core::SandboxPolicy::ReadOnly).await?;
+                Ok(serde_json::json!({
+                    "markdown": res
+                }))
             }
 
             "thread/create" | "thread/start" => {
@@ -2204,6 +2296,17 @@ mod tests {
         };
         let res_models = server.handle_request(req_models.clone()).await;
         assert!(res_models.error.is_none());
+
+        // Repository intelligence RPC endpoints
+        let req_status = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Some(serde_json::json!(3)),
+            method: "repo/status".to_string(),
+            params: None,
+        };
+        let res_status = server.handle_request(req_status).await;
+        assert!(res_status.error.is_none());
+        assert!(res_status.result.unwrap().get("status").is_some());
 
         // Unknown methods fail closed
         let req_unknown = JsonRpcRequest {

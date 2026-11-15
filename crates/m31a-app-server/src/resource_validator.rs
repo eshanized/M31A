@@ -44,7 +44,9 @@ pub fn get_method_metadata(method: &str) -> Option<MethodMetadata> {
 
         // Diagnostics & read-only catalog introspection
         "server/diagnostics" | "models/list" | "model/list" | "skills/list"
-        | "instructions/list" | "tools/list" | "config/read" => Some(MethodMetadata {
+        | "instructions/list" | "tools/list" | "config/read"
+        | "repo/overview" | "repo/status" | "repo/symbols/search" | "repo/symbols/references"
+        | "repo/graph" | "repo/impact" | "repo/tests/related" | "repo/architecture" | "repo/context" => Some(MethodMetadata {
             requires_target_resource: false,
             mutates_workspace: false,
             external_side_effects: false,

@@ -3442,6 +3442,35 @@ impl App {
                     ));
                 }
             }
+            "/repo" => {
+                let options = m31a_ast::TraversalOptions::default();
+                let index = m31a_ast::AstCodebaseIndex::build_with_options(&self.cwd, options);
+                let inv = index.inventory();
+                let pkg_count = inv.map(|i| i.packages.len()).unwrap_or(0);
+                let text = format!(
+                    "── Repository Intelligence Engine ───────────────────────────\n\
+                     • Status:             {:?}\n\
+                     • Workspace Root:     {}\n\
+                     • Discovered Packages: {}\n\
+                     • Indexed Files:      {}\n\
+                     • Total Symbols:      {}\n\
+                     • Relationships:      {}\n\
+                     • Module Cycles:      {}\n\
+                     • Diagnostics:        {}\n\
+                     ──────────────────────────────────────────────────────────────",
+                    index.status(),
+                    index.root_path().display(),
+                    pkg_count,
+                    index.files_indexed(),
+                    index.total_symbols(),
+                    index.all_relationships().len(),
+                    index.module_graph().detect_cycles().len(),
+                    index.all_diagnostics().len()
+                );
+                self.transcript
+                    .push(TranscriptItem::notice(text, NoticeLevel::Info));
+                self.sync_virtualizer();
+            }
             "/timing" | "/critical-path" => {
                 let durations = self.last_turn_critical_path.clone().unwrap_or_default();
                 let intervals = self.direct_tool_timings.completed_work();

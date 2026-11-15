@@ -54,6 +54,8 @@ pub struct ToolRegistry {
     /// Verified host approval tokens for sensitive plugin installations.
     pub host_plugin_approvals:
         Arc<std::sync::Mutex<Vec<crate::plugin_install::HostPluginApproval>>>,
+    /// Cached authoritative repository intelligence index.
+    pub repo_index: Arc<tokio::sync::RwLock<Option<m31a_ast::AstCodebaseIndex>>>,
 }
 
 impl Default for ToolRegistry {
@@ -105,6 +107,7 @@ impl ToolRegistry {
             message_history: None,
             session_id: None,
             host_plugin_approvals: Arc::new(std::sync::Mutex::new(Vec::new())),
+            repo_index: Arc::new(tokio::sync::RwLock::new(None)),
         }
     }
 
@@ -117,6 +120,42 @@ impl ToolRegistry {
     /// Gets the current active agent runtime handle, if injected.
     pub fn get_agent_runtime(&self) -> Option<Arc<dyn crate::agent_runtime::AgentRuntime>> {
         self.agent_runtime.read().unwrap().clone()
+    }
+
+    /// Retrieves cached repository index or builds and persists a new one.
+    pub async fn get_or_build_repo_index(
+        &self,
+        cwd: &Path,
+        force_refresh: bool,
+    ) -> m31a_ast::AstCodebaseIndex {
+        if !force_refresh {
+            let read_guard = self.repo_index.read().await;
+            if let Some(ref idx) = *read_guard {
+                if idx.root_path() == cwd {
+                    return idx.clone();
+                }
+            }
+            drop(read_guard);
+
+            if let Some(ref storage) = self.storage {
+                if let Ok(Some(loaded)) = storage.load_repo_index(cwd) {
+                    let mut write_guard = self.repo_index.write().await;
+                    *write_guard = Some(loaded.clone());
+                    return loaded;
+                }
+            }
+        }
+
+        let options = m31a_ast::TraversalOptions::default();
+        let index = m31a_ast::AstCodebaseIndex::build_with_options(cwd, options);
+
+        if let Some(ref storage) = self.storage {
+            let _ = storage.save_repo_index(&index);
+        }
+
+        let mut write_guard = self.repo_index.write().await;
+        *write_guard = Some(index.clone());
+        index
     }
 
     pub fn with_vault(mut self, vault: Arc<m31a_core::LocalEncryptedVault>) -> Self {
@@ -182,6 +221,7 @@ impl ToolRegistry {
             message_history: None,
             session_id: None,
             host_plugin_approvals: Arc::new(std::sync::Mutex::new(Vec::new())),
+            repo_index: Arc::new(tokio::sync::RwLock::new(None)),
         }
     }
 
@@ -1155,6 +1195,148 @@ impl ToolRegistry {
                             "max_results": { "type": "integer", "description": "Maximum number of references to return (default 50)." }
                         },
                         "required": ["symbol"]
+                    }),
+                },
+            },
+            ToolDefinition {
+                tool_type: "function".to_string(),
+                function: FunctionDefinition {
+                    name: "repository_overview".to_string(),
+                    description: "Returns repository identity, detected language distribution, package and workspace summary, source file counts, symbol counts, and index health/freshness.".to_string(),
+                    parameters: json!({
+                        "type": "object",
+                        "properties": {
+                            "refresh": { "type": "boolean", "description": "Force a fresh scan rather than using cached persistent index." }
+                        }
+                    }),
+                },
+            },
+            ToolDefinition {
+                tool_type: "function".to_string(),
+                function: FunctionDefinition {
+                    name: "symbol_search".to_string(),
+                    description: "Finds symbols by name, qualified name, kind (function, struct, class, trait, interface, enum, method), language, or file path using the canonical AST index.".to_string(),
+                    parameters: json!({
+                        "type": "object",
+                        "properties": {
+                            "query": { "type": "string", "description": "Symbol name or substring to search for." },
+                            "kind": { "type": "string", "description": "Optional symbol kind filter (function, method, struct, class, enum, trait, interface, type)." },
+                            "limit": { "type": "integer", "description": "Maximum number of symbols to return (default 30)." }
+                        },
+                        "required": ["query"]
+                    }),
+                },
+            },
+            ToolDefinition {
+                tool_type: "function".to_string(),
+                function: FunctionDefinition {
+                    name: "symbol_references".to_string(),
+                    description: "Returns resolved callers and references for a symbol with explicit confidence (exact, ast_derived, heuristic) and provenance.".to_string(),
+                    parameters: json!({
+                        "type": "object",
+                        "properties": {
+                            "symbol": { "type": "string", "description": "Exact name of the symbol to trace callers for." },
+                            "max_results": { "type": "integer", "description": "Maximum number of references to return (default 50)." }
+                        },
+                        "required": ["symbol"]
+                    }),
+                },
+            },
+            ToolDefinition {
+                tool_type: "function".to_string(),
+                function: FunctionDefinition {
+                    name: "dependency_graph".to_string(),
+                    description: "Returns direct and transitive package, module, or symbol dependencies with cycle detection and depth control.".to_string(),
+                    parameters: json!({
+                        "type": "object",
+                        "properties": {
+                            "tier": { "type": "string", "enum": ["package", "module", "symbol"], "description": "Graph tier: package (crates/npm/py), module (file imports), or symbol." },
+                            "target": { "type": "string", "description": "Target package name, module path, or symbol name." },
+                            "max_depth": { "type": "integer", "description": "Maximum transitive traversal depth (default 5)." }
+                        }
+                    }),
+                },
+            },
+            ToolDefinition {
+                tool_type: "function".to_string(),
+                function: FunctionDefinition {
+                    name: "call_graph".to_string(),
+                    description: "Returns a cycle-safe hierarchical call tree showing entry points, callers, and callees for a symbol.".to_string(),
+                    parameters: json!({
+                        "type": "object",
+                        "properties": {
+                            "symbol": { "type": "string", "description": "Root symbol name for call graph construction." },
+                            "max_depth": { "type": "integer", "description": "Maximum call depth (default 4)." }
+                        },
+                        "required": ["symbol"]
+                    }),
+                },
+            },
+            ToolDefinition {
+                tool_type: "function".to_string(),
+                function: FunctionDefinition {
+                    name: "analyze_change_impact".to_string(),
+                    description: "Produces an explainable semantic blast-radius and regression-risk report for proposed file or symbol edits.".to_string(),
+                    parameters: json!({
+                        "type": "object",
+                        "properties": {
+                            "files": { "type": "array", "items": { "type": "string" }, "description": "List of files to modify or inspect." },
+                            "symbols": { "type": "array", "items": { "type": "string" }, "description": "Specific symbol names being edited (optional)." }
+                        },
+                        "required": ["files"]
+                    }),
+                },
+            },
+            ToolDefinition {
+                tool_type: "function".to_string(),
+                function: FunctionDefinition {
+                    name: "related_tests".to_string(),
+                    description: "Discovers unit and integration tests exercising a target symbol or file with selection confidence and rationale.".to_string(),
+                    parameters: json!({
+                        "type": "object",
+                        "properties": {
+                            "symbol": { "type": "string", "description": "Target symbol to find tests for." },
+                            "file": { "type": "string", "description": "Target source file path relative to workspace." }
+                        }
+                    }),
+                },
+            },
+            ToolDefinition {
+                tool_type: "function".to_string(),
+                function: FunctionDefinition {
+                    name: "architecture_report".to_string(),
+                    description: "Evaluates repository modularity, computing Martin's coupling and instability metrics, detecting circular dependencies, and flagging architectural anti-patterns.".to_string(),
+                    parameters: json!({
+                        "type": "object",
+                        "properties": {}
+                    }),
+                },
+            },
+            ToolDefinition {
+                tool_type: "function".to_string(),
+                function: FunctionDefinition {
+                    name: "retrieve_repository_context".to_string(),
+                    description: "Creates a ranked, token-budgeted repository context packet for a task, error message, symbol, or stack trace.".to_string(),
+                    parameters: json!({
+                        "type": "object",
+                        "properties": {
+                            "task": { "type": "string", "description": "Natural language engineering task description." },
+                            "error": { "type": "string", "description": "Error message, failure log, or stack trace." },
+                            "symbol": { "type": "string", "description": "Primary symbol of interest." },
+                            "file": { "type": "string", "description": "Target source file of interest." },
+                            "token_budget": { "type": "integer", "description": "Maximum token budget for context packet (default 3000)." }
+                        }
+                    }),
+                },
+            },
+            ToolDefinition {
+                tool_type: "function".to_string(),
+                function: FunctionDefinition {
+                    name: "repository_index_status".to_string(),
+                    description: "Returns repository indexing completion status (Complete, Partial, Interrupted, Failed), freshness, file counts, and parser diagnostics.".to_string(),
+                    parameters: json!({
+                        "type": "object",
+                        "properties": {}
                     }),
                 },
             },
@@ -3937,6 +4119,255 @@ impl ToolRegistry {
                     }
                     Ok(out)
                 }
+            }
+            "repository_overview" => {
+                let refresh = args.get("refresh").and_then(|v| v.as_bool()).unwrap_or(false);
+                let index = self.get_or_build_repo_index(cwd, refresh).await;
+                let inv = index.inventory();
+                let packages: Vec<serde_json::Value> = inv.map(|i| {
+                    i.packages.iter().map(|p| json!({
+                        "name": p.name,
+                        "version": p.version,
+                        "manifest_path": p.manifest_path.strip_prefix(cwd).unwrap_or(&p.manifest_path).to_string_lossy(),
+                        "language": p.language.as_str(),
+                    })).collect()
+                }).unwrap_or_default();
+
+                let mut lang_dist: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+                for sym in index.all_symbols() {
+                    *lang_dist.entry(sym.language.as_str().to_string()).or_insert(0) += 1;
+                }
+
+                let resp = json!({
+                    "root_path": index.root_path().to_string_lossy(),
+                    "status": index.status(),
+                    "files_indexed": index.files_indexed(),
+                    "total_symbols": index.total_symbols(),
+                    "total_relationships": index.all_relationships().len(),
+                    "packages": packages,
+                    "languages": lang_dist,
+                    "diagnostics_count": index.all_diagnostics().len(),
+                });
+                Ok(serde_json::to_string_pretty(&resp)?)
+            }
+            "symbol_search" => {
+                let query = args.get("query").and_then(|v| v.as_str()).context("Missing 'query'")?;
+                let kind_filter = args.get("kind").and_then(|v| v.as_str());
+                let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(30) as usize;
+
+                let index = self.get_or_build_repo_index(cwd, false).await;
+                let query_lower = query.to_lowercase();
+                let matches: Vec<serde_json::Value> = index.all_symbols()
+                    .into_iter()
+                    .filter(|s| {
+                        let name_matches = s.name.to_lowercase().contains(&query_lower)
+                            || s.qualified_name.to_lowercase().contains(&query_lower);
+                        let kind_matches = kind_filter.map_or(true, |k| s.kind.as_str().eq_ignore_ascii_case(k));
+                        name_matches && kind_matches
+                    })
+                    .take(limit)
+                    .map(|s| json!({
+                        "name": s.name,
+                        "qualified_name": s.qualified_name,
+                        "kind": s.kind.as_str(),
+                        "file_path": s.file_path.strip_prefix(cwd).unwrap_or(&s.file_path).to_string_lossy(),
+                        "line_range": [s.range.start_line, s.range.end_line],
+                        "language": s.language.as_str(),
+                        "signature": s.signature,
+                        "visibility": format!("{:?}", s.visibility),
+                    }))
+                    .collect();
+
+                Ok(serde_json::to_string_pretty(&json!({
+                    "query": query,
+                    "total_found": matches.len(),
+                    "symbols": matches
+                }))?)
+            }
+            "symbol_references" => {
+                let symbol = args.get("symbol").and_then(|v| v.as_str()).context("Missing 'symbol'")?;
+                let max_results = args.get("max_results").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
+                let index = self.get_or_build_repo_index(cwd, false).await;
+
+                let callers = index.symbol_graph().find_callers(symbol);
+                let mut refs_out: Vec<serde_json::Value> = callers.into_iter().take(max_results).map(|c| {
+                    json!({
+                        "caller_symbol": c.caller_name,
+                        "file_path": c.file_path.strip_prefix(cwd).unwrap_or(&c.file_path).to_string_lossy(),
+                        "line": c.line,
+                        "confidence": "ast_derived",
+                    })
+                }).collect();
+
+                if refs_out.is_empty() {
+                    let token_refs = index.find_references_to(symbol);
+                    for r in token_refs.into_iter().take(max_results) {
+                        refs_out.push(json!({
+                            "caller_symbol": r.caller_name,
+                            "file_path": r.file_path.strip_prefix(cwd).unwrap_or(&r.file_path).to_string_lossy(),
+                            "line": r.line,
+                            "confidence": "heuristic",
+                        }));
+                    }
+                }
+
+                Ok(serde_json::to_string_pretty(&json!({
+                    "symbol": symbol,
+                    "reference_count": refs_out.len(),
+                    "references": refs_out
+                }))?)
+            }
+            "dependency_graph" => {
+                let tier = args.get("tier").and_then(|v| v.as_str()).unwrap_or("package");
+                let target = args.get("target").and_then(|v| v.as_str());
+                let index = self.get_or_build_repo_index(cwd, false).await;
+
+                let result = match tier {
+                    "module" => {
+                        let cycles = index.module_graph().detect_cycles();
+                        let modules: Vec<serde_json::Value> = index.module_graph().modules.values().take(100).map(|m| {
+                            json!({
+                                "file": m.relative_path.to_string_lossy(),
+                                "afferent_ca": m.afferent_coupling_ca,
+                                "efferent_ce": m.efferent_coupling_ce,
+                                "instability_i": m.instability_i,
+                                "imports_count": m.imported_modules.len(),
+                            })
+                        }).collect();
+                        json!({
+                            "tier": "module",
+                            "total_modules": index.module_graph().modules.len(),
+                            "cycles_detected": cycles.len(),
+                            "cycles": cycles,
+                            "modules": modules
+                        })
+                    },
+                    "symbol" => {
+                        let target_sym = target.unwrap_or("");
+                        let callers = if !target_sym.is_empty() {
+                            index.symbol_graph().find_callers(target_sym)
+                        } else {
+                            Vec::new()
+                        };
+                        let callees = if !target_sym.is_empty() {
+                            index.symbol_graph().find_callees(target_sym)
+                        } else {
+                            Vec::new()
+                        };
+                        json!({
+                            "tier": "symbol",
+                            "target": target_sym,
+                            "callers_count": callers.len(),
+                            "callees_count": callees.len(),
+                            "callers": callers,
+                            "callees": callees,
+                        })
+                    },
+                    _ => {
+                        let cycles = index.package_graph().detect_cycles();
+                        json!({
+                            "tier": "package",
+                            "packages": index.package_graph().packages,
+                            "cycles": cycles
+                        })
+                    }
+                };
+                Ok(serde_json::to_string_pretty(&result)?)
+            }
+            "call_graph" => {
+                let symbol = args.get("symbol").and_then(|v| v.as_str()).context("Missing 'symbol'")?;
+                let max_depth = args.get("max_depth").and_then(|v| v.as_u64()).unwrap_or(4) as usize;
+                let index = self.get_or_build_repo_index(cwd, false).await;
+                let call_tree = index.build_call_graph(symbol, max_depth);
+                Ok(serde_json::to_string_pretty(&call_tree)?)
+            }
+            "analyze_change_impact" => {
+                let files_val = args.get("files").and_then(|v| v.as_array()).context("Missing 'files'")?;
+                let files_vec: Vec<std::path::PathBuf> = files_val
+                    .iter()
+                    .filter_map(|v| v.as_str())
+                    .map(|s| resolve_path(cwd, s))
+                    .collect();
+                let candidate_syms: Vec<String> = args
+                    .get("symbols")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| arr.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+                    .unwrap_or_default();
+                let index = self.get_or_build_repo_index(cwd, false).await;
+                let impact = m31a_ast::SemanticImpactAnalyzer::analyze_impact(&index, &files_vec, &candidate_syms);
+                Ok(serde_json::to_string_pretty(&impact)?)
+            }
+            "related_tests" => {
+                let symbol = args.get("symbol").and_then(|v| v.as_str());
+                let file_opt = args.get("file").and_then(|v| v.as_str());
+                let index = self.get_or_build_repo_index(cwd, false).await;
+
+                let target_file = file_opt.map(|f| resolve_path(cwd, f)).unwrap_or_else(|| cwd.to_path_buf());
+                let target_sym = symbol.unwrap_or("");
+                let tests = index.find_related_tests(target_sym, &target_file);
+                Ok(serde_json::to_string_pretty(&tests)?)
+            }
+            "architecture_report" => {
+                let index = self.get_or_build_repo_index(cwd, false).await;
+                let cycles = index.module_graph().detect_cycles();
+                let pkg_cycles = index.package_graph().detect_cycles();
+                let mut high_instability = Vec::new();
+                let mut highly_coupled = Vec::new();
+
+                for m in index.module_graph().modules.values() {
+                    if m.instability_i > 0.8 && m.efferent_coupling_ce > 5 {
+                        high_instability.push(m.relative_path.to_string_lossy().to_string());
+                    }
+                    if m.afferent_coupling_ca > 10 {
+                        highly_coupled.push(m.relative_path.to_string_lossy().to_string());
+                    }
+                }
+
+                let report = json!({
+                    "total_packages": index.package_graph().packages.len(),
+                    "total_modules": index.module_graph().modules.len(),
+                    "module_cycles_count": cycles.len(),
+                    "module_cycles": cycles,
+                    "package_cycles": pkg_cycles,
+                    "high_instability_modules": high_instability,
+                    "high_afferent_coupling_modules": highly_coupled,
+                    "diagnostics": index.all_diagnostics(),
+                });
+                Ok(serde_json::to_string_pretty(&report)?)
+            }
+            "retrieve_repository_context" => {
+                let task = args.get("task").and_then(|v| v.as_str());
+                let error = args.get("error").and_then(|v| v.as_str());
+                let symbol = args.get("symbol").and_then(|v| v.as_str());
+                let file = args.get("file").and_then(|v| v.as_str());
+                let token_budget = args.get("token_budget").and_then(|v| v.as_u64()).unwrap_or(3000) as usize;
+
+                let index = self.get_or_build_repo_index(cwd, false).await;
+                let query = m31a_ast::RetrievalQuery {
+                    task_description: task.map(str::to_string),
+                    error_message: error.map(str::to_string),
+                    symbol_name: symbol.map(str::to_string),
+                    file_path: file.map(std::path::PathBuf::from),
+                    token_budget: Some(token_budget),
+                    ..Default::default()
+                };
+
+                let packet = index.retrieve_context(&query);
+                Ok(packet.render_markdown())
+            }
+            "repository_index_status" => {
+                let index = self.get_or_build_repo_index(cwd, false).await;
+                let resp = json!({
+                    "status": index.status(),
+                    "root_path": index.root_path().to_string_lossy(),
+                    "files_indexed": index.files_indexed(),
+                    "total_symbols": index.total_symbols(),
+                    "total_relationships": index.all_relationships().len(),
+                    "test_files_count": index.file_hashes().len(),
+                    "diagnostics_count": index.all_diagnostics().len(),
+                    "diagnostics": index.all_diagnostics(),
+                });
+                Ok(serde_json::to_string_pretty(&resp)?)
             }
             "diagnose_compiler_errors" => {
                 let output = args
@@ -7590,5 +8021,125 @@ error[E0308]: mismatched types
             .await
             .unwrap();
         assert!(read_res.contains("Security Verified"));
+    }
+
+    #[tokio::test]
+    async fn test_repository_intelligence_tools_suite() {
+        let temp = tempfile::tempdir().unwrap();
+        let ws = temp.path();
+
+        let cargo_toml = r#"[package]
+name = "sample-repo"
+version = "0.1.0"
+edition = "2024"
+"#;
+        std::fs::write(ws.join("Cargo.toml"), cargo_toml).unwrap();
+
+        std::fs::create_dir_all(ws.join("src")).unwrap();
+        let src_code = r#"pub fn add_numbers(a: i32, b: i32) -> i32 {
+    a + b
+}
+
+pub fn compute_sum() -> i32 {
+    add_numbers(10, 20)
+}
+"#;
+        std::fs::write(ws.join("src/lib.rs"), src_code).unwrap();
+
+        std::fs::create_dir_all(ws.join("tests")).unwrap();
+        let test_code = r#"use sample_repo::add_numbers;
+
+#[test]
+fn test_addition() {
+    let res = add_numbers(2, 3);
+    assert_eq!(res, 5);
+}
+"#;
+        std::fs::write(ws.join("tests/test_add.rs"), test_code).unwrap();
+
+        let registry = ToolRegistry::new();
+
+        // 1. Overview
+        let overview = registry
+            .execute("repository_overview", "{}", ws, SandboxPolicy::ReadOnly)
+            .await
+            .unwrap();
+        assert!(overview.contains("sample-repo"));
+        assert!(overview.contains("total_symbols"));
+
+        // 2. Index Status
+        let status = registry
+            .execute("repository_index_status", "{}", ws, SandboxPolicy::ReadOnly)
+            .await
+            .unwrap();
+        assert!(status.contains("files_indexed"));
+
+        // 3. Symbol Search
+        let search_args = r#"{"query": "add_numbers"}"#;
+        let search_res = registry
+            .execute("symbol_search", search_args, ws, SandboxPolicy::ReadOnly)
+            .await
+            .unwrap();
+        assert!(search_res.contains("add_numbers"));
+
+        // 4. Symbol References
+        let ref_args = r#"{"symbol": "add_numbers"}"#;
+        let ref_res = registry
+            .execute("symbol_references", ref_args, ws, SandboxPolicy::ReadOnly)
+            .await
+            .unwrap();
+        assert!(ref_res.contains("reference_count"));
+
+        // 5. Call Graph
+        let cg_args = r#"{"symbol": "compute_sum"}"#;
+        let cg_res = registry
+            .execute("call_graph", cg_args, ws, SandboxPolicy::ReadOnly)
+            .await
+            .unwrap();
+        assert!(cg_res.contains("compute_sum"));
+
+        // 6. Dependency Graph
+        let dep_pkg = registry
+            .execute("dependency_graph", r#"{"tier": "package"}"#, ws, SandboxPolicy::ReadOnly)
+            .await
+            .unwrap();
+        assert!(dep_pkg.contains("sample-repo"));
+
+        let dep_mod = registry
+            .execute("dependency_graph", r#"{"tier": "module"}"#, ws, SandboxPolicy::ReadOnly)
+            .await
+            .unwrap();
+        assert!(dep_mod.contains("total_modules"));
+
+        // 7. Change Impact
+        let impact_args = r#"{"files": ["src/lib.rs"], "symbols": ["add_numbers"]}"#;
+        let impact_res = registry
+            .execute("analyze_change_impact", impact_args, ws, SandboxPolicy::ReadOnly)
+            .await
+            .unwrap();
+        assert!(impact_res.contains("target_files") && impact_res.contains("blast_radius_score"));
+
+        // 8. Related Tests
+        let tests_args = r#"{"symbol": "add_numbers", "file": "src/lib.rs"}"#;
+        let tests_res = registry
+            .execute("related_tests", tests_args, ws, SandboxPolicy::ReadOnly)
+            .await
+            .unwrap();
+        assert!(tests_res.contains("confidence_score") || tests_res.contains("test_file"));
+
+        // 9. Architecture Report
+        let arch_res = registry
+            .execute("architecture_report", "{}", ws, SandboxPolicy::ReadOnly)
+            .await
+            .unwrap();
+        assert!(arch_res.contains("total_packages"));
+
+        // 10. Context Retrieval
+        let ctx_args = r#"{"task": "Optimize add_numbers implementation"}"#;
+        let ctx_res = registry
+            .execute("retrieve_repository_context", ctx_args, ws, SandboxPolicy::ReadOnly)
+            .await
+            .unwrap();
+        assert!(ctx_res.contains("Repository Intelligence Context Packet") || ctx_res.contains("Task Context"));
     }
 }

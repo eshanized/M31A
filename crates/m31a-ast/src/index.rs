@@ -1,10 +1,18 @@
-//! Codebase-wide AST symbol index and cross-reference search engine.
+//! Codebase-wide AST symbol index, multi-language relationship engine, and cross-reference search.
 
 use crate::chunker::AstChunker;
+use crate::graph::{ModuleGraph, PackageGraph, SymbolGraph};
+use crate::language::LanguageAdapterRegistry;
 use crate::parser::AstParser;
-use crate::types::{AstSymbol, CallReference, SemanticChunk};
+use crate::retrieval::{ContextPacket, RetrievalQuery, SemanticRetriever};
+use crate::test_discovery::{RelatedTestTarget, TestDiscoveryEngine};
+use crate::types::{
+    AstSymbol, CallReference, IndexStatus, ParserDiagnostic, SemanticChunk, SymbolRelationship,
+};
+use crate::workspace::{TraversalOptions, WorkspaceDiscovery, WorkspaceInventory};
 use anyhow::Result;
-use std::collections::HashMap;
+use sha2::{Digest, Sha256};
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -17,10 +25,21 @@ pub struct CallGraphNode {
     pub callees: Vec<CallGraphNode>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct AstCodebaseIndex {
+    root_path: PathBuf,
     symbols_by_name: HashMap<String, Vec<AstSymbol>>,
     symbols_by_file: HashMap<PathBuf, Vec<AstSymbol>>,
+    symbols_by_id: HashMap<String, AstSymbol>,
+    relationships: Vec<SymbolRelationship>,
+    file_hashes: HashMap<PathBuf, String>,
+    test_files: Vec<PathBuf>,
+    symbol_graph: SymbolGraph,
+    package_graph: PackageGraph,
+    module_graph: ModuleGraph,
+    inventory: Option<WorkspaceInventory>,
+    diagnostics: Vec<ParserDiagnostic>,
+    status: IndexStatus,
     files_indexed: usize,
 }
 
@@ -29,55 +48,83 @@ impl AstCodebaseIndex {
         Self::default()
     }
 
-    /// Recursively scans workspace and builds an in-memory AST symbol index.
+    /// Recursively scans workspace and builds an authoritative in-memory AST and relationship index.
     pub fn build(root: &Path, max_files: usize) -> Self {
+        let options = TraversalOptions {
+            max_files,
+            ..Default::default()
+        };
+        Self::build_with_options(root, options)
+    }
+
+    /// Recursively scans workspace with custom traversal options and builds the complete index.
+    pub fn build_with_options(root: &Path, options: TraversalOptions) -> Self {
         let mut index = Self::new();
-        let mut files_visited = 0;
-        let mut dirs = vec![root.to_path_buf()];
+        index.root_path = root.to_path_buf();
 
-        while let Some(dir) = dirs.pop() {
-            if let Ok(entries) = fs::read_dir(&dir) {
-                for entry in entries.filter_map(|e| e.ok()) {
-                    let path = entry.path();
-                    let file_name = entry.file_name();
-                    let name_str = file_name.to_string_lossy();
+        let inventory = WorkspaceDiscovery::discover_workspace(root);
+        index.package_graph = PackageGraph::build(&inventory);
 
-                    if name_str.starts_with('.')
-                        || matches!(
-                            name_str.as_ref(),
-                            "target" | "node_modules" | "dist" | "__pycache__" | ".git" | "vendor"
-                        )
-                    {
-                        continue;
-                    }
+        let scan_report = WorkspaceDiscovery::scan_files(root, &options);
+        index.status = scan_report.status;
+        index.inventory = Some(inventory);
 
-                    if path.is_dir() {
-                        dirs.push(path);
-                    } else if path.is_file()
-                        && is_supported(&path)
-                        && let Ok(content) = fs::read_to_string(&path)
-                    {
-                        let syms = AstParser::parse_file(&path, &content);
-                        for s in &syms {
-                            index
-                                .symbols_by_name
-                                .entry(s.name.clone())
-                                .or_default()
-                                .push(s.clone());
-                        }
-                        index.symbols_by_file.insert(path.clone(), syms);
+        let registry = LanguageAdapterRegistry::new();
 
-                        files_visited += 1;
-                        if files_visited >= max_files {
-                            index.files_indexed = files_visited;
-                            return index;
-                        }
-                    }
+        for file in &scan_report.files {
+            if file.is_test {
+                index.test_files.push(file.path.clone());
+            }
+
+            if let Ok(content) = fs::read_to_string(&file.path) {
+                let hash = compute_hash(&content);
+                index.file_hashes.insert(file.path.clone(), hash);
+
+                let parse_result = registry.parse_file(&file.path, &content);
+                index.diagnostics.extend(parse_result.diagnostics);
+
+                // If specialized adapter returned symbols, use those; otherwise fall back to AstParser
+                let syms = if !parse_result.symbols.is_empty() {
+                    parse_result.symbols
+                } else {
+                    AstParser::parse_file(&file.path, &content)
+                };
+
+                for s in &syms {
+                    index
+                        .symbols_by_name
+                        .entry(s.name.clone())
+                        .or_default()
+                        .push(s.clone());
+                    index.symbols_by_id.insert(s.id.clone(), s.clone());
+                    index.symbol_graph.insert_symbol(s.clone());
                 }
+
+                for rel in parse_result.relationships {
+                    index.symbol_graph.add_relationship(rel.clone());
+                    index.relationships.push(rel);
+                }
+
+                // Add to module graph
+                let imported_paths: std::collections::HashSet<PathBuf> = parse_result
+                    .imports
+                    .iter()
+                    .map(|imp| PathBuf::from(&imp.from_module))
+                    .collect();
+                let rel_path = file.path.strip_prefix(root).unwrap_or(&file.path).to_path_buf();
+                index.module_graph.insert_module(
+                    file.path.clone(),
+                    rel_path,
+                    file.package_id.clone(),
+                    imported_paths,
+                );
+
+                index.symbols_by_file.insert(file.path.clone(), syms);
+                index.files_indexed += 1;
             }
         }
 
-        index.files_indexed = files_visited;
+        index.module_graph.recompute_coupling_metrics();
         index
     }
 
@@ -87,6 +134,42 @@ impl AstCodebaseIndex {
 
     pub fn total_symbols(&self) -> usize {
         self.symbols_by_name.values().map(|v| v.len()).sum()
+    }
+
+    pub fn root_path(&self) -> &Path {
+        &self.root_path
+    }
+
+    pub fn status(&self) -> IndexStatus {
+        self.status
+    }
+
+    pub fn symbol_graph(&self) -> &SymbolGraph {
+        &self.symbol_graph
+    }
+
+    pub fn package_graph(&self) -> &PackageGraph {
+        &self.package_graph
+    }
+
+    pub fn module_graph(&self) -> &ModuleGraph {
+        &self.module_graph
+    }
+
+    pub fn inventory(&self) -> Option<&WorkspaceInventory> {
+        self.inventory.as_ref()
+    }
+
+    pub fn all_relationships(&self) -> &[SymbolRelationship] {
+        &self.relationships
+    }
+
+    pub fn all_diagnostics(&self) -> &[ParserDiagnostic] {
+        &self.diagnostics
+    }
+
+    pub fn file_hashes(&self) -> &HashMap<PathBuf, String> {
+        &self.file_hashes
     }
 
     /// Returns a flat list of all indexed symbols.
@@ -108,13 +191,17 @@ impl AstCodebaseIndex {
         self.symbols_by_name
             .entry(symbol.name.clone())
             .or_default()
-            .push(symbol);
+            .push(symbol.clone());
+        self.symbols_by_id.insert(symbol.id.clone(), symbol.clone());
+        self.symbol_graph.insert_symbol(symbol);
     }
 
-    /// Removes a file from the index and cleans up all associated symbol mappings.
+    /// Removes a file from the index and cleans up all associated symbol mappings and graph nodes.
     pub fn remove_file(&mut self, path: &Path) -> bool {
+        self.file_hashes.remove(path);
         if let Some(removed_syms) = self.symbols_by_file.remove(path) {
             for sym in removed_syms {
+                self.symbols_by_id.remove(&sym.id);
                 if let Some(list) = self.symbols_by_name.get_mut(&sym.name) {
                     list.retain(|s| s.file_path != path);
                     if list.is_empty() {
@@ -122,6 +209,7 @@ impl AstCodebaseIndex {
                     }
                 }
             }
+            self.relationships.retain(|r| r.file_path != path);
             self.files_indexed = self.files_indexed.saturating_sub(1);
             true
         } else {
@@ -129,20 +217,81 @@ impl AstCodebaseIndex {
         }
     }
 
-    /// Incrementally updates or adds a file's symbols in the index without full re-indexing.
+    /// Incrementally updates or adds a file's symbols and relationships in the index with content hashing.
     pub fn update_file(&mut self, path: &Path, content: &str) {
+        let hash = compute_hash(content);
+        if let Some(existing_hash) = self.file_hashes.get(path) {
+            if existing_hash == &hash {
+                return; // Content unchanged, avoid unnecessary re-indexing
+            }
+        }
+
         self.remove_file(path);
         if is_supported(path) {
-            let syms = AstParser::parse_file(path, content);
+            self.file_hashes.insert(path.to_path_buf(), hash);
+            let registry = LanguageAdapterRegistry::new();
+            let parse_result = registry.parse_file(path, content);
+            self.diagnostics.extend(parse_result.diagnostics);
+
+            let syms = if !parse_result.symbols.is_empty() {
+                parse_result.symbols
+            } else {
+                AstParser::parse_file(path, content)
+            };
+
             for s in &syms {
                 self.symbols_by_name
                     .entry(s.name.clone())
                     .or_default()
                     .push(s.clone());
+                self.symbols_by_id.insert(s.id.clone(), s.clone());
+                self.symbol_graph.insert_symbol(s.clone());
             }
+
+            for rel in parse_result.relationships {
+                self.symbol_graph.add_relationship(rel.clone());
+                self.relationships.push(rel);
+            }
+
             self.symbols_by_file.insert(path.to_path_buf(), syms);
             self.files_indexed += 1;
         }
+    }
+
+    /// Reconciles the workspace index against filesystem state (incremental update for modified/deleted/new files).
+    pub fn reconcile_workspace(&mut self) -> usize {
+        if self.root_path.as_os_str().is_empty() {
+            return 0;
+        }
+
+        let options = TraversalOptions::default();
+        let scan_report = WorkspaceDiscovery::scan_files(&self.root_path, &options);
+        let mut changed_count = 0;
+
+        let on_disk_paths: HashSet<PathBuf> = scan_report.files.iter().map(|f| f.path.clone()).collect();
+        let indexed_paths: Vec<PathBuf> = self.symbols_by_file.keys().cloned().collect();
+
+        // 1. Remove deleted files
+        for p in indexed_paths {
+            if !on_disk_paths.contains(&p) {
+                self.remove_file(&p);
+                changed_count += 1;
+            }
+        }
+
+        // 2. Add or update modified files
+        for file in scan_report.files {
+            if let Ok(content) = fs::read_to_string(&file.path) {
+                let hash = compute_hash(&content);
+                let needs_update = self.file_hashes.get(&file.path) != Some(&hash);
+                if needs_update {
+                    self.update_file(&file.path, &content);
+                    changed_count += 1;
+                }
+            }
+        }
+
+        changed_count
     }
 
     /// Returns all symbols defined in a file.
@@ -156,7 +305,13 @@ impl AstCodebaseIndex {
     }
 
     /// Finds all references / callers across files in the index.
+    /// Prefers high-fidelity AST-derived callers from SymbolGraph, falling back to token-bounded scan.
     pub fn find_references_to(&self, symbol_name: &str) -> Vec<CallReference> {
+        let ast_callers = self.symbol_graph.find_callers(symbol_name);
+        if !ast_callers.is_empty() {
+            return ast_callers;
+        }
+
         let mut refs = Vec::new();
         for (path, syms) in &self.symbols_by_file {
             if let Ok(content) = fs::read_to_string(path) {
@@ -200,7 +355,13 @@ impl AstCodebaseIndex {
             return Ok(syms.clone());
         }
         let content = fs::read_to_string(path)?;
-        Ok(AstParser::parse_file(path, &content))
+        let registry = LanguageAdapterRegistry::new();
+        let res = registry.parse_file(path, &content);
+        if !res.symbols.is_empty() {
+            Ok(res.symbols)
+        } else {
+            Ok(AstParser::parse_file(path, &content))
+        }
     }
 
     /// Extracts the exact body of a symbol by name from a file.
@@ -229,6 +390,11 @@ impl AstCodebaseIndex {
 
     /// Finds all symbols called directly from inside the body of `caller_name`.
     pub fn find_callees(&self, caller_name: &str) -> Vec<CallReference> {
+        let graph_callees = self.symbol_graph.find_callees(caller_name);
+        if !graph_callees.is_empty() {
+            return graph_callees;
+        }
+
         let mut callees = Vec::new();
         let caller_defs = self.find_definition(caller_name);
 
@@ -262,7 +428,7 @@ impl AstCodebaseIndex {
 
     /// Recursively builds a call graph tree starting at `entry_symbol` up to `max_depth`.
     pub fn build_call_graph(&self, entry_symbol: &str, max_depth: usize) -> CallGraphNode {
-        let mut visited = std::collections::HashSet::new();
+        let mut visited = HashSet::new();
         self.build_call_graph_internal(entry_symbol, 0, max_depth, &mut visited)
     }
 
@@ -271,7 +437,7 @@ impl AstCodebaseIndex {
         symbol: &str,
         current_depth: usize,
         max_depth: usize,
-        visited: &mut std::collections::HashSet<String>,
+        visited: &mut HashSet<String>,
     ) -> CallGraphNode {
         let def = self.find_definition(symbol).into_iter().next();
         let (file_path, line) = def
@@ -312,6 +478,11 @@ impl AstCodebaseIndex {
 
     /// Finds all symbols implemented under a specific parent scope (e.g. struct or trait name).
     pub fn find_interface_implementations(&self, target_scope: &str) -> Vec<AstSymbol> {
+        let from_graph = self.symbol_graph.find_implementations(target_scope);
+        if !from_graph.is_empty() {
+            return from_graph;
+        }
+
         let mut results = Vec::new();
         for syms in self.symbols_by_file.values() {
             for s in syms {
@@ -325,69 +496,56 @@ impl AstCodebaseIndex {
         results
     }
 
+    /// Retrieves task-aware repository context for engineering agents within a token budget.
+    pub fn retrieve_context(&self, query: &RetrievalQuery) -> ContextPacket {
+        let all_syms: Vec<AstSymbol> = self.symbols_by_id.values().cloned().collect();
+        let inv = self.inventory.clone().unwrap_or_else(|| {
+            WorkspaceInventory {
+                root_path: self.root_path.clone(),
+                repo_name: "workspace".to_string(),
+                git_branch: None,
+                git_head_sha: None,
+                detected_languages: vec![],
+                manifests: vec![],
+                packages: vec![],
+                is_monorepo: false,
+            }
+        });
+
+        SemanticRetriever::retrieve_context(
+            query,
+            &all_syms,
+            &self.relationships,
+            &self.symbol_graph,
+            &inv,
+            &self.test_files,
+        )
+    }
+
+    /// Finds all tests related to a symbol or file.
+    pub fn find_related_tests(&self, target_symbol: &str, target_file: &Path) -> Vec<RelatedTestTarget> {
+        let all_syms: Vec<AstSymbol> = self.symbols_by_id.values().cloned().collect();
+        TestDiscoveryEngine::find_related_tests(
+            target_symbol,
+            target_file,
+            &all_syms,
+            &self.relationships,
+            &self.test_files,
+        )
+    }
+
     /// Finds potential callers/references to a symbol across the workspace.
     pub fn find_callers(root: &Path, symbol_name: &str, max_results: usize) -> Vec<CallReference> {
-        let mut results = Vec::new();
-        let mut dirs = vec![root.to_path_buf()];
-
-        while let Some(dir) = dirs.pop() {
-            if let Ok(entries) = fs::read_dir(&dir) {
-                for entry in entries.filter_map(|e| e.ok()) {
-                    let path = entry.path();
-                    let name_str = entry.file_name().to_string_lossy().to_string();
-
-                    if name_str.starts_with('.')
-                        || matches!(
-                            name_str.as_ref(),
-                            "target" | "node_modules" | "dist" | "__pycache__" | ".git"
-                        )
-                    {
-                        continue;
-                    }
-
-                    if path.is_dir() {
-                        dirs.push(path);
-                    } else if path.is_file()
-                        && is_supported(&path)
-                        && let Ok(content) = fs::read_to_string(&path)
-                    {
-                        let syms = AstParser::parse_file(&path, &content);
-
-                        for (idx, line) in content.lines().enumerate() {
-                            if contains_ident(line, symbol_name) {
-                                let line_num = idx + 1;
-                                // Determine containing function/method
-                                let caller_name = syms
-                                    .iter()
-                                    .find(|s| {
-                                        s.range.start_line <= line_num
-                                            && line_num <= s.range.end_line
-                                    })
-                                    .map(|s| s.name.clone())
-                                    .unwrap_or_else(|| "<top-level>".to_string());
-
-                                // Don't report self-definition as caller
-                                if caller_name != symbol_name {
-                                    results.push(CallReference {
-                                        caller_name,
-                                        callee_name: symbol_name.to_string(),
-                                        file_path: path.clone(),
-                                        line: line_num,
-                                    });
-
-                                    if results.len() >= max_results {
-                                        return results;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        results
+        let index = Self::build(root, 1000);
+        let refs = index.find_references_to(symbol_name);
+        refs.into_iter().take(max_results).collect()
     }
+}
+
+fn compute_hash(content: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(content.as_bytes());
+    format!("{:x}", hasher.finalize())
 }
 
 fn is_supported(path: &Path) -> bool {

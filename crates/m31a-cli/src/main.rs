@@ -42,6 +42,7 @@ mod setup;
 mod speculate;
 mod vibe;
 mod workflow;
+mod repo_cli;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -372,6 +373,14 @@ enum Commands {
     Hooks {
         #[command(subcommand)]
         cmd: HooksCommands,
+    },
+    #[command(about = "Repository intelligence, code graph navigation, impact analysis, and context retrieval")]
+    Repo {
+        #[arg(long = "json", global = true, help = "Output structured JSON")]
+        json: bool,
+
+        #[command(subcommand)]
+        cmd: repo_cli::RepoCommands,
     },
     #[command(about = "Inspect and manage cross-session memories")]
     Memories {
@@ -1497,6 +1506,11 @@ async fn main() -> Result<()> {
                     Ok(())
                 }
             }
+        }
+
+        Some(Commands::Repo { json, cmd }) => {
+            repo_cli::run_repo_command(cmd, json, &cwd).await?;
+            Ok(())
         }
 
         Some(Commands::Memories { cmd }) => {
@@ -5046,6 +5060,34 @@ mod tests {
                 assert_eq!(bind, "127.0.0.1");
             }
             _ => panic!("Expected Commands::Serve"),
+        }
+    }
+
+    #[test]
+    fn test_cli_parse_repo_commands() {
+        let cli_status = Cli::try_parse_from(["m31a", "repo", "status"]).unwrap();
+        assert!(matches!(cli_status.command, Some(Commands::Repo { json: false, cmd: repo_cli::RepoCommands::Status })));
+
+        let cli_overview = Cli::try_parse_from(["m31a", "repo", "--json", "overview"]).unwrap();
+        assert!(matches!(cli_overview.command, Some(Commands::Repo { json: true, cmd: repo_cli::RepoCommands::Overview })));
+
+        let cli_symbols = Cli::try_parse_from(["m31a", "repo", "symbols", "AstParser", "--kind", "struct", "--limit", "10"]).unwrap();
+        match cli_symbols.command {
+            Some(Commands::Repo { json: false, cmd: repo_cli::RepoCommands::Symbols { query, kind, limit } }) => {
+                assert_eq!(query, "AstParser");
+                assert_eq!(kind, Some("struct".to_string()));
+                assert_eq!(limit, 10);
+            }
+            _ => panic!("Expected RepoCommands::Symbols"),
+        }
+
+        let cli_impact = Cli::try_parse_from(["m31a", "repo", "impact", "src/lib.rs", "-s", "parse_file"]).unwrap();
+        match cli_impact.command {
+            Some(Commands::Repo { json: false, cmd: repo_cli::RepoCommands::Impact { files, symbols } }) => {
+                assert_eq!(files, vec!["src/lib.rs".to_string()]);
+                assert_eq!(symbols, vec!["parse_file".to_string()]);
+            }
+            _ => panic!("Expected RepoCommands::Impact"),
         }
     }
 }

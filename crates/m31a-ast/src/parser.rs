@@ -165,6 +165,32 @@ fn parse_rust_syn(
                     sym.is_public = is_public;
                     sym.doc_comment = extract_syn_doc(&t.attrs);
                     symbols.push(sym);
+
+                    for trait_item in &t.items {
+                        if let syn::TraitItem::Fn(tf) = trait_item {
+                            let start_line = tf.span().start().line;
+                            let end_line = tf.span().end().line;
+                            let mut method_sym = AstSymbol::new(
+                                tf.sig.ident.to_string(),
+                                AstSymbolKind::Method,
+                                path.to_path_buf(),
+                                SourceRange::new(
+                                    start_line,
+                                    end_line,
+                                    0,
+                                    lines
+                                        .get(start_line.saturating_sub(1))
+                                        .map(|l| l.len())
+                                        .unwrap_or(0),
+                                ),
+                                extract_signature(lines, start_line.saturating_sub(1)),
+                            );
+                            method_sym.is_public = is_public;
+                            method_sym.doc_comment = extract_syn_doc(&tf.attrs);
+                            method_sym.parent_scope = Some(t.ident.to_string());
+                            symbols.push(method_sym);
+                        }
+                    }
                 }
                 syn::Item::Impl(imp) => {
                     let target_name = match &*imp.self_ty {

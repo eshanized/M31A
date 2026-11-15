@@ -306,17 +306,15 @@ mod tests {
     use std::path::PathBuf;
 
     fn make_sym(name: &str, sig: &str, is_pub: bool) -> AstSymbol {
-        AstSymbol {
-            name: name.to_string(),
-            kind: AstSymbolKind::Function,
-            file_path: PathBuf::from("src/lib.rs"),
-            range: SourceRange::new(1, 10, 1, 1),
-            signature: sig.to_string(),
-            doc_comment: None,
-            parent_scope: None,
-            is_public: is_pub,
-            children: Vec::new(),
-        }
+        let mut sym = AstSymbol::new(
+            name,
+            AstSymbolKind::Function,
+            PathBuf::from("src/lib.rs"),
+            SourceRange::new(1, 10, 1, 1),
+            sig,
+        );
+        sym.is_public = is_pub;
+        sym
     }
 
     #[test]

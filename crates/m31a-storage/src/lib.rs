@@ -11,6 +11,7 @@ pub mod log_db;
 pub mod migrations;
 pub mod notes;
 pub mod queue_store;
+pub mod repo_index_store;
 pub mod rollout;
 pub mod state_file;
 pub mod transcript_export;
@@ -45,5 +46,6 @@ pub use notes::{
     validate_and_normalize_path,
 };
 pub use queue_store::{QueueStore, QueueTaskRecord, TaskStatus};
+pub use repo_index_store::RepoIndexStore;
 pub use transcript_export::{TranscriptExporter, TranscriptItemRecord, TranscriptTurnGroup};
 pub use workflow_store::WorkflowStore;
