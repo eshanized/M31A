@@ -13,7 +13,7 @@ chrono = { workspace = true }
 tracing = { workspace = true }
 thiserror = { workspace = true }
 anyhow = { workspace = true }
-notify = "6.1"
+notify = "8.2"
 
 [dev-dependencies]
 tempfile = { workspace = true }
