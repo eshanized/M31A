@@ -1,0 +1,150 @@
+<svg width="1504" height="934" viewBox="0 0 1504 934" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <style>
+      .window-bg { fill: #141b1e; stroke: #2e3538; stroke-width: 1.5; }
+      .title-bar { fill: #192124; }
+      .title-text { fill: #b3b9b8; font-family: 'JetBrainsMono Nerd Font', 'JetBrains Mono', 'Noto Sans Mono', monospace; font-size: 12px; font-weight: 500; }
+      .term-text { font-family: 'JetBrainsMono Nerd Font', 'JetBrains Mono', 'Noto Sans Mono', monospace; font-size: 13.5px; }
+    </style>
+  </defs>
+
+  <!-- Window Container with Rounded Border -->
+  <rect x="1" y="1" width="1502" height="932" rx="10" ry="10" class="window-bg" />
+
+  <!-- Window Titlebar -->
+  <path d="M 1 10 C 1 5 5 1 10 1 L 1494 1 C 1503 1 1503 5 1503 10 L 1503 38 L 1 38 Z" class="title-bar" />
+  <line x1="1" y1="38" x2="1503" y2="38" stroke="#232a2d" stroke-width="1" />
+
+  <!-- macOS Window Controls -->
+  <circle cx="24" cy="19" r="6" fill="#e57474" />
+  <circle cx="44" cy="19" r="6" fill="#e5c76b" />
+  <circle cx="64" cy="19" r="6" fill="#8ccf7e" />
+
+  <!-- Title Text -->
+  <text x="752.0" y="23" text-anchor="middle" class="title-text">M31A — Interactive Chat &amp; Reasoning [Build Mode]</text>
+
+  <!-- Terminal Area Background -->
+  <g transform="translate(16.0, 44.0)">
+    <rect x="9.2" y="19.0" width="1453.6" height="19.0" fill="rgb(35,42,45)" />
+    <rect x="9.2" y="38.0" width="9.2" height="19.0" fill="rgb(35,42,45)" />
+    <rect x="18.4" y="38.0" width="55.2" height="19.0" fill="rgb(108,191,191)" />
+    <rect x="73.6" y="38.0" width="9.2" height="19.0" fill="rgb(35,42,45)" />
+    <rect x="82.8" y="38.0" width="64.4" height="19.0" fill="rgb(140,207,126)" />
+    <rect x="147.2" y="38.0" width="1315.6" height="19.0" fill="rgb(35,42,45)" />
+    <rect x="9.2" y="57.0" width="1453.6" height="19.0" fill="rgb(35,42,45)" />
+    <rect x="9.2" y="76.0" width="1453.6" height="19.0" fill="rgb(35,42,45)" />
+    <rect x="9.2" y="95.0" width="1453.6" height="19.0" fill="rgb(35,42,45)" />
+    <rect x="9.2" y="114.0" width="1453.6" height="19.0" fill="rgb(35,42,45)" />
+    <rect x="9.2" y="133.0" width="1453.6" height="19.0" fill="rgb(35,42,45)" />
+    <rect x="9.2" y="152.0" width="1453.6" height="19.0" fill="rgb(35,42,45)" />
+    <rect x="9.2" y="171.0" width="1453.6" height="19.0" fill="rgb(35,42,45)" />
+    <rect x="9.2" y="190.0" width="1453.6" height="19.0" fill="rgb(35,42,45)" />
+    <rect x="9.2" y="209.0" width="1453.6" height="19.0" fill="rgb(35,42,45)" />
+    <rect x="9.2" y="228.0" width="1453.6" height="19.0" fill="rgb(35,42,45)" />
+    <rect x="9.2" y="247.0" width="1453.6" height="19.0" fill="rgb(35,42,45)" />
+    <rect x="9.2" y="266.0" width="1453.6" height="19.0" fill="rgb(35,42,45)" />
+    <rect x="9.2" y="285.0" width="1453.6" height="19.0" fill="rgb(35,42,45)" />
+    <rect x="9.2" y="304.0" width="1453.6" height="19.0" fill="rgb(35,42,45)" />
+    <rect x="9.2" y="323.0" width="1453.6" height="19.0" fill="rgb(35,42,45)" />
+    <rect x="9.2" y="342.0" width="1453.6" height="19.0" fill="rgb(35,42,45)" />
+    <rect x="9.2" y="361.0" width="1453.6" height="19.0" fill="rgb(35,42,45)" />
+    <rect x="9.2" y="380.0" width="184.0" height="19.0" fill="rgb(35,42,45)" />
+    <rect x="193.2" y="380.0" width="303.6" height="19.0" fill="rgb(40,44,52)" />
+    <rect x="496.8" y="380.0" width="966.0" height="19.0" fill="rgb(35,42,45)" />
+    <rect x="9.2" y="399.0" width="1453.6" height="19.0" fill="rgb(35,42,45)" />
+    <rect x="9.2" y="418.0" width="1453.6" height="19.0" fill="rgb(35,42,45)" />
+    <rect x="9.2" y="437.0" width="920.0" height="19.0" fill="rgb(35,42,45)" />
+    <rect x="929.2" y="437.0" width="276.0" height="19.0" fill="rgb(40,44,52)" />
+    <rect x="1205.2" y="437.0" width="257.6" height="19.0" fill="rgb(35,42,45)" />
+    <rect x="9.2" y="456.0" width="506.0" height="19.0" fill="rgb(35,42,45)" />
+    <rect x="515.2" y="456.0" width="92.0" height="19.0" fill="rgb(40,44,52)" />
+    <rect x="607.2" y="456.0" width="27.6" height="19.0" fill="rgb(35,42,45)" />
+    <rect x="634.8" y="456.0" width="202.4" height="19.0" fill="rgb(40,44,52)" />
+    <rect x="837.2" y="456.0" width="27.6" height="19.0" fill="rgb(35,42,45)" />
+    <rect x="864.8" y="456.0" width="220.8" height="19.0" fill="rgb(40,44,52)" />
+    <rect x="1085.6" y="456.0" width="27.6" height="19.0" fill="rgb(35,42,45)" />
+    <rect x="1113.2" y="456.0" width="165.6" height="19.0" fill="rgb(40,44,52)" />
+    <rect x="1278.8" y="456.0" width="184.0" height="19.0" fill="rgb(35,42,45)" />
+    <rect x="9.2" y="475.0" width="9.2" height="19.0" fill="rgb(35,42,45)" />
+    <rect x="18.4" y="475.0" width="174.8" height="19.0" fill="rgb(40,44,52)" />
+    <rect x="193.2" y="475.0" width="27.6" height="19.0" fill="rgb(35,42,45)" />
+    <rect x="220.8" y="475.0" width="138.0" height="19.0" fill="rgb(40,44,52)" />
+    <rect x="358.8" y="475.0" width="27.6" height="19.0" fill="rgb(35,42,45)" />
+    <rect x="386.4" y="475.0" width="138.0" height="19.0" fill="rgb(40,44,52)" />
+    <rect x="524.4" y="475.0" width="27.6" height="19.0" fill="rgb(35,42,45)" />
+    <rect x="552.0" y="475.0" width="138.0" height="19.0" fill="rgb(40,44,52)" />
+    <rect x="690.0" y="475.0" width="27.6" height="19.0" fill="rgb(35,42,45)" />
+    <rect x="717.6" y="475.0" width="202.4" height="19.0" fill="rgb(40,44,52)" />
+    <rect x="920.0" y="475.0" width="27.6" height="19.0" fill="rgb(35,42,45)" />
+    <rect x="947.6" y="475.0" width="73.6" height="19.0" fill="rgb(40,44,52)" />
+    <rect x="1021.2" y="475.0" width="9.2" height="19.0" fill="rgb(35,42,45)" />
+    <rect x="1030.4" y="475.0" width="92.0" height="19.0" fill="rgb(40,44,52)" />
+    <rect x="1122.4" y="475.0" width="27.6" height="19.0" fill="rgb(35,42,45)" />
+    <rect x="1150.0" y="475.0" width="165.6" height="19.0" fill="rgb(40,44,52)" />
+    <rect x="1315.6" y="475.0" width="147.2" height="19.0" fill="rgb(35,42,45)" />
+    <rect x="9.2" y="494.0" width="1453.6" height="19.0" fill="rgb(35,42,45)" />
+    <rect x="9.2" y="513.0" width="1453.6" height="19.0" fill="rgb(35,42,45)" />
+    <rect x="9.2" y="532.0" width="1453.6" height="19.0" fill="rgb(35,42,45)" />
+    <rect x="9.2" y="551.0" width="1453.6" height="19.0" fill="rgb(35,42,45)" />
+    <rect x="9.2" y="570.0" width="1453.6" height="19.0" fill="rgb(35,42,45)" />
+    <rect x="9.2" y="589.0" width="1453.6" height="19.0" fill="rgb(35,42,45)" />
+    <rect x="9.2" y="608.0" width="1453.6" height="19.0" fill="rgb(35,42,45)" />
+    <rect x="9.2" y="627.0" width="1453.6" height="19.0" fill="rgb(35,42,45)" />
+    <rect x="9.2" y="646.0" width="1453.6" height="19.0" fill="rgb(35,42,45)" />
+    <rect x="9.2" y="665.0" width="1453.6" height="19.0" fill="rgb(35,42,45)" />
+    <rect x="9.2" y="684.0" width="1453.6" height="19.0" fill="rgb(35,42,45)" />
+    <rect x="9.2" y="703.0" width="1453.6" height="19.0" fill="rgb(35,42,45)" />
+    <rect x="9.2" y="722.0" width="1453.6" height="19.0" fill="rgb(35,42,45)" />
+    <rect x="9.2" y="741.0" width="1453.6" height="19.0" fill="rgb(35,42,45)" />
+    <rect x="9.2" y="760.0" width="64.4" height="19.0" fill="rgb(140,207,126)" />
+    <rect x="9.2" y="779.0" width="1453.6" height="19.0" fill="rgb(35,42,45)" />
+    <rect x="9.2" y="798.0" width="1453.6" height="19.0" fill="rgb(35,42,45)" />
+    <rect x="9.2" y="817.0" width="1453.6" height="19.0" fill="rgb(35,42,45)" />
+    <rect x="9.2" y="836.0" width="119.6" height="19.0" fill="rgb(108,191,191)" />
+    <!-- Terminal Text Spans -->
+    <text y="33.0" class="term-text"><tspan x="9.2" fill="rgb(46,53,56)">╭────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮</tspan></text>
+    <text y="52.0" class="term-text"><tspan x="9.2" fill="rgb(46,53,56)">│</tspan><tspan x="27.6" fill="rgb(20,27,30)" font-weight="bold">M31A </tspan><tspan x="92.0" fill="rgb(20,27,30)" font-weight="bold">BUILD </tspan><tspan x="156.4" fill="rgb(179,185,184)" font-weight="bold">nvidia/nemotron-3.5-lightning-30b-a3b [medium]</tspan><tspan x="588.8" fill="rgb(103,110,113)">│ </tspan><tspan x="607.2" fill="rgb(218,218,218)">[D] M31A</tspan><tspan x="690.0" fill="rgb(103,110,113)">│ [#] #3af3c140 │ </tspan><tspan x="855.6" fill="rgb(103,110,113)" font-weight="bold">● Ready</tspan><tspan x="1094.8" fill="rgb(103,110,113)">[Ctrl+P: Commands] [Ctrl+B: Panel ▹]</tspan><tspan x="1453.6" fill="rgb(46,53,56)">│</tspan></text>
+    <text y="71.0" class="term-text"><tspan x="9.2" fill="rgb(46,53,56)">╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯</tspan></text>
+    <text y="90.0" class="term-text"><tspan x="9.2" fill="rgb(46,53,56)">╭</tspan><tspan x="27.6" fill="rgb(179,185,184)" font-weight="bold">Conversation </tspan><tspan x="147.2" fill="rgb(46,53,56)">──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮</tspan></text>
+    <text y="109.0" class="term-text"><tspan x="9.2" fill="rgb(46,53,56)">│</tspan><tspan x="18.4" fill="rgb(108,191,191)" font-weight="bold">ℹ Info: </tspan><tspan x="92.0" fill="rgb(108,191,191)">M31A Autonomous Software Engineering Runtime active. Provider: NVIDIA NIM (Nemotron 3.5 Lightning 30B). Policy: WorkspaceWrite.</tspan><tspan x="1453.6" fill="rgb(46,53,56)">│</tspan></text>
+    <text y="128.0" class="term-text"><tspan x="9.2" fill="rgb(46,53,56)">│</tspan><tspan x="1453.6" fill="rgb(46,53,56)">│</tspan></text>
+    <text y="147.0" class="term-text"><tspan x="9.2" fill="rgb(46,53,56)">│</tspan><tspan x="18.4" fill="rgb(108,191,191)" font-weight="bold">◈ You </tspan><tspan x="73.6" fill="rgb(103,110,113)">(05:40:07)</tspan><tspan x="1453.6" fill="rgb(46,53,56)">│</tspan></text>
+    <text y="166.0" class="term-text"><tspan x="9.2" fill="rgb(46,53,56)">│</tspan><tspan x="36.8" fill="rgb(218,218,218)">Audit crates/m31a-core/src/prompts.rs and verify our new 11-layer canonical prompt architecture invariants.                                               </tspan><tspan x="1453.6" fill="rgb(46,53,56)">│</tspan></text>
+    <text y="185.0" class="term-text"><tspan x="9.2" fill="rgb(46,53,56)">│</tspan><tspan x="1453.6" fill="rgb(46,53,56)">│</tspan></text>
+    <text y="204.0" class="term-text"><tspan x="9.2" fill="rgb(46,53,56)">│</tspan><tspan x="18.4" fill="rgb(108,191,191)" font-weight="bold">▼ ● Progress: Analyzing crates/m31a-core/src/prompts.rs</tspan><tspan x="533.6" fill="rgb(103,110,113)">(~156 tok)</tspan><tspan x="1453.6" fill="rgb(46,53,56)">│</tspan></text>
+    <text y="223.0" class="term-text"><tspan x="9.2" fill="rgb(46,53,56)">│</tspan><tspan x="36.8" fill="rgb(108,191,191)">│ </tspan><tspan x="55.2" fill="rgb(218,218,218)" font-weight="bold">Execution Step: Analyzing crates/m31a-core/src/prompts.rs</tspan><tspan x="1453.6" fill="rgb(46,53,56)">│</tspan></text>
+    <text y="242.0" class="term-text"><tspan x="9.2" fill="rgb(46,53,56)">│</tspan><tspan x="1453.6" fill="rgb(46,53,56)">│</tspan></text>
+    <text y="261.0" class="term-text"><tspan x="9.2" fill="rgb(46,53,56)">│</tspan><tspan x="18.4" fill="rgb(218,218,218)" font-weight="bold">▼ tool_call audit_codebase_safety </tspan><tspan x="331.2" fill="rgb(218,218,218)">⚙ </tspan><tspan x="349.6" fill="rgb(140,207,126)" font-weight="bold">[✔ OK (16ms)]</tspan><tspan x="1453.6" fill="rgb(46,53,56)">│</tspan></text>
+    <text y="280.0" class="term-text"><tspan x="9.2" fill="rgb(46,53,56)">│</tspan><tspan x="55.2" fill="rgb(103,110,113)">args: </tspan><tspan x="110.4" fill="rgb(218,218,218)">{&quot;target_path&quot;: &quot;crates/m31a-core/src/prompts.rs&quot;, &quot;strict_mode&quot;: true}                                                                           </tspan><tspan x="1453.6" fill="rgb(46,53,56)">│</tspan></text>
+    <text y="299.0" class="term-text"><tspan x="9.2" fill="rgb(46,53,56)">│</tspan><tspan x="46.0" fill="rgb(103,110,113)">1 │ </tspan><tspan x="82.8" fill="rgb(108,191,191)">✓ Invariants Verified: 11 layers assembled, 136 tools gated, pure deterministic output.</tspan><tspan x="1453.6" fill="rgb(46,53,56)">│</tspan></text>
+    <text y="318.0" class="term-text"><tspan x="9.2" fill="rgb(46,53,56)">│</tspan><tspan x="1453.6" fill="rgb(46,53,56)">│</tspan></text>
+    <text y="337.0" class="term-text"><tspan x="9.2" fill="rgb(46,53,56)">│</tspan><tspan x="18.4" fill="rgb(140,207,126)" font-weight="bold">◆ M31A</tspan><tspan x="1453.6" fill="rgb(46,53,56)">│</tspan></text>
+    <text y="356.0" class="term-text"><tspan x="9.2" fill="rgb(46,53,56)">│</tspan><tspan x="46.0" fill="rgb(108,191,191)" font-weight="bold">### </tspan><tspan x="82.8" fill="rgb(218,218,218)" font-weight="bold">Architectural Audit: Canonical System Prompt Compiler</tspan><tspan x="1453.6" fill="rgb(46,53,56)">│</tspan></text>
+    <text y="375.0" class="term-text"><tspan x="9.2" fill="rgb(46,53,56)">│</tspan><tspan x="1453.6" fill="rgb(46,53,56)">│</tspan></text>
+    <text y="394.0" class="term-text"><tspan x="9.2" fill="rgb(46,53,56)">│</tspan><tspan x="46.0" fill="rgb(218,218,218)">I have verified </tspan><tspan x="202.4" fill="rgb(108,191,191)">crates/m31a-core/src/prompts.rs </tspan><tspan x="496.8" fill="rgb(218,218,218)">. The implementation adheres strictly to the runtime source-of-truth principle:                         </tspan><tspan x="1453.6" fill="rgb(46,53,56)">│</tspan></text>
+    <text y="413.0" class="term-text"><tspan x="9.2" fill="rgb(46,53,56)">│</tspan><tspan x="1453.6" fill="rgb(46,53,56)">│</tspan></text>
+    <text y="432.0" class="term-text"><tspan x="9.2" fill="rgb(46,53,56)">│</tspan><tspan x="46.0" fill="rgb(108,191,191)" font-weight="bold">1. </tspan><tspan x="73.6" fill="rgb(218,218,218)" font-weight="bold">Runtime Truthfulness</tspan><tspan x="257.6" fill="rgb(218,218,218)">: Optimistic defaults eliminated. Provider metadata, context limits, and tool authorizations reflect actual runtime components.   </tspan><tspan x="1453.6" fill="rgb(46,53,56)">│</tspan></text>
+    <text y="451.0" class="term-text"><tspan x="9.2" fill="rgb(46,53,56)">│</tspan><tspan x="46.0" fill="rgb(108,191,191)" font-weight="bold">2. </tspan><tspan x="73.6" fill="rgb(218,218,218)" font-weight="bold">Untrusted Content Quarantine</tspan><tspan x="331.2" fill="rgb(218,218,218)">: External input, git diffs, and issue context are fenced within </tspan><tspan x="938.4" fill="rgb(108,191,191)">&lt;untrusted_content_boundary&gt; </tspan><tspan x="1214.4" fill="rgb(218,218,218)">tags.                     </tspan><tspan x="1453.6" fill="rgb(46,53,56)">│</tspan></text>
+    <text y="470.0" class="term-text"><tspan x="9.2" fill="rgb(46,53,56)">│</tspan><tspan x="46.0" fill="rgb(108,191,191)" font-weight="bold">3. </tspan><tspan x="73.6" fill="rgb(218,218,218)" font-weight="bold">11-Layer Order</tspan><tspan x="202.4" fill="rgb(218,218,218)">: Deterministic section ordering (</tspan><tspan x="524.4" fill="rgb(108,191,191)">identity </tspan><tspan x="616.4" fill="rgb(218,218,218)">→ </tspan><tspan x="644.0" fill="rgb(108,191,191)">operating_invariants </tspan><tspan x="846.4" fill="rgb(218,218,218)">→ </tspan><tspan x="874.0" fill="rgb(108,191,191)">instruction_precedence </tspan><tspan x="1094.8" fill="rgb(218,218,218)">→ </tspan><tspan x="1122.4" fill="rgb(108,191,191)">runtime_envelope </tspan><tspan x="1288.0" fill="rgb(218,218,218)">→                 </tspan><tspan x="1453.6" fill="rgb(46,53,56)">│</tspan></text>
+    <text y="489.0" class="term-text"><tspan x="9.2" fill="rgb(46,53,56)">│</tspan><tspan x="18.4" fill="rgb(108,191,191)">collaboration_mode </tspan><tspan x="202.4" fill="rgb(218,218,218)">→ </tspan><tspan x="230.0" fill="rgb(108,191,191)">role_contract </tspan><tspan x="368.0" fill="rgb(218,218,218)">→ </tspan><tspan x="395.6" fill="rgb(108,191,191)">tool_protocol </tspan><tspan x="533.6" fill="rgb(218,218,218)">→ </tspan><tspan x="561.2" fill="rgb(108,191,191)">model_adapter </tspan><tspan x="699.2" fill="rgb(218,218,218)">→ </tspan><tspan x="726.8" fill="rgb(108,191,191)">project_instructions </tspan><tspan x="929.2" fill="rgb(218,218,218)">→ </tspan><tspan x="956.8" fill="rgb(108,191,191)">skills </tspan><tspan x="1021.2" fill="rgb(218,218,218)">/</tspan><tspan x="1039.6" fill="rgb(108,191,191)">memories </tspan><tspan x="1131.6" fill="rgb(218,218,218)">→ </tspan><tspan x="1159.2" fill="rgb(108,191,191)">workspace_status </tspan><tspan x="1315.6" fill="rgb(218,218,218)">).             </tspan><tspan x="1453.6" fill="rgb(46,53,56)">│</tspan></text>
+    <text y="508.0" class="term-text"><tspan x="9.2" fill="rgb(46,53,56)">│</tspan><tspan x="46.0" fill="rgb(108,191,191)" font-weight="bold">4. </tspan><tspan x="73.6" fill="rgb(218,218,218)" font-weight="bold">Parity</tspan><tspan x="128.8" fill="rgb(218,218,218)">: Parity verified across CLI, TUI, App Server, and child subagents; system instructions preserved across compaction.                            </tspan><tspan x="1453.6" fill="rgb(46,53,56)">│</tspan></text>
+    <text y="527.0" class="term-text"><tspan x="9.2" fill="rgb(46,53,56)">│</tspan><tspan x="1453.6" fill="rgb(46,53,56)">│</tspan></text>
+    <text y="546.0" class="term-text"><tspan x="9.2" fill="rgb(46,53,56)">│</tspan><tspan x="46.0" fill="rgb(103,110,113)">╭── rust ───────────────────────────────</tspan><tspan x="1453.6" fill="rgb(46,53,56)">│</tspan></text>
+    <text y="565.0" class="term-text"><tspan x="9.2" fill="rgb(46,53,56)">│</tspan><tspan x="46.0" fill="rgb(103,110,113)">│ </tspan><tspan x="64.4" fill="rgb(179,185,184)" font-style="italic">// Deterministic assembly from immutable runtime snapshot</tspan><tspan x="1453.6" fill="rgb(46,53,56)">│</tspan></text>
+    <text y="584.0" class="term-text"><tspan x="9.2" fill="rgb(46,53,56)">│</tspan><tspan x="46.0" fill="rgb(103,110,113)">│ </tspan><tspan x="64.4" fill="rgb(196,127,213)" font-weight="bold">let</tspan><tspan x="101.2" fill="rgb(218,218,218)">snapshot </tspan><tspan x="184.0" fill="rgb(179,185,184)">=</tspan><tspan x="202.4" fill="rgb(108,191,191)">PromptRuntimeSnapshot</tspan><tspan x="395.6" fill="rgb(179,185,184)">::</tspan><tspan x="414.0" fill="rgb(218,218,218)">gather_from_environment</tspan><tspan x="625.6" fill="rgb(179,185,184)">(&amp;</tspan><tspan x="644.0" fill="rgb(218,218,218)">cwd</tspan><tspan x="671.6" fill="rgb(179,185,184)">,</tspan><tspan x="690.0" fill="rgb(179,185,184)">&amp;</tspan><tspan x="699.2" fill="rgb(218,218,218)">tools</tspan><tspan x="745.2" fill="rgb(179,185,184)">,</tspan><tspan x="763.6" fill="rgb(179,185,184)">&amp;</tspan><tspan x="772.8" fill="rgb(218,218,218)">config</tspan><tspan x="828.0" fill="rgb(179,185,184)">)?;</tspan><tspan x="1453.6" fill="rgb(46,53,56)">│</tspan></text>
+    <text y="603.0" class="term-text"><tspan x="9.2" fill="rgb(46,53,56)">│</tspan><tspan x="46.0" fill="rgb(103,110,113)">│ </tspan><tspan x="64.4" fill="rgb(196,127,213)" font-weight="bold">let</tspan><tspan x="101.2" fill="rgb(218,218,218)">world_state </tspan><tspan x="211.6" fill="rgb(179,185,184)">=</tspan><tspan x="230.0" fill="rgb(108,191,191)">CanonicalPromptAssembler</tspan><tspan x="450.8" fill="rgb(179,185,184)">::</tspan><tspan x="469.2" fill="rgb(218,218,218)">assemble</tspan><tspan x="542.8" fill="rgb(179,185,184)">(&amp;</tspan><tspan x="561.2" fill="rgb(218,218,218)">snapshot</tspan><tspan x="634.8" fill="rgb(179,185,184)">)?;</tspan><tspan x="1453.6" fill="rgb(46,53,56)">│</tspan></text>
+    <text y="622.0" class="term-text"><tspan x="9.2" fill="rgb(46,53,56)">│</tspan><tspan x="46.0" fill="rgb(103,110,113)">╰──────────────────────────────────────</tspan><tspan x="1453.6" fill="rgb(46,53,56)">│</tspan></text>
+    <text y="641.0" class="term-text"><tspan x="9.2" fill="rgb(46,53,56)">│</tspan><tspan x="1453.6" fill="rgb(46,53,56)">│</tspan></text>
+    <text y="660.0" class="term-text"><tspan x="9.2" fill="rgb(46,53,56)">│</tspan><tspan x="1453.6" fill="rgb(46,53,56)">│</tspan></text>
+    <text y="679.0" class="term-text"><tspan x="9.2" fill="rgb(46,53,56)">│</tspan><tspan x="1453.6" fill="rgb(46,53,56)">│</tspan></text>
+    <text y="698.0" class="term-text"><tspan x="9.2" fill="rgb(46,53,56)">│</tspan><tspan x="1453.6" fill="rgb(46,53,56)">│</tspan></text>
+    <text y="717.0" class="term-text"><tspan x="9.2" fill="rgb(46,53,56)">│</tspan><tspan x="1453.6" fill="rgb(46,53,56)">│</tspan></text>
+    <text y="736.0" class="term-text"><tspan x="9.2" fill="rgb(46,53,56)">│</tspan><tspan x="1453.6" fill="rgb(46,53,56)">│</tspan></text>
+    <text y="755.0" class="term-text"><tspan x="9.2" fill="rgb(46,53,56)">╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯</tspan></text>
+    <text y="774.0" class="term-text"><tspan x="18.4" fill="rgb(20,27,30)" font-weight="bold">BUILD </tspan><tspan x="92.0" fill="rgb(179,185,184)" font-weight="bold">[nvidia/nemotron-3.5-lightning-30b-a3b | medium] </tspan><tspan x="552.0" fill="rgb(103,176,232)">[WorkspaceWrite] </tspan><tspan x="717.6" fill="rgb(229,199,107)" font-weight="bold"> master* (11 dirty) </tspan><tspan x="920.0" fill="rgb(103,176,232)">[0.0k/128k (0%)] </tspan></text>
+    <text y="793.0" class="term-text"><tspan x="9.2" fill="rgb(46,53,56)">╭</tspan><tspan x="27.6" fill="rgb(179,185,184)" font-weight="bold">Input </tspan><tspan x="92.0" fill="rgb(103,110,113)">/ commands  @ files  $ skills  Shift+Enter / Alt+Enter newline  Ctrl+V paste </tspan><tspan x="800.4" fill="rgb(46,53,56)">───────────────────────────────────────────────────────────────────────╮</tspan></text>
+    <text y="812.0" class="term-text"><tspan x="9.2" fill="rgb(46,53,56)">│</tspan><tspan x="18.4" fill="rgb(179,185,184)" font-weight="bold">[BUILD] </tspan><tspan x="92.0" fill="rgb(108,191,191)" font-weight="bold">❯ </tspan><tspan x="110.4" fill="rgb(103,110,113)" font-style="italic">Type a message, &apos;/&apos; for commands, &apos;@&apos; for files, &apos;$&apos; for skills, &apos;!&apos; for shell...</tspan><tspan x="1453.6" fill="rgb(46,53,56)">│</tspan></text>
+    <text y="831.0" class="term-text"><tspan x="9.2" fill="rgb(46,53,56)">╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯</tspan></text>
+    <text y="850.0" class="term-text"><tspan x="18.4" fill="rgb(20,27,30)" font-weight="bold">[Workspace] </tspan><tspan x="138.0" fill="rgb(103,110,113)">Enter: Send  Ctrl+Enter: Queue  Tab: Mode  Ctrl+M: Model  Ctrl+P: Palette  Ctrl+R: Sessions  Ctrl+B: Panel</tspan></text>
+  </g>
+</svg>

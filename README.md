@@ -50,9 +50,23 @@
 ## 📸 Interactive Terminal Interface
 
 <p align="center">
-  <img src="assets/screenshot_1.png" alt="M31A Ratatui Terminal User Interface featuring streaming markdown, DeepSeek R1 reasoning paths, multi-file diff viewer, and prompt composer" width="100%" />
+  <img src="assets/screenshot_1.png" alt="M31A Ratatui Terminal User Interface featuring streaming markdown, Nemotron 3.5 reasoning traces, tool execution telemetry, and prompt composer" width="100%" />
 </p>
 <p align="center"><em>M31A full-screen interactive Terminal User Interface (Ratatui/Crossterm) with streaming reasoning traces, AST syntax highlighting, and live tool card outputs.</em></p>
+
+<details open>
+<summary><b>🔍 Additional Developer Screens & Modals (Click to expand / collapse)</b></summary>
+<br />
+
+| Frontier Model Selector & Switching (`F3` / `Ctrl+M`) | Interactive Code Review & Diff Viewer (`Ctrl+D`) |
+| :---: | :---: |
+| <img src="assets/screenshot_models.png" width="100%" alt="M31A Frontier Model Catalog with NVIDIA NIM activation" /> | <img src="assets/screenshot_diff.png" width="100%" alt="M31A Multi-File Diff Viewer with syntax highlighting" /> |
+
+| Multi-Agent Swarm Governance (`F5`) | Tools & MCP Integrations Surface (`F8`) |
+| :---: | :---: |
+| <img src="assets/screenshot_agents.png" width="100%" alt="M31A Multi-Agent Swarm Hierarchy and Workflow Tracking" /> | <img src="assets/screenshot_tools.png" width="100%" alt="M31A Tools Registry and MCP Sandboxing Policies" /> |
+
+</details>
 
 ---
 
