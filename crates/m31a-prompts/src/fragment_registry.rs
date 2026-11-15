@@ -42,45 +42,7 @@ pub struct ResolvedFragments {
     pub rendered: String,
 }
 
-/// Supported model families (maps to NIM model slugs)
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum ModelFamily {
-    Nemotron35,      // nvidia/nemotron-3.5-*
-    DeepSeek,        // deepseek-ai/deepseek-*
-    CodeStral,       // mistralai/codestral-*
-    Llama31Nemotron, // nvidia/llama-3.1-nemotron-*
-    Other(String),   // Custom/unknown
-}
-
-impl ModelFamily {
-    /// Detect family from model slug
-    pub fn from_model_slug(slug: &str) -> Self {
-        let slug = slug.to_lowercase();
-        if slug.contains("nemotron-3.5") || slug.contains("nemotron-3-5") {
-            ModelFamily::Nemotron35
-        } else if slug.contains("deepseek") {
-            ModelFamily::DeepSeek
-        } else if slug.contains("codestral") {
-            ModelFamily::CodeStral
-        } else if slug.contains("llama-3.1-nemotron") || slug.contains("llama-3-1-nemotron") {
-            ModelFamily::Llama31Nemotron
-        } else {
-            ModelFamily::Other(slug)
-        }
-    }
-
-    /// Human-readable name
-    pub fn display_name(&self) -> &str {
-        match self {
-            ModelFamily::Nemotron35 => "Nemotron 3.5",
-            ModelFamily::DeepSeek => "DeepSeek",
-            ModelFamily::CodeStral => "CodeStral",
-            ModelFamily::Llama31Nemotron => "Llama 3.1 Nemotron",
-            ModelFamily::Other(s) => s,
-        }
-    }
-}
+pub use m31a_core::prompts::ModelFamily;
 
 /// Fragment registry with built-in and custom fragments
 pub struct FragmentRegistry {

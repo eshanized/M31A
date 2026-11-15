@@ -308,6 +308,22 @@ m31a sandbox ls -la
 m31a sandbox --policy read-only make test
 ```
 
+#### `m31a prompt`
+Inspect canonical system prompts, diagnose capability state, and manage prompt templates.
+```bash
+# Inspect the compiled canonical prompt, section hashes, and active tools
+m31a prompt inspect --model nvidia/nemotron-3.5-70b-instruct --role reviewer
+
+# Output structured JSON diagnostic report
+m31a prompt inspect --model deepseek-ai/deepseek-r1 --json
+
+# List reusable prompt templates
+m31a prompt list
+
+# Render model-specific prompt fragments
+m31a prompt fragments -m nvidia/nemotron-3.5-70b-instruct
+```
+
 ---
 
 ## Environment Variables

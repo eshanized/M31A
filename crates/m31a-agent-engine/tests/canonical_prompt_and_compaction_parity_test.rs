@@ -263,12 +263,24 @@ async fn test_compaction_preserves_unique_system_prompt_end_to_end() -> Result<(
 #[test]
 fn test_runtime_capability_parity_in_canonical_prompt() {
     let tmp = tempdir().unwrap();
-    let snapshot = PromptRuntimeSnapshot::new(
+    let tools = vec![
+        "apply_patch".to_string(),
+        "edit".to_string(),
+        "write_file".to_string(),
+        "exec".to_string(),
+        "wait".to_string(),
+        "request_permissions".to_string(),
+        "spawn_agent".to_string(),
+    ];
+    let mut snapshot = PromptRuntimeSnapshot::new(
         tmp.path(),
         "nvidia/nemotron-3.5-70b-instruct",
         "WorkspaceWrite",
         CollaborationMode::Default,
-    );
+    )
+    .with_tools(tools);
+    snapshot.max_spawn_depth = 3;
+    snapshot.worktree_isolation_supported = true;
 
     let prompt = SystemPromptBuilder::build_canonical(&snapshot);
 
@@ -302,4 +314,31 @@ fn test_runtime_capability_parity_in_canonical_prompt() {
     assert!(prompt.contains("3. Implement"));
     assert!(prompt.contains("4. Verify"));
     assert!(prompt.contains("5. Conclude"));
+}
+
+#[test]
+fn test_capability_truthfulness_excludes_unavailable_tools() {
+    let tmp = tempdir().unwrap();
+    // Read-only inspection agent without Code Mode or subagent spawning
+    let tools = vec!["read_file".to_string(), "list_dir".to_string()];
+    let snapshot = PromptRuntimeSnapshot::new(
+        tmp.path(),
+        "deepseek-ai/deepseek-r1",
+        "ReadOnly",
+        CollaborationMode::Plan,
+    )
+    .with_tools(tools);
+
+    let prompt = SystemPromptBuilder::build_canonical(&snapshot);
+
+    // Unavailable tools must NEVER be advertised in the prompt
+    assert!(!prompt.contains("*** Begin Patch"));
+    assert!(!prompt.contains("`exec` evaluates asynchronous JavaScript"));
+    assert!(!prompt.contains("Subagent Collaboration & Worktree Isolation"));
+    assert!(!prompt.contains("request_permissions"));
+
+    // Expected plan mode & trust invariants must be present
+    assert!(prompt.contains("Operating Mode: Plan"));
+    assert!(prompt.contains("Instruction Precedence Hierarchy"));
+    assert!(prompt.contains("<untrusted_content_boundary>"));
 }

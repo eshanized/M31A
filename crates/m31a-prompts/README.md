@@ -1,35 +1,32 @@
 # `m31a-prompts`
 
-> System prompt builders, versioned prompt templates, fragment registries, and context injection templates for M31A.
+> System prompt template library, versioned engineering prompt catalogs, and model fragment resolution for M31A.
 
 ---
 
-## Why Does This Crate Exist?
+## Architecture Overview & Canonical Pipeline
 
-Prompt engineering in an autonomous agent is not a static text file. Different LLMs require distinct preambles:
-- DeepSeek R1 models need explicit instruction formatting to trigger reasoning traces without leaking raw formatting tags.
-- NVIDIA Nemotron and Codestral models excel with concise, structured tool instructions.
-- Different agent modes (`[⚡ BUILD]` vs `[📋 PLAN]`) require different permission boundaries described directly in their system instructions.
-- Custom skills, workspace boundaries, and active tool definitions must be dynamically composed into the prompt at runtime.
+M31A maintains a **single authoritative prompt compiler** located in [`m31a-core::prompts`](../m31a-core/src/prompts.rs).
 
-`m31a-prompts` provides a modular prompt library and fragment registry. It allows dynamically assembling system prompts from versioned, tested fragments while supporting user-defined custom templates with variable interpolation.
+- **Canonical Prompt Compiler (`m31a-core::prompts`)**: Assembles immutable `PromptRuntimeSnapshot` records into deterministic, diffable `WorldState` sections. Used across CLI, TUI, App Server, and child subagent engines.
+- **Prompt Library (`m31a-prompts::PromptLibrary`)**: Manages versioned prompt templates (`PromptTemplate`), category filtering, variable substitution, and user prompt catalogs (`~/.config/m31a/prompts`).
+- **Fragment Registry (`m31a-prompts::fragment_registry`)**: Provides fragment-level resolution for diagnostic inspection and model-tailored instruction blocks, sharing the authoritative `ModelFamily` definition with `m31a-core`.
+
+For complete system prompt architectural documentation, refer to [SYSTEM_PROMPT_ARCHITECTURE.md](../../docs/architecture/SYSTEM_PROMPT_ARCHITECTURE.md).
 
 ---
 
-## Core Concepts & How It Works
+## Core Concepts
 
-### 1. Dynamic Fragment Registry (`fragment_registry.rs`)
-Prompts are composed of composable blocks:
-- **`IdentityFragment`**: Defines agent persona, sovereignty, and role.
-- **`ToolGuidelinesFragment`**: Describes the 18 available tools, argument formatting, and patch standards.
-- **`SafetyPolicyFragment`**: Details sandbox rules, protected paths (`.git`, `.m31a`, `.env`), and approval gates.
-- **`SkillInjectionFragment`**: Injects user skills discovered from `~/.m31a/skills`.
-- **`ModelSpecificFragment`**: Applies model-tailored formatting rules for NVIDIA NIM slugs.
-
-### 2. Versioned Prompt Templates
-Provides pre-packaged, parameterized templates for common engineering workflows:
+### 1. Versioned Prompt Templates (`src/lib.rs`)
+Pre-packaged, parameterized templates for specialized engineering activities:
 - `Coding`, `Debugging`, `CodeReview`, `Architecture`, `Testing`, `Security`, `Performance`.
-- Templates support variable substitution (e.g., `{{file_path}}`, `{{error_trace}}`) with fallback defaults.
+- Supports typed variables (`FilePath`, `CodeSnippet`, `Language`, `Enum`) with validation and fallback defaults.
+
+### 2. Fragment Registry (`src/fragment_registry.rs`)
+Condition-gated prompt fragment evaluation:
+- Condition types: `ToolEnabled`, `FeatureEnabled`, `SandboxPolicy`, `ApprovalPolicy`, `ContextUsageAbove`.
+- Model family alignment with `m31a_core::prompts::ModelFamily`.
 
 ---
 
@@ -37,39 +34,32 @@ Provides pre-packaged, parameterized templates for common engineering workflows:
 
 | Module | Key Structs / Enums | Purpose |
 | :--- | :--- | :--- |
-| [`src/fragment_registry.rs`](src/fragment_registry.rs) | `FragmentRegistry`, `SystemPromptBuilder` | Composes modular system prompt fragments into cohesive context instructions. |
-| [`src/lib.rs`](src/lib.rs) | `PromptTemplate`, `PromptLibrary`, `PromptCategory` | Stores, searches, and renders versioned prompt templates. |
+| [`src/lib.rs`](src/lib.rs) | `PromptTemplate`, `PromptLibrary`, `PromptCategory`, `PromptVariable` | Stores, searches, and renders versioned prompt templates with variable substitution. |
+| [`src/fragment_registry.rs`](src/fragment_registry.rs) | `FragmentRegistry`, `Fragment`, `FragmentCondition`, `ModelFamily` | Resolves modular system prompt fragments against active runtime conditions. |
 
 ---
 
-## Practical Usage Example
+## Developer Usage
 
+### Listing & Rendering Templates
 ```rust
-use m31a_prompts::fragment_registry::FragmentRegistry;
 use m31a_prompts::{PromptCategory, PromptLibrary};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // 1. Compose a model-tailored system prompt
-    let registry = FragmentRegistry::default();
-    let system_prompt = registry.build_system_prompt(
-        "nvidia/nemotron-3.5-lightning-30b-a3b",
-        /* is_plan_mode = */ false,
-        /* active_tools = */ &["read_file", "write_file", "apply_patch", "exec_command"]
-    );
-
-    println!("Constructed System Prompt (first 200 chars):");
-    println!("{}", &system_prompt[..200.min(system_prompt.len())]);
-
-    // 2. Query built-in prompt templates
     let library = PromptLibrary::load_builtin()?;
     let review_prompts = library.find_by_category(PromptCategory::CodeReview);
     for prompt in review_prompts {
-        println!("Available Review Template: {} (v{})", prompt.name, prompt.version);
+        println!("Template: {} (v{})", prompt.name, prompt.version);
     }
-
     Ok(())
 }
+```
+
+### Inspecting Canonical System Prompts via CLI
+```bash
+m31a prompt inspect --model nvidia/nemotron-3.5-70b-instruct --role reviewer
+m31a prompt inspect --model deepseek-ai/deepseek-r1 --json
 ```
 
 ---

@@ -90,7 +90,7 @@ pub mod worktree;
 pub mod world_state;
 
 pub use agent_identity::AgentIdentity;
-pub use agent_roles::{AgentRole, AgentRoleRegistry};
+pub use agent_roles::{AgentRole, AgentRoleContract, AgentRoleRegistry};
 pub use agents_md::{
     AgentsMdEntry, AgentsMdManager, DEFAULT_AGENTS_MD_FILENAME, LOCAL_AGENTS_MD_FILENAME,
     LoadedAgentsMd,
@@ -243,9 +243,11 @@ pub use process_hardening::{
     DANGEROUS_ENV_PREFIXES, apply_process_hardening, scrub_dangerous_env_vars,
 };
 pub use prompts::{
-    CanonicalPromptAssembler, CollaborationMode, DynamicContextItem, InstructionResolver,
-    ModelCapabilitiesSnapshot, ModelFamily, PromptLifecycleManager, PromptRuntimeSnapshot,
-    SystemPromptBuilder,
+    CanonicalPromptAssembler, CollaborationCapabilitiesSnapshot, CollaborationMode,
+    DynamicContextItem, FeatureSnapshot, InstructionResolver, LiveWorkspaceStatus,
+    ModelCapabilitiesSnapshot, ModelFamily, ModelMetadata, PromptInspectionReport,
+    PromptLifecycleManager, PromptRuntimeSnapshot, PromptSectionInspection, SecurityPolicySnapshot,
+    SystemPromptBuilder, ToolDescriptor, inspect_prompt,
 };
 pub use queue_service::{
     MAX_QUEUE_ITEMS, MAX_USER_INPUT_TEXT_CHARS, QueueService, QueueServiceError, QueuedItem,

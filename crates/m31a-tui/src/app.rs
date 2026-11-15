@@ -460,7 +460,34 @@ impl App {
 
         let (event_tx, event_rx) = mpsc::channel(1024);
 
-        let snapshot = m31a_core::prompts::PromptRuntimeSnapshot::new(
+        let model_meta = if let Some(info) = m31a_provider::find_model(&active_model) {
+            m31a_core::prompts::ModelMetadata {
+                provider: info.originator.clone(),
+                model_id: info.slug.clone(),
+                model_family: m31a_core::prompts::ModelFamily::from_model_slug(&info.slug),
+                context_window: info.context_window as usize,
+                max_output_tokens: Some(info.max_output_tokens as usize),
+                supports_tools: info.supports_tools,
+                supports_reasoning: info.supports_thinking,
+                supports_vision: info.supports_vision,
+                supports_parallel_tools: info.supports_tools,
+            }
+        } else {
+            m31a_core::prompts::ModelMetadata::conservative(
+                config
+                    .model_provider
+                    .as_deref()
+                    .unwrap_or("NVIDIA NIM / Upstream Provider"),
+                &active_model,
+            )
+        };
+
+        let mut tool_defs = tools.definitions();
+        if let Some(ref cm) = code_mode {
+            tool_defs.extend(cm.tool_definitions(&tool_defs));
+        }
+
+        let snapshot = m31a_core::prompts::PromptRuntimeSnapshot::gather_from_environment(
             &cwd,
             &active_model,
             &format!("{:?}", config.sandbox),
@@ -472,7 +499,24 @@ impl App {
                 .model_provider
                 .as_deref()
                 .unwrap_or("NVIDIA NIM / Upstream Provider"),
-        );
+        )
+        .with_model_metadata(model_meta)
+        .with_tool_definitions(&tool_defs)
+        .with_security_policy(m31a_core::prompts::SecurityPolicySnapshot {
+            sandbox_policy: format!("{:?}", config.sandbox),
+            approval_policy: format!("{:?}", config.approval),
+            execution_mode: "tui".to_string(),
+            workspace_root: cwd.clone(),
+            allows_escalation: false,
+        })
+        .with_collaboration(m31a_core::prompts::CollaborationCapabilitiesSnapshot {
+            max_spawn_depth: config.agents.max_depth,
+            current_spawn_depth: 0,
+            can_spawn_subagents: config.agents.max_depth > 0 && tools.is_allowed("spawn_agent"),
+            available_roles: Vec::new(),
+            worktree_isolation_supported: true,
+            inter_agent_channels_enabled: tools.is_allowed("post_message"),
+        });
 
         let initial_state = SystemPromptBuilder::sections_canonical(&snapshot);
         let initial_sys_prompt = initial_state.render();
@@ -2334,11 +2378,12 @@ impl App {
         self.push_modal(ModalState::command_palette(items));
     }
 
-    /// Toggles collaboration mode between Build (full modification) and Plan (read-only analysis).
+    /// Toggles collaboration mode between Build (full modification), Plan (read-only analysis), and Review (adversarial review).
     pub fn toggle_collaboration_mode(&mut self) {
         self.collaboration_mode = match self.collaboration_mode {
             CollaborationMode::Default => CollaborationMode::Plan,
-            CollaborationMode::Plan => CollaborationMode::Default,
+            CollaborationMode::Plan => CollaborationMode::Review,
+            CollaborationMode::Review => CollaborationMode::Default,
         };
         self.bottom_pane.collaboration_mode = self.collaboration_mode;
         self.refresh_system_prompt();
@@ -2352,6 +2397,11 @@ impl App {
                 "PLAN",
                 "Advisory & architecture exploration enabled (read-only checks, no mutations).",
                 NoticeLevel::Info,
+            ),
+            CollaborationMode::Review => (
+                "REVIEW",
+                "Adversarial code review & security auditing (read-only diff inspections, no mutations).",
+                NoticeLevel::Warning,
             ),
         };
         self.transcript.push(TranscriptItem::notice(
@@ -4456,7 +4506,34 @@ impl App {
     }
 
     pub fn refresh_system_prompt(&mut self) {
-        let mut snapshot = m31a_core::prompts::PromptRuntimeSnapshot::new(
+        let model_meta = if let Some(info) = m31a_provider::find_model(&self.active_model) {
+            m31a_core::prompts::ModelMetadata {
+                provider: info.originator.clone(),
+                model_id: info.slug.clone(),
+                model_family: m31a_core::prompts::ModelFamily::from_model_slug(&info.slug),
+                context_window: info.context_window as usize,
+                max_output_tokens: Some(info.max_output_tokens as usize),
+                supports_tools: info.supports_tools,
+                supports_reasoning: info.supports_thinking,
+                supports_vision: info.supports_vision,
+                supports_parallel_tools: info.supports_tools,
+            }
+        } else {
+            m31a_core::prompts::ModelMetadata::conservative(
+                self.config
+                    .model_provider
+                    .as_deref()
+                    .unwrap_or("NVIDIA NIM / Upstream Provider"),
+                &self.active_model,
+            )
+        };
+
+        let mut tool_defs = self.tools.definitions();
+        if let Some(ref cm) = self.code_mode {
+            tool_defs.extend(cm.tool_definitions(&tool_defs));
+        }
+
+        let mut snapshot = m31a_core::prompts::PromptRuntimeSnapshot::gather_from_environment(
             &self.cwd,
             &self.active_model,
             &format!("{:?}", self.config.sandbox),
@@ -4469,9 +4546,28 @@ impl App {
                 .as_deref()
                 .unwrap_or("NVIDIA NIM / Upstream Provider"),
         )
-        .with_dynamic_context(self.pinned_context.clone());
+        .with_model_metadata(model_meta)
+        .with_tool_definitions(&tool_defs)
+        .with_dynamic_context(self.pinned_context.clone())
+        .with_security_policy(m31a_core::prompts::SecurityPolicySnapshot {
+            sandbox_policy: format!("{:?}", self.config.sandbox),
+            approval_policy: format!("{:?}", self.config.approval),
+            execution_mode: "tui".to_string(),
+            workspace_root: self.cwd.clone(),
+            allows_escalation: false,
+        })
+        .with_collaboration(m31a_core::prompts::CollaborationCapabilitiesSnapshot {
+            max_spawn_depth: self.config.agents.max_depth,
+            current_spawn_depth: 0,
+            can_spawn_subagents: self.config.agents.max_depth > 0
+                && self.tools.is_allowed("spawn_agent"),
+            available_roles: Vec::new(),
+            worktree_isolation_supported: true,
+            inter_agent_channels_enabled: self.tools.is_allowed("post_message"),
+        });
+
         if let Some(ref goal) = self.active_goal {
-            snapshot.active_goal = Some(goal.clone());
+            snapshot = snapshot.with_active_goal(Some(goal.clone()));
         }
 
         let state = SystemPromptBuilder::sections_canonical(&snapshot);

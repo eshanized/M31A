@@ -356,13 +356,16 @@ impl BottomPaneState {
         }
     }
 
-    /// Toggles between Build and Plan mode for the current session.
+    /// Toggles between Build, Plan, and Review mode for the current session.
     pub fn toggle_mode(&mut self) -> m31a_core::prompts::CollaborationMode {
         self.collaboration_mode = match self.collaboration_mode {
             m31a_core::prompts::CollaborationMode::Default => {
                 m31a_core::prompts::CollaborationMode::Plan
             }
             m31a_core::prompts::CollaborationMode::Plan => {
+                m31a_core::prompts::CollaborationMode::Review
+            }
+            m31a_core::prompts::CollaborationMode::Review => {
                 m31a_core::prompts::CollaborationMode::Default
             }
         };
@@ -897,6 +900,15 @@ impl BottomPaneState {
                         .add_modifier(Modifier::BOLD),
                 ));
             }
+            m31a_core::prompts::CollaborationMode::Review => {
+                spans.push(Span::styled(
+                    " REVIEW ",
+                    Style::default()
+                        .fg(t.color(ColorRole::Surface0))
+                        .bg(t.color(ColorRole::Error))
+                        .add_modifier(Modifier::BOLD),
+                ));
+            }
         }
         spans.push(Span::raw(" "));
 
@@ -993,6 +1005,7 @@ impl BottomPaneState {
         let mode_tag = match self.collaboration_mode {
             m31a_core::prompts::CollaborationMode::Default => "[BUILD] ",
             m31a_core::prompts::CollaborationMode::Plan => "[PLAN] ",
+            m31a_core::prompts::CollaborationMode::Review => "[REVIEW] ",
         };
         let mode_style = t.style_secondary().add_modifier(Modifier::BOLD);
         let prompt_span = Span::styled("❯ ", t.style_accent(true));

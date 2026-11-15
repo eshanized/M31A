@@ -179,6 +179,11 @@ fn render_header(f: &mut Frame, app: &App, area: Rect, t: &Theme) {
             t.color(ColorRole::Warning),
             t.color(ColorRole::Surface0),
         ),
+        m31a_core::prompts::CollaborationMode::Review => (
+            " REVIEW ",
+            t.color(ColorRole::Error),
+            t.color(ColorRole::Surface0),
+        ),
     };
 
     let model_display = if let Some(effort) = app.nim_client.reasoning_effort() {

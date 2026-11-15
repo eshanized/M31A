@@ -414,7 +414,34 @@ impl AppServer {
         engine.hooks = Some(self.hooks.clone());
         engine.dangerously_bypass = self.config.dangerously_bypass;
 
-        let snapshot = m31a_core::prompts::PromptRuntimeSnapshot::new(
+        let model_meta = if let Some(info) = m31a_provider::find_model(&self.config.model) {
+            m31a_core::prompts::ModelMetadata {
+                provider: info.originator.clone(),
+                model_id: info.slug.clone(),
+                model_family: m31a_core::prompts::ModelFamily::from_model_slug(&info.slug),
+                context_window: info.context_window as usize,
+                max_output_tokens: Some(info.max_output_tokens as usize),
+                supports_tools: info.supports_tools,
+                supports_reasoning: info.supports_thinking,
+                supports_vision: info.supports_vision,
+                supports_parallel_tools: info.supports_tools,
+            }
+        } else {
+            m31a_core::prompts::ModelMetadata::conservative(
+                self.config
+                    .model_provider
+                    .as_deref()
+                    .unwrap_or("NVIDIA NIM / Upstream Provider"),
+                &self.config.model,
+            )
+        };
+
+        let mut tool_defs = engine.tools.definitions();
+        if let Some(ref cm) = engine.code_mode {
+            tool_defs.extend(cm.tool_definitions(&tool_defs));
+        }
+
+        let snapshot = m31a_core::prompts::PromptRuntimeSnapshot::gather_from_environment(
             &cwd,
             &self.config.model,
             &format!("{:?}", self.config.sandbox),
@@ -426,7 +453,25 @@ impl AppServer {
                 .model_provider
                 .as_deref()
                 .unwrap_or("NVIDIA NIM / Upstream Provider"),
-        );
+        )
+        .with_model_metadata(model_meta)
+        .with_tool_definitions(&tool_defs)
+        .with_security_policy(m31a_core::prompts::SecurityPolicySnapshot {
+            sandbox_policy: format!("{:?}", self.config.sandbox),
+            approval_policy: format!("{:?}", self.config.approval),
+            execution_mode: "app_server".to_string(),
+            workspace_root: cwd.clone(),
+            allows_escalation: false,
+        })
+        .with_collaboration(m31a_core::prompts::CollaborationCapabilitiesSnapshot {
+            max_spawn_depth: self.config.agents.max_depth,
+            current_spawn_depth: 0,
+            can_spawn_subagents: self.config.agents.max_depth > 0
+                && engine.tools.is_allowed("spawn_agent"),
+            available_roles: Vec::new(),
+            worktree_isolation_supported: true,
+            inter_agent_channels_enabled: engine.tools.is_allowed("post_message"),
+        });
 
         let system_instructions = SystemPromptBuilder::build_canonical(&snapshot);
         engine.authoritative_system_prompt = Some(system_instructions.clone());

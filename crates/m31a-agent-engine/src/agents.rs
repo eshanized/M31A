@@ -635,6 +635,14 @@ impl AgentRuntime for EngineAgentRuntime {
         let mut child_tools = self.tools.clone();
         // Children cannot block on interactive elicitation (deadlock hazard).
         child_tools.disable("request_user_input");
+        if role.sandbox_policy == m31a_core::SandboxPolicy::ReadOnly {
+            child_tools.disable("write_file");
+            child_tools.disable("edit");
+            child_tools.disable("apply_patch");
+        }
+        if depth >= max_depth {
+            child_tools.disable("spawn_agent");
+        }
 
         let client = self.base_client.with_model(&model);
         let mut child = AgentEngine::new(
@@ -652,13 +660,56 @@ impl AgentRuntime for EngineAgentRuntime {
         }));
         child.hooks = self.hooks.clone();
 
-        let snapshot = m31a_core::prompts::PromptRuntimeSnapshot::new(
+        let child_model_meta = if let Some(info) = m31a_provider::find_model(&model) {
+            m31a_core::prompts::ModelMetadata {
+                provider: info.originator.clone(),
+                model_id: info.slug.clone(),
+                model_family: m31a_core::prompts::ModelFamily::from_model_slug(&info.slug),
+                context_window: info.context_window as usize,
+                max_output_tokens: Some(info.max_output_tokens as usize),
+                supports_tools: info.supports_tools,
+                supports_reasoning: info.supports_thinking,
+                supports_vision: info.supports_vision,
+                supports_parallel_tools: info.supports_tools,
+            }
+        } else {
+            m31a_core::prompts::ModelMetadata::conservative("Configured Provider", &model)
+        };
+
+        let child_remaining_depth = max_depth.saturating_sub(depth);
+        let child_tool_defs = child.tools.definitions();
+        let child_worktree_supported = child_worktree.is_some();
+        let child_instructions = m31a_core::HierarchicalInstructions::discover(&child_cwd, None);
+
+        let mut snapshot = m31a_core::prompts::PromptRuntimeSnapshot::new(
             &child_cwd,
             &model,
             &format!("{:?}", role.sandbox_policy),
             CollaborationMode::Default,
         )
-        .with_role(Some(role.clone()));
+        .with_provider(&child_model_meta.provider)
+        .with_model_metadata(child_model_meta)
+        .with_tool_definitions(&child_tool_defs)
+        .with_role(Some(role.clone()))
+        .with_security_policy(m31a_core::prompts::SecurityPolicySnapshot {
+            sandbox_policy: format!("{:?}", role.sandbox_policy),
+            approval_policy: "Never".to_string(),
+            execution_mode: "child_agent".to_string(),
+            workspace_root: child_cwd.clone(),
+            allows_escalation: false,
+        })
+        .with_collaboration(m31a_core::prompts::CollaborationCapabilitiesSnapshot {
+            max_spawn_depth: child_remaining_depth,
+            current_spawn_depth: depth,
+            can_spawn_subagents: child_remaining_depth > 0 && child.tools.is_allowed("spawn_agent"),
+            available_roles: Vec::new(),
+            worktree_isolation_supported: child_worktree_supported,
+            inter_agent_channels_enabled: child.tools.is_allowed("post_message"),
+        });
+
+        if !child_instructions.entries.is_empty() {
+            snapshot = snapshot.with_project_instructions(child_instructions);
+        }
 
         let system_prompt = SystemPromptBuilder::build_canonical(&snapshot);
         child.authoritative_system_prompt = Some(system_prompt.clone());

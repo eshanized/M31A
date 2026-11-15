@@ -222,4 +222,15 @@ State is persisted within an embedded SQLite database (`m31a.db`):
 - **Threads & Turns**: Complete conversation tree including turn items, prompt tokens, completion tokens, and model configurations.
 - **Checkpoints**: Atomic workspace snapshots linked to git commits and file change lists.
 - **Multi-Agent Message Board**: Pub-sub topic channels enabling autonomous agents in a swarm to share status updates, findings, and requests.
-- **Path Concurrency Locks**: Granular file-path mutexes preventing conflicting writes between parallel subagents.
+---
+
+## 8. Canonical System Prompt Architecture (`m31a-core::prompts`)
+
+The system prompt is governed by the core principle: **The runtime is the source of truth; the prompt describes the runtime, never invents it.**
+- **Pure & Deterministic**: Assembled from an immutable `PromptRuntimeSnapshot` into named, diffable `WorldState` sections without side-effects or process execution during compilation.
+- **11 Modular Composition Layers**: Agent Identity, Non-Negotiable Invariants, Instruction Precedence & Trust Boundaries, Runtime Capability Envelope, Operating Modes (Build, Plan, Review), Agent Role Contracts, Engineering Workflow, Dynamic Tool Protocol, Model Adapters, Project Instructions, and Dynamic Context.
+- **Truthful Tool Protocol**: Only tools actually registered and authorized in the active execution context are described.
+- **Structured Role Contracts**: Predefined contracts for `architect`, `coder`, `reviewer`, `explorer`, `debugger`, `tester`, `security_analyst`, and `performance_engineer`.
+- **Compaction Immutability**: Authoritative system instructions remain pinned byte-for-byte at the head of conversation history across normal turns, context compaction, and session restores.
+
+See [SYSTEM_PROMPT_ARCHITECTURE.md](architecture/SYSTEM_PROMPT_ARCHITECTURE.md) for full architectural specification.

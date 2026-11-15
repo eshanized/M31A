@@ -769,6 +769,22 @@ enum PromptCommands {
     },
     #[command(about = "List built-in reusable prompt templates")]
     List,
+    #[command(about = "Inspect the canonical compiled system prompt and runtime capabilities")]
+    Inspect {
+        #[arg(
+            short = 'm',
+            long = "model",
+            help = "Model slug (defaults to configured model)"
+        )]
+        model: Option<String>,
+        #[arg(
+            long = "role",
+            help = "Optional agent role (e.g. architect, coder, reviewer)"
+        )]
+        role: Option<String>,
+        #[arg(long = "json", help = "Output structured JSON report")]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -1370,14 +1386,20 @@ async fn main() -> Result<()> {
             }
             DebugCommands::PromptInput { prompt } => {
                 let p = prompt.unwrap_or_else(|| "Hello, please inspect workspace".to_string());
-                let sys = SystemPromptBuilder::build(
+                let tools = ToolRegistry::new();
+                let snapshot = m31a_core::prompts::PromptRuntimeSnapshot::gather_from_environment(
                     &cwd,
                     &config.model,
                     &format!("{:?}", config.sandbox),
                     CollaborationMode::Default,
-                );
+                )
+                .with_user_custom_instructions(config.system_prompt.clone())
+                .with_tool_definitions(&tools.definitions());
+                let report = m31a_core::prompts::inspect_prompt(&snapshot);
                 println!("{}", "=== MODEL SYSTEM PROMPT ===".bold().blue());
-                println!("{}\n", sys);
+                println!("Prompt ID: {}", report.prompt_id.dimmed());
+                println!("Estimated Tokens: ~{}\n", report.total_estimated_tokens);
+                println!("{}\n", report.rendered_prompt);
                 println!("{}", "=== USER PROMPT ===".bold().cyan());
                 println!("{}", p);
                 Ok(())
@@ -3010,6 +3032,101 @@ async fn main() -> Result<()> {
                 }
                 Ok(())
             }
+            PromptCommands::Inspect { model, role, json } => {
+                let m = model.as_deref().unwrap_or(&config.model);
+                let tools = ToolRegistry::new();
+                let mut tool_defs = tools.definitions();
+                if config.features.get("code_mode").copied().unwrap_or(false) {
+                    let cm = m31a_code_mode::CodeModeOrchestrator::new();
+                    tool_defs.extend(cm.tool_definitions(&tool_defs));
+                }
+
+                let role_obj = if let Some(ref r_name) = role {
+                    let mut reg = m31a_core::AgentRoleRegistry::new();
+                    reg.load_custom_roles(&cwd);
+                    reg.get_role(r_name).cloned()
+                } else {
+                    None
+                };
+
+                let model_meta = if let Some(info) = m31a_provider::find_model(m) {
+                    m31a_core::prompts::ModelMetadata {
+                        provider: info.originator.clone(),
+                        model_id: info.slug.clone(),
+                        model_family: m31a_core::prompts::ModelFamily::from_model_slug(&info.slug),
+                        context_window: info.context_window as usize,
+                        max_output_tokens: Some(info.max_output_tokens as usize),
+                        supports_tools: info.supports_tools,
+                        supports_reasoning: info.supports_thinking,
+                        supports_vision: info.supports_vision,
+                        supports_parallel_tools: info.supports_tools,
+                    }
+                } else {
+                    m31a_core::prompts::ModelMetadata::conservative(
+                        config
+                            .model_provider
+                            .as_deref()
+                            .unwrap_or("Configured Provider"),
+                        m,
+                    )
+                };
+
+                let snapshot = m31a_core::prompts::PromptRuntimeSnapshot::gather_from_environment(
+                    &cwd,
+                    m,
+                    &format!("{:?}", config.sandbox),
+                    CollaborationMode::Default,
+                )
+                .with_user_custom_instructions(config.system_prompt.clone())
+                .with_model_metadata(model_meta)
+                .with_tool_definitions(&tool_defs)
+                .with_role(role_obj);
+
+                let report = m31a_core::prompts::inspect_prompt(&snapshot);
+                if json {
+                    println!("{}", serde_json::to_string_pretty(&report)?);
+                } else {
+                    println!(
+                        "{}",
+                        "=== M31A CANONICAL SYSTEM PROMPT INSPECTION ==="
+                            .bold()
+                            .blue()
+                    );
+                    println!("Prompt ID:         {}", report.prompt_id.cyan());
+                    println!("Model ID:          {}", report.model.model_id.green());
+                    println!("Provider:          {}", report.model.provider);
+                    println!("Model Family:      {:?}", report.model.model_family);
+                    println!("Max Context:       {} tokens", report.model.context_window);
+                    println!("Estimated Tokens:  ~{}", report.total_estimated_tokens);
+                    println!(
+                        "Active Role:       {}",
+                        report
+                            .active_role
+                            .as_deref()
+                            .unwrap_or("None (Default General Engineer)")
+                    );
+                    println!("Operating Mode:    {:?}", report.operating_mode);
+                    println!("Sandbox Policy:    {}", report.sandbox_policy);
+                    println!("Approval Policy:   {}", report.approval_policy);
+                    println!(
+                        "Authorized Tools:  {} registered ({})",
+                        report.registered_tools_count,
+                        report.authorized_tools.join(", ")
+                    );
+                    println!("\n{}", "--- Assembled WorldState Sections ---".bold());
+                    for s in &report.sections {
+                        println!(
+                            "- [{:<12}] {:<24} (hash: {})",
+                            s.placement,
+                            s.id.yellow(),
+                            &s.digest[..8.min(s.digest.len())]
+                        );
+                    }
+                    println!("\n{}", "--- Full Compiled System Instructions ---".bold());
+                    println!("{}", report.rendered_prompt);
+                }
+                Ok(())
+            }
         },
 
         Some(Commands::Vibe {
@@ -3644,7 +3761,35 @@ async fn run_turn(
     };
 
     // Initial system prompt assembled via canonical runtime pipeline
-    let snapshot = m31a_core::prompts::PromptRuntimeSnapshot::new(
+    let model_meta = if let Some(info) = m31a_provider::find_model(&config.model) {
+        m31a_core::prompts::ModelMetadata {
+            provider: info.originator.clone(),
+            model_id: info.slug.clone(),
+            model_family: m31a_core::prompts::ModelFamily::from_model_slug(&info.slug),
+            context_window: info.context_window as usize,
+            max_output_tokens: Some(info.max_output_tokens as usize),
+            supports_tools: info.supports_tools,
+            supports_reasoning: info.supports_thinking,
+            supports_vision: info.supports_vision,
+            supports_parallel_tools: info.supports_tools,
+        }
+    } else {
+        m31a_core::prompts::ModelMetadata::conservative(
+            config
+                .model_provider
+                .as_deref()
+                .unwrap_or("NVIDIA NIM / Upstream Provider"),
+            &config.model,
+        )
+    };
+
+    let mut tool_defs = tools.definitions();
+    if config.features.get("code_mode").copied().unwrap_or(false) {
+        let cm = m31a_code_mode::CodeModeOrchestrator::new();
+        tool_defs.extend(cm.tool_definitions(&tool_defs));
+    }
+
+    let snapshot = m31a_core::prompts::PromptRuntimeSnapshot::gather_from_environment(
         cwd,
         &config.model,
         &format!("{:?}", config.sandbox),
@@ -3656,7 +3801,24 @@ async fn run_turn(
             .model_provider
             .as_deref()
             .unwrap_or("NVIDIA NIM / Upstream Provider"),
-    );
+    )
+    .with_model_metadata(model_meta)
+    .with_tool_definitions(&tool_defs)
+    .with_security_policy(m31a_core::prompts::SecurityPolicySnapshot {
+        sandbox_policy: format!("{:?}", config.sandbox),
+        approval_policy: format!("{:?}", config.approval),
+        execution_mode: "cli".to_string(),
+        workspace_root: cwd.to_path_buf(),
+        allows_escalation: false,
+    })
+    .with_collaboration(m31a_core::prompts::CollaborationCapabilitiesSnapshot {
+        max_spawn_depth: config.agents.max_depth,
+        current_spawn_depth: 0,
+        can_spawn_subagents: config.agents.max_depth > 0 && tools.is_allowed("spawn_agent"),
+        available_roles: Vec::new(),
+        worktree_isolation_supported: true,
+        inter_agent_channels_enabled: tools.is_allowed("post_message"),
+    });
 
     let system_instructions = SystemPromptBuilder::build_canonical(&snapshot);
 
