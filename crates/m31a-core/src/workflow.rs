@@ -1173,6 +1173,605 @@ pub struct WorktreeRecord {
     pub updated_at_epoch_ms: i64,
 }
 
+// ============================================================================
+// INITIATIVE 2: VERIFIED EXECUTION ENGINE DOMAIN MODELS
+// ============================================================================
+
+/// Fine-grained authoritative execution transaction lifecycle states.
+///
+/// Ensures execution, verification, approval, promotion, and completion
+/// are strictly separated milestones that cannot be collapsed into a single boolean.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionLifecycleState {
+    #[default]
+    Created,
+    Authorized,
+    Preparing,
+    Executing,
+    ResultCaptured,
+    Frozen,
+    Verifying,
+    Verified,
+    ApprovalPending,
+    PromotionPending,
+    Promoting,
+    Promoted,
+    Completed,
+    // Terminal and exceptional failure states
+    Failed,
+    Cancelled,
+    Expired,
+    RetryPending,
+    NeedsReconciliation,
+    RollbackPending,
+    RollbackFailed,
+    Rejected,
+    PartiallyCompleted,
+}
+
+impl ExecutionLifecycleState {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Created => "created",
+            Self::Authorized => "authorized",
+            Self::Preparing => "preparing",
+            Self::Executing => "executing",
+            Self::ResultCaptured => "result_captured",
+            Self::Frozen => "frozen",
+            Self::Verifying => "verifying",
+            Self::Verified => "verified",
+            Self::ApprovalPending => "approval_pending",
+            Self::PromotionPending => "promotion_pending",
+            Self::Promoting => "promoting",
+            Self::Promoted => "promoted",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+            Self::Expired => "expired",
+            Self::RetryPending => "retry_pending",
+            Self::NeedsReconciliation => "needs_reconciliation",
+            Self::RollbackPending => "rollback_pending",
+            Self::RollbackFailed => "rollback_failed",
+            Self::Rejected => "rejected",
+            Self::PartiallyCompleted => "partially_completed",
+        }
+    }
+
+    #[allow(clippy::should_implement_trait)]
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "created" => Some(Self::Created),
+            "authorized" => Some(Self::Authorized),
+            "preparing" => Some(Self::Preparing),
+            "executing" => Some(Self::Executing),
+            "result_captured" => Some(Self::ResultCaptured),
+            "frozen" => Some(Self::Frozen),
+            "verifying" => Some(Self::Verifying),
+            "verified" => Some(Self::Verified),
+            "approval_pending" => Some(Self::ApprovalPending),
+            "promotion_pending" => Some(Self::PromotionPending),
+            "promoting" => Some(Self::Promoting),
+            "promoted" => Some(Self::Promoted),
+            "completed" => Some(Self::Completed),
+            "failed" => Some(Self::Failed),
+            "cancelled" => Some(Self::Cancelled),
+            "expired" => Some(Self::Expired),
+            "retry_pending" => Some(Self::RetryPending),
+            "needs_reconciliation" => Some(Self::NeedsReconciliation),
+            "rollback_pending" => Some(Self::RollbackPending),
+            "rollback_failed" => Some(Self::RollbackFailed),
+            "rejected" => Some(Self::Rejected),
+            "partially_completed" => Some(Self::PartiallyCompleted),
+            _ => None,
+        }
+    }
+
+    pub fn is_terminal(&self) -> bool {
+        matches!(
+            self,
+            Self::Completed
+                | Self::Failed
+                | Self::Cancelled
+                | Self::RollbackFailed
+                | Self::Rejected
+                | Self::PartiallyCompleted
+        )
+    }
+
+    /// Validates whether transitioning to `next` is permitted.
+    pub fn can_transition_to(&self, next: &ExecutionLifecycleState) -> bool {
+        if self == next {
+            return true;
+        }
+        if self.is_terminal() {
+            return false;
+        }
+
+        match self {
+            Self::Created => matches!(
+                next,
+                Self::Authorized | Self::Preparing | Self::Cancelled | Self::Failed
+            ),
+            Self::Authorized => matches!(
+                next,
+                Self::Preparing | Self::Executing | Self::Cancelled | Self::Failed | Self::Expired
+            ),
+            Self::Preparing => matches!(
+                next,
+                Self::Executing
+                    | Self::Cancelled
+                    | Self::Failed
+                    | Self::Expired
+                    | Self::NeedsReconciliation
+            ),
+            Self::Executing => matches!(
+                next,
+                Self::ResultCaptured
+                    | Self::Failed
+                    | Self::Cancelled
+                    | Self::Expired
+                    | Self::RetryPending
+                    | Self::NeedsReconciliation
+            ),
+            Self::ResultCaptured => matches!(
+                next,
+                Self::Frozen
+                    | Self::Failed
+                    | Self::Cancelled
+                    | Self::NeedsReconciliation
+                    | Self::RollbackPending
+            ),
+            Self::Frozen => matches!(
+                next,
+                Self::Verifying
+                    | Self::Failed
+                    | Self::Cancelled
+                    | Self::RollbackPending
+                    | Self::NeedsReconciliation
+            ),
+            Self::Verifying => matches!(
+                next,
+                Self::Verified
+                    | Self::Failed
+                    | Self::Cancelled
+                    | Self::RollbackPending
+                    | Self::RetryPending
+                    | Self::NeedsReconciliation
+            ),
+            Self::Verified => matches!(
+                next,
+                Self::ApprovalPending
+                    | Self::PromotionPending
+                    | Self::Promoting
+                    | Self::Failed
+                    | Self::Cancelled
+                    | Self::Rejected
+                    | Self::RollbackPending
+            ),
+            Self::ApprovalPending => matches!(
+                next,
+                Self::PromotionPending
+                    | Self::Promoting
+                    | Self::Rejected
+                    | Self::Cancelled
+                    | Self::Failed
+                    | Self::RollbackPending
+            ),
+            Self::PromotionPending => matches!(
+                next,
+                Self::Promoting
+                    | Self::Cancelled
+                    | Self::Failed
+                    | Self::RollbackPending
+                    | Self::NeedsReconciliation
+            ),
+            Self::Promoting => matches!(
+                next,
+                Self::Promoted
+                    | Self::RollbackPending
+                    | Self::RollbackFailed
+                    | Self::Failed
+                    | Self::NeedsReconciliation
+            ),
+            Self::Promoted => matches!(
+                next,
+                Self::Completed
+                    | Self::PartiallyCompleted
+                    | Self::Failed
+                    | Self::NeedsReconciliation
+            ),
+            Self::Expired => matches!(
+                next,
+                Self::RetryPending | Self::Failed | Self::Cancelled | Self::NeedsReconciliation
+            ),
+            Self::RetryPending => matches!(
+                next,
+                Self::Authorized
+                    | Self::Preparing
+                    | Self::Executing
+                    | Self::Cancelled
+                    | Self::Failed
+            ),
+            Self::NeedsReconciliation => matches!(
+                next,
+                Self::Preparing
+                    | Self::Executing
+                    | Self::Frozen
+                    | Self::Verifying
+                    | Self::PromotionPending
+                    | Self::RollbackPending
+                    | Self::Failed
+                    | Self::Cancelled
+                    | Self::PartiallyCompleted
+            ),
+            Self::RollbackPending => matches!(
+                next,
+                Self::Failed
+                    | Self::RollbackFailed
+                    | Self::RetryPending
+                    | Self::Cancelled
+                    | Self::Rejected
+            ),
+            Self::Completed
+            | Self::Failed
+            | Self::Cancelled
+            | Self::RollbackFailed
+            | Self::Rejected
+            | Self::PartiallyCompleted => false,
+        }
+    }
+}
+
+/// Type of change applied to an individual file in a change-set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FileChangeType {
+    Added,
+    Modified,
+    Deleted,
+    Renamed,
+    Copied,
+    PermissionChange,
+    SymlinkChange,
+}
+
+impl FileChangeType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Added => "added",
+            Self::Modified => "modified",
+            Self::Deleted => "deleted",
+            Self::Renamed => "renamed",
+            Self::Copied => "copied",
+            Self::PermissionChange => "permission_change",
+            Self::SymlinkChange => "symlink_change",
+        }
+    }
+}
+
+/// Detailed file-level change record within an immutable ChangeSetManifest.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FileChangeRecord {
+    pub relative_path: PathBuf,
+    pub original_path: Option<PathBuf>,
+    pub change_type: FileChangeType,
+    pub original_exists: bool,
+    pub original_content_hash: Option<String>,
+    pub new_content_hash: Option<String>,
+    pub original_mode: Option<u32>,
+    pub new_mode: Option<u32>,
+    pub symlink_target: Option<PathBuf>,
+    pub size_bytes: u64,
+    pub is_binary: bool,
+    pub patch_artifact_path: Option<String>,
+}
+
+/// Canonical, immutable change-set manifest binding actual changes to the execution attempt.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChangeSetManifest {
+    pub manifest_version: u32,
+    pub id: String,
+    pub workflow_id: String,
+    pub plan_revision: u32,
+    pub task_id: String,
+    pub attempt_id: u32,
+    pub worker_id: String,
+    pub agent_id: Option<String>,
+    pub repository_root: PathBuf,
+    pub canonical_workspace_id: String,
+    pub source_base_sha: String,
+    pub target_commit_sha: Option<String>,
+    pub files: Vec<FileChangeRecord>,
+    pub isolation_strategy: WorkspaceIsolationStrategy,
+    pub created_at_epoch_ms: i64,
+    pub frozen_at_epoch_ms: Option<i64>,
+    pub is_frozen: bool,
+    pub manifest_hash: String,
+}
+
+impl ChangeSetManifest {
+    /// Computes deterministic content-addressed SHA-256 hash of the manifest.
+    pub fn compute_canonical_hash(&self) -> String {
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+
+        // Feed canonical header fields
+        hasher.update(self.manifest_version.to_le_bytes());
+        hasher.update(self.workflow_id.as_bytes());
+        hasher.update(self.plan_revision.to_le_bytes());
+        hasher.update(self.task_id.as_bytes());
+        hasher.update(self.attempt_id.to_le_bytes());
+        hasher.update(self.worker_id.as_bytes());
+        if let Some(ref aid) = self.agent_id {
+            hasher.update(aid.as_bytes());
+        }
+        hasher.update(self.source_base_sha.as_bytes());
+        if let Some(ref sha) = self.target_commit_sha {
+            hasher.update(sha.as_bytes());
+        }
+        hasher.update(self.isolation_strategy.as_str().as_bytes());
+
+        // Sort files deterministically by relative_path
+        let mut sorted_files = self.files.clone();
+        sorted_files.sort_by(|a, b| a.relative_path.cmp(&b.relative_path));
+
+        for f in &sorted_files {
+            hasher.update(f.relative_path.to_string_lossy().as_bytes());
+            hasher.update(f.change_type.as_str().as_bytes());
+            hasher.update([if f.original_exists { 1 } else { 0 }]);
+            if let Some(ref h) = f.original_content_hash {
+                hasher.update(h.as_bytes());
+            }
+            if let Some(ref h) = f.new_content_hash {
+                hasher.update(h.as_bytes());
+            }
+            if let Some(m) = f.original_mode {
+                hasher.update(m.to_le_bytes());
+            }
+            if let Some(m) = f.new_mode {
+                hasher.update(m.to_le_bytes());
+            }
+            if let Some(ref st) = f.symlink_target {
+                hasher.update(st.to_string_lossy().as_bytes());
+            }
+            hasher.update(f.size_bytes.to_le_bytes());
+            hasher.update([if f.is_binary { 1 } else { 0 }]);
+        }
+
+        format!("{:x}", hasher.finalize())
+    }
+
+    /// Freezes the manifest so no further mutations can be accepted into this result.
+    pub fn freeze(&mut self) {
+        self.is_frozen = true;
+        self.frozen_at_epoch_ms = Some(chrono::Utc::now().timestamp_millis());
+        self.manifest_hash = self.compute_canonical_hash();
+    }
+
+    /// Validates integrity of paths and hash.
+    pub fn validate_integrity(&self) -> Result<()> {
+        let expected = self.compute_canonical_hash();
+        if self.manifest_hash != expected {
+            bail!(
+                "ChangeSetManifest hash mismatch: expected {expected}, recorded {}",
+                self.manifest_hash
+            );
+        }
+
+        for f in &self.files {
+            if f.relative_path.is_absolute() {
+                bail!(
+                    "Manifest contains absolute path: {}",
+                    f.relative_path.display()
+                );
+            }
+            for comp in f.relative_path.components() {
+                if matches!(comp, std::path::Component::ParentDir) {
+                    bail!(
+                        "Manifest path traversal detected: {}",
+                        f.relative_path.display()
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Lifecycle status for external side effects.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ExternalEffectLifecycleStatus {
+    #[default]
+    Prepared,
+    Authorized,
+    Dispatching,
+    Confirmed,
+    Rejected,
+    UnknownOutcome,
+    Reconciling,
+    Completed,
+    Compensating,
+    Compensated,
+    CompensationFailed,
+    ManualReconciliationRequired,
+}
+
+impl ExternalEffectLifecycleStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Prepared => "prepared",
+            Self::Authorized => "authorized",
+            Self::Dispatching => "dispatching",
+            Self::Confirmed => "confirmed",
+            Self::Rejected => "rejected",
+            Self::UnknownOutcome => "unknown_outcome",
+            Self::Reconciling => "reconciling",
+            Self::Completed => "completed",
+            Self::Compensating => "compensating",
+            Self::Compensated => "compensated",
+            Self::CompensationFailed => "compensation_failed",
+            Self::ManualReconciliationRequired => "manual_reconciliation_required",
+        }
+    }
+
+    #[allow(clippy::should_implement_trait)]
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "prepared" => Some(Self::Prepared),
+            "authorized" => Some(Self::Authorized),
+            "dispatching" => Some(Self::Dispatching),
+            "confirmed" => Some(Self::Confirmed),
+            "rejected" => Some(Self::Rejected),
+            "unknown_outcome" => Some(Self::UnknownOutcome),
+            "reconciling" => Some(Self::Reconciling),
+            "completed" => Some(Self::Completed),
+            "compensating" => Some(Self::Compensating),
+            "compensated" => Some(Self::Compensated),
+            "compensation_failed" => Some(Self::CompensationFailed),
+            "manual_reconciliation_required" => Some(Self::ManualReconciliationRequired),
+            _ => None,
+        }
+    }
+
+    pub fn is_terminal(&self) -> bool {
+        matches!(
+            self,
+            Self::Completed
+                | Self::Rejected
+                | Self::Compensated
+                | Self::CompensationFailed
+                | Self::ManualReconciliationRequired
+        )
+    }
+}
+
+/// Durable external side effect intent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExternalEffectIntent {
+    pub id: String,
+    pub workflow_id: String,
+    pub task_id: String,
+    pub attempt_id: u32,
+    pub worker_id: String,
+    pub logical_operation_id: String,
+    pub tool_name: String,
+    pub target_service: String,
+    pub authorized_destination: String,
+    pub request_fingerprint: String,
+    pub idempotency_key: Option<String>,
+    pub lifecycle_status: ExternalEffectLifecycleStatus,
+    pub is_reversible: bool,
+    pub compensation_procedure: Option<String>,
+    pub error_details: Option<String>,
+    pub created_at_epoch_ms: i64,
+    pub updated_at_epoch_ms: i64,
+}
+
+impl ExternalEffectIntent {
+    /// Compute stable request fingerprint.
+    pub fn compute_fingerprint(tool_name: &str, target_service: &str, payload: &str) -> String {
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(tool_name.as_bytes());
+        hasher.update(target_service.as_bytes());
+        hasher.update(payload.as_bytes());
+        format!("{:x}", hasher.finalize())
+    }
+}
+
+/// Durable mutation journal event record.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExecutionJournalEvent {
+    pub id: String,
+    pub workflow_id: String,
+    pub task_id: String,
+    pub attempt_id: u32,
+    pub worker_id: String,
+    pub operation_id: Option<String>,
+    pub event_type: String,
+    pub previous_state: Option<String>,
+    pub new_state: Option<String>,
+    pub resource_identity: Option<String>,
+    pub manifest_hash: Option<String>,
+    pub payload_json: String,
+    pub timestamp_epoch_ms: i64,
+}
+
+/// Status of an individual pre-integration file snapshot record.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PreIntegrationSnapshotStatus {
+    #[default]
+    Prepared,
+    Restored,
+    Failed,
+}
+
+impl PreIntegrationSnapshotStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Prepared => "prepared",
+            Self::Restored => "restored",
+            Self::Failed => "failed",
+        }
+    }
+
+    #[allow(clippy::should_implement_trait)]
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "prepared" => Some(Self::Prepared),
+            "restored" => Some(Self::Restored),
+            "failed" => Some(Self::Failed),
+            _ => None,
+        }
+    }
+}
+
+/// Durable pre-integration snapshot record for crash-safe rollback.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PreIntegrationSnapshotRecord {
+    pub id: String,
+    pub integration_id: String,
+    pub workflow_id: String,
+    pub task_id: String,
+    pub attempt_id: u32,
+    pub relative_path: PathBuf,
+    pub original_exists: bool,
+    pub original_content_hash: Option<String>,
+    pub original_mode: Option<u32>,
+    pub preimage_storage_path: Option<PathBuf>,
+    pub status: PreIntegrationSnapshotStatus,
+    pub created_at_epoch_ms: i64,
+}
+
+/// Durable evidence record bound to immutable manifest hash and verification plan.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DurableVerificationRecord {
+    pub id: String,
+    pub workflow_id: String,
+    pub task_id: String,
+    pub attempt_id: u32,
+    pub manifest_hash: String,
+    pub source_base_sha: String,
+    pub target_commit_sha: Option<String>,
+    pub verification_plan_hash: String,
+    pub requirement_id: String,
+    pub category: String,
+    pub operation: String,
+    pub exit_code: Option<i32>,
+    pub status: String,
+    pub tests_total: Option<usize>,
+    pub tests_passed: Option<usize>,
+    pub tests_failed: Option<usize>,
+    pub tests_skipped: Option<usize>,
+    pub duration_ms: u64,
+    pub diagnostics: Option<String>,
+    pub artifact_refs: Vec<String>,
+    pub timestamp_epoch_ms: i64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1517,5 +2116,123 @@ mod tests {
             ExecutionMode::from_str("coordinated"),
             Some(ExecutionMode::Coordinated)
         );
+    }
+
+    #[test]
+    fn test_execution_lifecycle_state_transitions() {
+        use ExecutionLifecycleState::*;
+        assert!(Created.can_transition_to(&Authorized));
+        assert!(Authorized.can_transition_to(&Preparing));
+        assert!(Preparing.can_transition_to(&Executing));
+        assert!(Executing.can_transition_to(&ResultCaptured));
+        assert!(ResultCaptured.can_transition_to(&Frozen));
+        assert!(Frozen.can_transition_to(&Verifying));
+        assert!(Verifying.can_transition_to(&Verified));
+        assert!(Verified.can_transition_to(&ApprovalPending));
+        assert!(ApprovalPending.can_transition_to(&Promoting));
+        assert!(Promoting.can_transition_to(&Promoted));
+        assert!(Promoted.can_transition_to(&Completed));
+
+        // Exceptional transitions
+        assert!(Executing.can_transition_to(&Expired));
+        assert!(Expired.can_transition_to(&RetryPending));
+        assert!(RetryPending.can_transition_to(&Executing));
+        assert!(Promoting.can_transition_to(&RollbackPending));
+        assert!(RollbackPending.can_transition_to(&Failed));
+
+        // Terminal states cannot transition
+        assert!(Completed.is_terminal());
+        assert!(!Completed.can_transition_to(&Executing));
+        assert!(Failed.is_terminal());
+        assert!(!Failed.can_transition_to(&Executing));
+    }
+
+    #[test]
+    fn test_changeset_manifest_hashing_and_freeze() {
+        let mut manifest = ChangeSetManifest {
+            manifest_version: 1,
+            id: "cs-1".into(),
+            workflow_id: "wf-1".into(),
+            plan_revision: 1,
+            task_id: "t-1".into(),
+            attempt_id: 1,
+            worker_id: "worker-1".into(),
+            agent_id: Some("agent-1".into()),
+            repository_root: PathBuf::from("/repo"),
+            canonical_workspace_id: "ws-1".into(),
+            source_base_sha: "abc1234".into(),
+            target_commit_sha: Some("abc1234".into()),
+            files: vec![
+                FileChangeRecord {
+                    relative_path: PathBuf::from("src/lib.rs"),
+                    original_path: None,
+                    change_type: FileChangeType::Modified,
+                    original_exists: true,
+                    original_content_hash: Some("old_hash".into()),
+                    new_content_hash: Some("new_hash".into()),
+                    original_mode: Some(0o644),
+                    new_mode: Some(0o644),
+                    symlink_target: None,
+                    size_bytes: 120,
+                    is_binary: false,
+                    patch_artifact_path: None,
+                },
+                FileChangeRecord {
+                    relative_path: PathBuf::from("src/new.rs"),
+                    original_path: None,
+                    change_type: FileChangeType::Added,
+                    original_exists: false,
+                    original_content_hash: None,
+                    new_content_hash: Some("fresh_hash".into()),
+                    original_mode: None,
+                    new_mode: Some(0o644),
+                    symlink_target: None,
+                    size_bytes: 45,
+                    is_binary: false,
+                    patch_artifact_path: None,
+                },
+            ],
+            isolation_strategy: WorkspaceIsolationStrategy::Worktree,
+            created_at_epoch_ms: 1000,
+            frozen_at_epoch_ms: None,
+            is_frozen: false,
+            manifest_hash: String::new(),
+        };
+
+        let initial_hash = manifest.compute_canonical_hash();
+        assert_eq!(initial_hash.len(), 64);
+
+        manifest.freeze();
+        assert!(manifest.is_frozen);
+        assert!(manifest.frozen_at_epoch_ms.is_some());
+        assert_eq!(manifest.manifest_hash, initial_hash);
+        assert!(manifest.validate_integrity().is_ok());
+
+        // Tamper test: mutating a file path must invalidate integrity check
+        manifest.files[0].new_content_hash = Some("tampered_hash".into());
+        assert!(manifest.validate_integrity().is_err());
+    }
+
+    #[test]
+    fn test_external_effect_intent_fingerprint() {
+        let fp1 = ExternalEffectIntent::compute_fingerprint(
+            "cloud_deploy",
+            "production",
+            r#"{"env": "prod", "version": "1.0.0"}"#,
+        );
+        let fp2 = ExternalEffectIntent::compute_fingerprint(
+            "cloud_deploy",
+            "production",
+            r#"{"env": "prod", "version": "1.0.0"}"#,
+        );
+        let fp3 = ExternalEffectIntent::compute_fingerprint(
+            "cloud_deploy",
+            "staging",
+            r#"{"env": "prod", "version": "1.0.0"}"#,
+        );
+
+        assert_eq!(fp1, fp2);
+        assert_ne!(fp1, fp3);
+        assert_eq!(fp1.len(), 64);
     }
 }

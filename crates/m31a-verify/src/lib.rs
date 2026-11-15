@@ -6,6 +6,7 @@
 pub mod benchmark;
 pub mod deployment;
 pub mod diagnostics;
+pub mod engine;
 pub mod goal_backward;
 pub mod iac;
 pub mod integrity;
@@ -29,6 +30,10 @@ pub use deployment::{
     DeploymentReadinessGate, DeploymentReadinessReport, DeploymentVerdict, GateCheck,
 };
 pub use diagnostics::{Diagnostic, DiagnosticParser, DiagnosticSeverity};
+pub use engine::{
+    IndependentVerificationEngine, VerificationCategory, VerificationEvaluationReport,
+    VerificationPlan, VerificationRequirement,
+};
 pub use goal_backward::{
     ArtifactCheck, AutomatedTestCheck, GoalBackwardReport, GoalBackwardVerifier, TruthStatus,
     TruthVerification, VerificationOutcome,

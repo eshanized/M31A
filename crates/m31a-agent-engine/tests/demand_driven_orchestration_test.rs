@@ -299,6 +299,9 @@ async fn test_2_overlapping_modifications_detected_during_integration() {
         source_branch: Some("branch-task-1".into()),
         source_base_sha: Some(base_sha.clone()),
         target_base_sha: Some(base_sha.clone()),
+        worker_id: None,
+        manifest: None,
+        expected_target_head_sha: None,
     };
 
     let outcome_1 = svc.integrate(&req_1).await.unwrap();
@@ -335,6 +338,9 @@ async fn test_2_overlapping_modifications_detected_during_integration() {
         source_branch: Some("branch-task-2".into()),
         source_base_sha: Some(base_sha.clone()), // Stale base!
         target_base_sha: Some(base_sha.clone()),
+        worker_id: None,
+        manifest: None,
+        expected_target_head_sha: None,
     };
 
     let outcome_2 = svc.integrate(&req_2).await.unwrap();
@@ -712,6 +718,9 @@ async fn test_7_dynamically_spawned_agents_cannot_bypass_ownership_policies() {
         source_branch: None,
         source_base_sha: None,
         target_base_sha: None,
+        worker_id: None,
+        manifest: None,
+        expected_target_head_sha: None,
     };
 
     let outcome = svc.integrate(&req).await.unwrap();
@@ -840,6 +849,9 @@ async fn test_9_integration_retries_are_idempotent() {
         source_branch: Some("branch-idemp".into()),
         source_base_sha: Some(base_sha.clone()),
         target_base_sha: Some(base_sha.clone()),
+        worker_id: None,
+        manifest: None,
+        expected_target_head_sha: None,
     };
 
     // First attempt: integrates and commits
@@ -1061,6 +1073,9 @@ async fn test_13_verification_failures_prevent_promotion() {
         source_branch: Some("branch-broken".into()),
         source_base_sha: Some(base_sha.clone()),
         target_base_sha: Some(base_sha.clone()),
+        worker_id: None,
+        manifest: None,
+        expected_target_head_sha: None,
     };
 
     let outcome = svc.integrate(&req).await.unwrap();

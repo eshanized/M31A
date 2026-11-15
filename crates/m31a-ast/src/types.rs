@@ -330,9 +330,7 @@ impl AstSymbol {
         let hash = format!("{:x}", hasher.finalize());
         let short_hash = &hash[..16];
 
-        let scope_prefix = parent_scope
-            .map(|s| format!("{}::", s))
-            .unwrap_or_default();
+        let scope_prefix = parent_scope.map(|s| format!("{}::", s)).unwrap_or_default();
         format!("sym::{}{}_{}", scope_prefix, name, short_hash)
     }
 }

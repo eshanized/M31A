@@ -111,7 +111,11 @@ impl AstCodebaseIndex {
                     .iter()
                     .map(|imp| PathBuf::from(&imp.from_module))
                     .collect();
-                let rel_path = file.path.strip_prefix(root).unwrap_or(&file.path).to_path_buf();
+                let rel_path = file
+                    .path
+                    .strip_prefix(root)
+                    .unwrap_or(&file.path)
+                    .to_path_buf();
                 index.module_graph.insert_module(
                     file.path.clone(),
                     rel_path,
@@ -220,10 +224,10 @@ impl AstCodebaseIndex {
     /// Incrementally updates or adds a file's symbols and relationships in the index with content hashing.
     pub fn update_file(&mut self, path: &Path, content: &str) {
         let hash = compute_hash(content);
-        if let Some(existing_hash) = self.file_hashes.get(path) {
-            if existing_hash == &hash {
-                return; // Content unchanged, avoid unnecessary re-indexing
-            }
+        if let Some(existing_hash) = self.file_hashes.get(path)
+            && existing_hash == &hash
+        {
+            return; // Content unchanged, avoid unnecessary re-indexing
         }
 
         self.remove_file(path);
@@ -268,7 +272,8 @@ impl AstCodebaseIndex {
         let scan_report = WorkspaceDiscovery::scan_files(&self.root_path, &options);
         let mut changed_count = 0;
 
-        let on_disk_paths: HashSet<PathBuf> = scan_report.files.iter().map(|f| f.path.clone()).collect();
+        let on_disk_paths: HashSet<PathBuf> =
+            scan_report.files.iter().map(|f| f.path.clone()).collect();
         let indexed_paths: Vec<PathBuf> = self.symbols_by_file.keys().cloned().collect();
 
         // 1. Remove deleted files
@@ -499,8 +504,10 @@ impl AstCodebaseIndex {
     /// Retrieves task-aware repository context for engineering agents within a token budget.
     pub fn retrieve_context(&self, query: &RetrievalQuery) -> ContextPacket {
         let all_syms: Vec<AstSymbol> = self.symbols_by_id.values().cloned().collect();
-        let inv = self.inventory.clone().unwrap_or_else(|| {
-            WorkspaceInventory {
+        let inv = self
+            .inventory
+            .clone()
+            .unwrap_or_else(|| WorkspaceInventory {
                 root_path: self.root_path.clone(),
                 repo_name: "workspace".to_string(),
                 git_branch: None,
@@ -509,8 +516,7 @@ impl AstCodebaseIndex {
                 manifests: vec![],
                 packages: vec![],
                 is_monorepo: false,
-            }
-        });
+            });
 
         SemanticRetriever::retrieve_context(
             query,
@@ -523,7 +529,11 @@ impl AstCodebaseIndex {
     }
 
     /// Finds all tests related to a symbol or file.
-    pub fn find_related_tests(&self, target_symbol: &str, target_file: &Path) -> Vec<RelatedTestTarget> {
+    pub fn find_related_tests(
+        &self,
+        target_symbol: &str,
+        target_file: &Path,
+    ) -> Vec<RelatedTestTarget> {
         let all_syms: Vec<AstSymbol> = self.symbols_by_id.values().cloned().collect();
         TestDiscoveryEngine::find_related_tests(
             target_symbol,

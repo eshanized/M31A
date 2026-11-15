@@ -205,8 +205,8 @@
       "required": true,
       "owning_crate": "m31a-core",
       "runtime_consumer": "m31a-cli",
-      "sha256": "4956145874e65f9b18545e81b07518ec80a07dceb5e03218466921be99dd8cfe",
-      "size_bytes": 40756
+      "sha256": "8e84faa9d44f8787cfaf93035848f1bcbcfe6ccf6f83a0f368b07ac539f2a41f",
+      "size_bytes": 41590
     },
     {
       "resource_id": "package-changelog",

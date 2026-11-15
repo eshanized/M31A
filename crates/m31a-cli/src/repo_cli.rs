@@ -15,30 +15,55 @@ pub enum RepoCommands {
 
     #[command(about = "Index or re-index the repository")]
     Index {
-        #[arg(short = 'f', long = "force", help = "Force full re-indexing from scratch")]
+        #[arg(
+            short = 'f',
+            long = "force",
+            help = "Force full re-indexing from scratch"
+        )]
         force: bool,
     },
 
-    #[command(about = "Show repository overview including manifests, packages, languages, and symbol counts")]
+    #[command(
+        about = "Show repository overview including manifests, packages, languages, and symbol counts"
+    )]
     Overview,
 
     #[command(about = "Search for symbols by name, qualified name, or kind")]
     Symbols {
         #[arg(help = "Symbol name or query pattern")]
         query: String,
-        #[arg(short = 'k', long = "kind", help = "Filter by symbol kind (fn, struct, class, trait, enum, method)")]
+        #[arg(
+            short = 'k',
+            long = "kind",
+            help = "Filter by symbol kind (fn, struct, class, trait, enum, method)"
+        )]
         kind: Option<String>,
-        #[arg(short = 'l', long = "limit", default_value = "30", help = "Maximum results")]
+        #[arg(
+            short = 'l',
+            long = "limit",
+            default_value = "30",
+            help = "Maximum results"
+        )]
         limit: usize,
     },
 
     #[command(about = "Inspect direct and transitive dependency graphs")]
     Graph {
-        #[arg(short = 't', long = "tier", default_value = "package", help = "Graph tier: package, module, or symbol")]
+        #[arg(
+            short = 't',
+            long = "tier",
+            default_value = "package",
+            help = "Graph tier: package, module, or symbol"
+        )]
         tier: String,
         #[arg(help = "Target package, module, or symbol name")]
         target: Option<String>,
-        #[arg(short = 'd', long = "depth", default_value = "5", help = "Maximum traversal depth")]
+        #[arg(
+            short = 'd',
+            long = "depth",
+            default_value = "5",
+            help = "Maximum traversal depth"
+        )]
         depth: usize,
     },
 
@@ -46,7 +71,11 @@ pub enum RepoCommands {
     Impact {
         #[arg(required = true, help = "File paths to modify or analyze")]
         files: Vec<String>,
-        #[arg(short = 's', long = "symbol", help = "Specific symbol names being edited")]
+        #[arg(
+            short = 's',
+            long = "symbol",
+            help = "Specific symbol names being edited"
+        )]
         symbols: Vec<String>,
     },
 
@@ -65,7 +94,12 @@ pub enum RepoCommands {
     Context {
         #[arg(help = "Task description, error message, or prompt")]
         task: String,
-        #[arg(short = 'b', long = "budget", default_value = "3000", help = "Token budget")]
+        #[arg(
+            short = 'b',
+            long = "budget",
+            default_value = "3000",
+            help = "Token budget"
+        )]
         budget: usize,
     },
 }
@@ -76,15 +110,26 @@ pub async fn run_repo_command(cmd: RepoCommands, json_output: bool, cwd: &Path) 
     match cmd {
         RepoCommands::Status => {
             let res = registry
-                .execute("repository_index_status", "{}", cwd, SandboxPolicy::ReadOnly)
+                .execute(
+                    "repository_index_status",
+                    "{}",
+                    cwd,
+                    SandboxPolicy::ReadOnly,
+                )
                 .await?;
             if json_output {
                 println!("{}", res);
             } else {
                 let val: serde_json::Value = serde_json::from_str(&res)?;
                 println!("{}", "Repository Index Status".cyan().bold());
-                println!("  Status:           {}", val["status"].as_str().unwrap_or("unknown").green());
-                println!("  Root Path:        {}", val["root_path"].as_str().unwrap_or(""));
+                println!(
+                    "  Status:           {}",
+                    val["status"].as_str().unwrap_or("unknown").green()
+                );
+                println!(
+                    "  Root Path:        {}",
+                    val["root_path"].as_str().unwrap_or("")
+                );
                 println!("  Files Indexed:    {}", val["files_indexed"]);
                 println!("  Total Symbols:    {}", val["total_symbols"]);
                 println!("  Relationships:    {}", val["total_relationships"]);
@@ -95,7 +140,16 @@ pub async fn run_repo_command(cmd: RepoCommands, json_output: bool, cwd: &Path) 
         RepoCommands::Index { force } => {
             let start = std::time::Instant::now();
             if !json_output {
-                println!("{}", format!("Indexing repository at '{}' (force: {})...", cwd.display(), force).cyan().bold());
+                println!(
+                    "{}",
+                    format!(
+                        "Indexing repository at '{}' (force: {})...",
+                        cwd.display(),
+                        force
+                    )
+                    .cyan()
+                    .bold()
+                );
             }
             let index = registry.get_or_build_repo_index(cwd, force).await;
             let elapsed = start.elapsed();
@@ -128,7 +182,10 @@ pub async fn run_repo_command(cmd: RepoCommands, json_output: bool, cwd: &Path) 
             } else {
                 let val: serde_json::Value = serde_json::from_str(&res)?;
                 println!("{}", "Repository Architecture Overview".cyan().bold());
-                println!("  Root:          {}", val["root_path"].as_str().unwrap_or(""));
+                println!(
+                    "  Root:          {}",
+                    val["root_path"].as_str().unwrap_or("")
+                );
                 println!("  Status:        {}", val["status"].as_str().unwrap_or(""));
                 println!("  Files:         {}", val["files_indexed"]);
                 println!("  Symbols:       {}", val["total_symbols"]);
@@ -136,13 +193,22 @@ pub async fn run_repo_command(cmd: RepoCommands, json_output: bool, cwd: &Path) 
 
                 if let Some(pkgs) = val["packages"].as_array() {
                     if !pkgs.is_empty() {
-                        println!("\n{}", "Discovered Packages / Workspace Members:".yellow().bold());
+                        println!(
+                            "\n{}",
+                            "Discovered Packages / Workspace Members:".yellow().bold()
+                        );
                         for p in pkgs {
                             let name = p["name"].as_str().unwrap_or("");
                             let ver = p["version"].as_str().unwrap_or("0.0.0");
                             let lang = p["language"].as_str().unwrap_or("");
                             let path = p["manifest_path"].as_str().unwrap_or("");
-                            println!("  - {:<24} {:<10} {:<10} ({})", name.green(), ver.dimmed(), lang.cyan(), path);
+                            println!(
+                                "  - {:<24} {:<10} {:<10} ({})",
+                                name.green(),
+                                ver.dimmed(),
+                                lang.cyan(),
+                                path
+                            );
                         }
                     }
                 }
@@ -164,14 +230,24 @@ pub async fn run_repo_command(cmd: RepoCommands, json_output: bool, cwd: &Path) 
                 "limit": limit,
             });
             let res = registry
-                .execute("symbol_search", &args.to_string(), cwd, SandboxPolicy::ReadOnly)
+                .execute(
+                    "symbol_search",
+                    &args.to_string(),
+                    cwd,
+                    SandboxPolicy::ReadOnly,
+                )
                 .await?;
             if json_output {
                 println!("{}", res);
             } else {
                 let val: serde_json::Value = serde_json::from_str(&res)?;
                 let total = val["total_found"].as_u64().unwrap_or(0);
-                println!("{}", format!("Symbol Search: '{}' (found {})", query, total).cyan().bold());
+                println!(
+                    "{}",
+                    format!("Symbol Search: '{}' (found {})", query, total)
+                        .cyan()
+                        .bold()
+                );
                 if let Some(symbols) = val["symbols"].as_array() {
                     for s in symbols {
                         let name = s["name"].as_str().unwrap_or("");
@@ -182,7 +258,13 @@ pub async fn run_repo_command(cmd: RepoCommands, json_output: bool, cwd: &Path) 
                             .map(|l| format!("{}-{}", l[0], l[1]))
                             .unwrap_or_default();
                         let sig = s["signature"].as_str().unwrap_or("");
-                        println!("  - [{:<8}] {:<24} {}:{}", kind.yellow(), name.green().bold(), file, line_str);
+                        println!(
+                            "  - [{:<8}] {:<24} {}:{}",
+                            kind.yellow(),
+                            name.green().bold(),
+                            file,
+                            line_str
+                        );
                         if !sig.is_empty() {
                             println!("      {}", sig.dimmed());
                         }
@@ -190,14 +272,23 @@ pub async fn run_repo_command(cmd: RepoCommands, json_output: bool, cwd: &Path) 
                 }
             }
         }
-        RepoCommands::Graph { tier, target, depth } => {
+        RepoCommands::Graph {
+            tier,
+            target,
+            depth,
+        } => {
             let args = json!({
                 "tier": tier,
                 "target": target,
                 "max_depth": depth,
             });
             let res = registry
-                .execute("dependency_graph", &args.to_string(), cwd, SandboxPolicy::ReadOnly)
+                .execute(
+                    "dependency_graph",
+                    &args.to_string(),
+                    cwd,
+                    SandboxPolicy::ReadOnly,
+                )
                 .await?;
             if json_output {
                 println!("{}", res);
@@ -216,7 +307,15 @@ pub async fn run_repo_command(cmd: RepoCommands, json_output: bool, cwd: &Path) 
                             if cycles.is_empty() {
                                 println!("  Cycles: {}", "None detected (Clean DAG)".green());
                             } else {
-                                println!("  Cycles: {}", format!("{} circular dependency cycle(s) detected!", cycles.len()).red().bold());
+                                println!(
+                                    "  Cycles: {}",
+                                    format!(
+                                        "{} circular dependency cycle(s) detected!",
+                                        cycles.len()
+                                    )
+                                    .red()
+                                    .bold()
+                                );
                             }
                         }
                     }
@@ -238,7 +337,12 @@ pub async fn run_repo_command(cmd: RepoCommands, json_output: bool, cwd: &Path) 
                 "symbols": symbols,
             });
             let res = registry
-                .execute("analyze_change_impact", &args.to_string(), cwd, SandboxPolicy::ReadOnly)
+                .execute(
+                    "analyze_change_impact",
+                    &args.to_string(),
+                    cwd,
+                    SandboxPolicy::ReadOnly,
+                )
                 .await?;
             if json_output {
                 println!("{}", res);
@@ -251,11 +355,20 @@ pub async fn run_repo_command(cmd: RepoCommands, json_output: bool, cwd: &Path) 
                     "medium" => risk.yellow(),
                     _ => risk.green(),
                 };
-                println!("{}", "Semantic Blast Radius & Impact Analysis".cyan().bold());
+                println!(
+                    "{}",
+                    "Semantic Blast Radius & Impact Analysis".cyan().bold()
+                );
                 println!("  Risk Level:        {}", risk_colored);
-                println!("  Blast Score:       {:.2}", val["blast_radius_score"].as_f64().unwrap_or(0.0));
+                println!(
+                    "  Blast Score:       {:.2}",
+                    val["blast_radius_score"].as_f64().unwrap_or(0.0)
+                );
                 println!("  Affected Files:    {}", val["total_affected_files"]);
-                println!("  Summary:           {}", val["summary"].as_str().unwrap_or(""));
+                println!(
+                    "  Summary:           {}",
+                    val["summary"].as_str().unwrap_or("")
+                );
 
                 if let Some(tests) = val["recommended_test_targets"].as_array() {
                     if !tests.is_empty() {
@@ -273,21 +386,37 @@ pub async fn run_repo_command(cmd: RepoCommands, json_output: bool, cwd: &Path) 
                 "file": file,
             });
             let res = registry
-                .execute("related_tests", &args.to_string(), cwd, SandboxPolicy::ReadOnly)
+                .execute(
+                    "related_tests",
+                    &args.to_string(),
+                    cwd,
+                    SandboxPolicy::ReadOnly,
+                )
                 .await?;
             if json_output {
                 println!("{}", res);
             } else {
                 let val: serde_json::Value = serde_json::from_str(&res)?;
                 if let Some(tests) = val.as_array() {
-                    println!("{}", format!("Related Tests (found {})", tests.len()).cyan().bold());
+                    println!(
+                        "{}",
+                        format!("Related Tests (found {})", tests.len())
+                            .cyan()
+                            .bold()
+                    );
                     for t in tests {
                         let name = t["test_name"].as_str().unwrap_or("");
                         let file = t["test_file"].as_str().unwrap_or("");
                         let line = t["line"].as_u64().unwrap_or(1);
                         let conf = t["confidence"].as_f64().unwrap_or(0.0);
                         let exp = t["explanation"].as_str().unwrap_or("");
-                        println!("  - {:<28} {}:{} (confidence: {:.0}%)", name.green().bold(), file, line, conf * 100.0);
+                        println!(
+                            "  - {:<28} {}:{} (confidence: {:.0}%)",
+                            name.green().bold(),
+                            file,
+                            line,
+                            conf * 100.0
+                        );
                         println!("      {}", exp.dimmed());
                     }
                 }
@@ -301,14 +430,21 @@ pub async fn run_repo_command(cmd: RepoCommands, json_output: bool, cwd: &Path) 
                 println!("{}", res);
             } else {
                 let val: serde_json::Value = serde_json::from_str(&res)?;
-                println!("{}", "Repository Architecture & Modularity Report".cyan().bold());
+                println!(
+                    "{}",
+                    "Repository Architecture & Modularity Report".cyan().bold()
+                );
                 println!("  Total Packages:       {}", val["total_packages"]);
                 println!("  Total Modules:        {}", val["total_modules"]);
                 println!("  Module Cycles:        {}", val["module_cycles_count"]);
 
                 if let Some(high_i) = val["high_instability_modules"].as_array() {
                     if !high_i.is_empty() {
-                        println!("\n{}", "High Instability Modules (I > 0.8, high outgoing dependencies):".yellow());
+                        println!(
+                            "\n{}",
+                            "High Instability Modules (I > 0.8, high outgoing dependencies):"
+                                .yellow()
+                        );
                         for m in high_i {
                             println!("  - {}", m.as_str().unwrap_or(""));
                         }
@@ -317,7 +453,10 @@ pub async fn run_repo_command(cmd: RepoCommands, json_output: bool, cwd: &Path) 
 
                 if let Some(high_ca) = val["high_afferent_coupling_modules"].as_array() {
                     if !high_ca.is_empty() {
-                        println!("\n{}", "High Afferent Coupling Components (Core dependencies):".yellow());
+                        println!(
+                            "\n{}",
+                            "High Afferent Coupling Components (Core dependencies):".yellow()
+                        );
                         for m in high_ca {
                             println!("  - {}", m.as_str().unwrap_or(""));
                         }
@@ -331,7 +470,12 @@ pub async fn run_repo_command(cmd: RepoCommands, json_output: bool, cwd: &Path) 
                 "token_budget": budget,
             });
             let res = registry
-                .execute("retrieve_repository_context", &args.to_string(), cwd, SandboxPolicy::ReadOnly)
+                .execute(
+                    "retrieve_repository_context",
+                    &args.to_string(),
+                    cwd,
+                    SandboxPolicy::ReadOnly,
+                )
                 .await?;
             println!("{}", res);
         }

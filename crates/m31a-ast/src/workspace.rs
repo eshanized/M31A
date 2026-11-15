@@ -212,7 +212,10 @@ impl WorkspaceDiscovery {
             if depth > options.max_depth {
                 skips.push(TraversalSkip {
                     path: dir.clone(),
-                    reason: format!("Exceeded maximum directory walk depth of {}", options.max_depth),
+                    reason: format!(
+                        "Exceeded maximum directory walk depth of {}",
+                        options.max_depth
+                    ),
                 });
                 status = IndexStatus::Partial;
                 continue;
@@ -440,7 +443,11 @@ impl WorkspaceDiscovery {
     }
 
     /// Parses Cargo.toml (root, workspaces, and member crates).
-    fn parse_cargo_manifest(root: &Path, manifest_path: &Path, packages: &mut Vec<WorkspacePackage>) {
+    fn parse_cargo_manifest(
+        root: &Path,
+        manifest_path: &Path,
+        packages: &mut Vec<WorkspacePackage>,
+    ) {
         let content = match fs::read_to_string(manifest_path) {
             Ok(c) => c,
             Err(_) => return,
@@ -466,7 +473,10 @@ impl WorkspaceDiscovery {
                         .unwrap_or("crate")
                 })
                 .to_string();
-            let version = pkg.get("version").and_then(|v| v.as_str()).map(|s| s.to_string());
+            let version = pkg
+                .get("version")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
 
             let mut dependencies = Vec::new();
             if let Some(deps) = parsed.get("dependencies").and_then(|d| d.as_table()) {
@@ -480,7 +490,10 @@ impl WorkspaceDiscovery {
                             is_internal = true;
                             path = Some(package_root.join(p));
                         }
-                        version_req = table.get("version").and_then(|v| v.as_str()).map(|s| s.to_string());
+                        version_req = table
+                            .get("version")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string());
                     } else if let Some(v) = dep_val.as_str() {
                         version_req = Some(v.to_string());
                     }
@@ -551,7 +564,10 @@ impl WorkspaceDiscovery {
             })
             .to_string();
 
-        let version = parsed.get("version").and_then(|v| v.as_str()).map(|s| s.to_string());
+        let version = parsed
+            .get("version")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
 
         let mut dependencies = Vec::new();
         if let Some(deps) = parsed.get("dependencies").and_then(|d| d.as_object()) {
@@ -560,7 +576,10 @@ impl WorkspaceDiscovery {
                     name: dep_name.clone(),
                     version_req: dep_ver.as_str().map(|s| s.to_string()),
                     is_dev: false,
-                    is_internal: dep_ver.as_str().map(|s| s.starts_with("workspace:")).unwrap_or(false),
+                    is_internal: dep_ver
+                        .as_str()
+                        .map(|s| s.starts_with("workspace:"))
+                        .unwrap_or(false),
                     path: None,
                 });
             }
@@ -572,7 +591,10 @@ impl WorkspaceDiscovery {
                     name: dep_name.clone(),
                     version_req: dep_ver.as_str().map(|s| s.to_string()),
                     is_dev: true,
-                    is_internal: dep_ver.as_str().map(|s| s.starts_with("workspace:")).unwrap_or(false),
+                    is_internal: dep_ver
+                        .as_str()
+                        .map(|s| s.starts_with("workspace:"))
+                        .unwrap_or(false),
                     path: None,
                 });
             }
@@ -593,7 +615,11 @@ impl WorkspaceDiscovery {
     }
 
     /// Parses Python pyproject.toml or requirements.txt.
-    fn parse_python_manifest(root: &Path, manifest_path: &Path, packages: &mut Vec<WorkspacePackage>) {
+    fn parse_python_manifest(
+        root: &Path,
+        manifest_path: &Path,
+        packages: &mut Vec<WorkspacePackage>,
+    ) {
         let package_root = manifest_path.parent().unwrap_or(root).to_path_buf();
         let is_root = &package_root == root;
 

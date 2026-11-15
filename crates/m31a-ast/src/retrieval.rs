@@ -115,7 +115,10 @@ impl SemanticRetriever {
                     reasons.push(format!("Exact symbol name match with `{}`", target_sym));
                 } else if sym.name.to_lowercase() == target_sym.to_lowercase() {
                     score += 80.0;
-                    reasons.push(format!("Case-insensitive symbol match with `{}`", target_sym));
+                    reasons.push(format!(
+                        "Case-insensitive symbol match with `{}`",
+                        target_sym
+                    ));
                 } else if sym.name.contains(target_sym.as_str()) {
                     score += 40.0;
                     reasons.push(format!("Sub-identifier match with `{}`", target_sym));
@@ -126,7 +129,10 @@ impl SemanticRetriever {
             if let Some(ref target_file) = query.file_path {
                 if sym.file_path == *target_file {
                     score += 50.0;
-                    reasons.push(format!("Defined in requested target file `{}`", target_file.display()));
+                    reasons.push(format!(
+                        "Defined in requested target file `{}`",
+                        target_file.display()
+                    ));
                 }
             }
 
@@ -159,7 +165,8 @@ impl SemanticRetriever {
         }
 
         // Sort candidates by score descending
-        candidate_symbols.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        candidate_symbols
+            .sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
         // 3. Assemble top candidates with call graph excerpts within token budget
         let mut retrieved_symbols = Vec::new();
@@ -175,7 +182,9 @@ impl SemanticRetriever {
 
             // Read excerpt if file exists
             let excerpt = read_symbol_excerpt(&sym);
-            let est_tokens = estimate_tokens(&sym.signature) + excerpt.as_ref().map(|e| estimate_tokens(e)).unwrap_or(0) + 50;
+            let est_tokens = estimate_tokens(&sym.signature)
+                + excerpt.as_ref().map(|e| estimate_tokens(e)).unwrap_or(0)
+                + 50;
 
             if total_tokens + est_tokens > token_budget {
                 is_truncated = true;
@@ -194,7 +203,9 @@ impl SemanticRetriever {
                     test_files,
                 );
                 for t in tests {
-                    if !related_tests.iter().any(|rt: &RelatedTestTarget| rt.test_name == t.test_name && rt.test_file == t.test_file) {
+                    if !related_tests.iter().any(|rt: &RelatedTestTarget| {
+                        rt.test_name == t.test_name && rt.test_file == t.test_file
+                    }) {
                         related_tests.push(t);
                     }
                 }
@@ -239,7 +250,11 @@ impl SemanticRetriever {
         let query_summary = format!(
             "Task: {} | Target File: {} | Target Symbol: {}",
             query.task_description.as_deref().unwrap_or("None"),
-            query.file_path.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "None".to_string()),
+            query
+                .file_path
+                .as_ref()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| "None".to_string()),
             query.symbol_name.as_deref().unwrap_or("None")
         );
 
@@ -266,8 +281,24 @@ fn estimate_tokens(text: &str) -> usize {
 fn is_stop_word(w: &str) -> bool {
     matches!(
         w,
-        "the" | "and" | "for" | "with" | "this" | "that" | "from" | "into" | "when" | "where"
-            | "does" | "have" | "should" | "would" | "could" | "what" | "make" | "need"
+        "the"
+            | "and"
+            | "for"
+            | "with"
+            | "this"
+            | "that"
+            | "from"
+            | "into"
+            | "when"
+            | "where"
+            | "does"
+            | "have"
+            | "should"
+            | "would"
+            | "could"
+            | "what"
+            | "make"
+            | "need"
     )
 }
 
@@ -332,9 +363,15 @@ fn format_packet_markdown(
                 sym_ctx.symbol.file_path.display(),
                 sym_ctx.symbol.range.start_line
             ));
-            s.push_str(&format!("- **Signature:** `{}`\n", sym_ctx.symbol.signature));
+            s.push_str(&format!(
+                "- **Signature:** `{}`\n",
+                sym_ctx.symbol.signature
+            ));
             if !sym_ctx.match_reasons.is_empty() {
-                s.push_str(&format!("- **Match Rationale:** {}\n", sym_ctx.match_reasons.join(", ")));
+                s.push_str(&format!(
+                    "- **Match Rationale:** {}\n",
+                    sym_ctx.match_reasons.join(", ")
+                ));
             }
 
             if !sym_ctx.callers.is_empty() {
@@ -344,7 +381,10 @@ fn format_packet_markdown(
                     .take(4)
                     .map(|c| format!("`{}` ({}:{})", c.caller_name, c.file_path.display(), c.line))
                     .collect();
-                s.push_str(&format!("- **Direct Callers:** {}\n", caller_names.join(", ")));
+                s.push_str(&format!(
+                    "- **Direct Callers:** {}\n",
+                    caller_names.join(", ")
+                ));
             }
 
             if !sym_ctx.callees.is_empty() {
@@ -354,7 +394,10 @@ fn format_packet_markdown(
                     .take(4)
                     .map(|c| format!("`{}`", c.callee_name))
                     .collect();
-                s.push_str(&format!("- **Callees Invoked:** {}\n", callee_names.join(", ")));
+                s.push_str(&format!(
+                    "- **Callees Invoked:** {}\n",
+                    callee_names.join(", ")
+                ));
             }
 
             if let Some(ref body) = sym_ctx.body_excerpt {

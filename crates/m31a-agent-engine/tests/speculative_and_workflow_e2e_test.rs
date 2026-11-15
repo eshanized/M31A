@@ -898,6 +898,9 @@ async fn test_approval_gated_integration_blocks_unapproved_integration() {
         source_branch: None,
         source_base_sha: None,
         target_base_sha: None,
+        worker_id: None,
+        manifest: None,
+        expected_target_head_sha: None,
     };
 
     let outcome_unapproved = service.integrate(&req_unapproved).await.unwrap();
@@ -940,6 +943,9 @@ async fn test_approval_gated_integration_blocks_unapproved_integration() {
         source_branch: None,
         source_base_sha: None,
         target_base_sha: None,
+        worker_id: None,
+        manifest: None,
+        expected_target_head_sha: None,
     };
 
     let outcome_approved = service

@@ -696,6 +696,9 @@ async fn test_all_agent_integrations_use_workflow() {
         source_branch: None,
         source_base_sha: None,
         target_base_sha: None,
+        worker_id: None,
+        manifest: None,
+        expected_target_head_sha: None,
     };
 
     let outcome = svc.integrate(&req).await.unwrap();

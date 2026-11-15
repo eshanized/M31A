@@ -316,8 +316,20 @@ export function fetchUser(id: string): UserPayload {
         let symbols = parse_symbols_from_source(Path::new("service.ts"), src);
         // Includes interface, class, method, function
         assert!(symbols.len() >= 3);
-        assert!(symbols.iter().any(|s| s.name == "UserPayload" && s.kind == SymbolKind::Interface));
-        assert!(symbols.iter().any(|s| s.name == "UserService" && s.kind == SymbolKind::Class));
-        assert!(symbols.iter().any(|s| s.name == "fetchUser" && s.kind == SymbolKind::Function));
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "UserPayload" && s.kind == SymbolKind::Interface)
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "UserService" && s.kind == SymbolKind::Class)
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "fetchUser" && s.kind == SymbolKind::Function)
+        );
     }
 }

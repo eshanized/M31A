@@ -165,3 +165,38 @@ When `cancel_workflow` is invoked:
 3. In-flight task outcomes are reconciled; unfinished tasks enter `Cancelled`.
 4. Child worktrees are cleaned up safely.
 5. No patches are applied or promoted after cancellation.
+
+---
+
+## 6. Verified Execution Engine Contract (Initiative 2)
+
+### 6.1 Canonical Change-Set Manifest & Deterministic Freezing
+1. **Canonical Representation:** All file modifications, additions, deletions, renames, and mode changes are captured in a typed `ChangeSetManifest`.
+2. **Deterministic Manifest Hash:** The manifest SHA-256 digest is computed over lexicographically sorted normalized paths, content hashes, change types, and file permissions.
+3. **Immutability Barrier:** Once a task completes execution, the manifest is frozen (`freeze()`). Verification criteria, operator approvals, and integration requests are cryptographically bound to `manifest_hash`. Any subsequent mutation invalidates the binding.
+
+### 6.2 Durable Pre-Integration Snapshots & Cross-Process Crash-Safe Rollback
+1. **Durable Preimages:** Before any file is modified or created on disk during patch application, a pre-integration snapshot is durably persisted to SQLite table `pre_integration_snapshots`.
+2. **Crash-Safe Recovery:** If the process is killed (`SIGKILL`, power failure, hardware abort) during patch application or rollback, `resume_incomplete_rollbacks()` queries incomplete snapshot records upon restart.
+3. **Exact Restoration:** Preimages are verified against original SHA-256 digests and written back; newly created files are safely unlinked.
+
+### 6.3 Independent Verification Engine & Zero-Test False Positive Prevention
+1. **Independent Verification Execution:** Verification is driven by `IndependentVerificationEngine` in an isolated environment, producing `VerificationEvaluationReport` and `DurableVerificationRecord`s.
+2. **False Positive Prevention:** Exit code 0 is never sufficient proof of success. If `tests_total == Some(0)`, the evaluation marks the outcome `Inconclusive`/`Failed`. Tasks cannot be promoted with zero executed tests when tests are required.
+3. **Repository Intelligence Integration:** Tests and impacted symbols are automatically discovered via AST semantic analysis and bound to the manifest verification plan.
+
+### 6.4 Worker Fencing Across All Boundaries
+1. **Universal Fencing Token:** Every attempt increments `attempt_id`.
+2. **Multi-Boundary Enforcement:**
+   - *Storage boundary:* `WorkflowStore` rejects lease renewals and result commits with stale `attempt_id`.
+   - *Mutation boundary:* `WorkflowIntegrationService` validates that the requesting `worker_id` and `attempt_id` hold the active lease. Stale workers are rejected with `FencingDenied`.
+   - *External Effect boundary:* `ExternalEffectGateway` rejects dispatch requests from superseded worker attempts.
+
+### 6.5 Target Revision Compare-and-Swap (CAS) Fencing
+1. **Base Commit Pinning:** Verification records and manifests are bound to a target commit SHA (`base_commit`).
+2. **Atomic CAS Check:** `WorkflowIntegrationService::integrate()` validates `expected_target_head_sha` against `git rev-parse HEAD`. If another commit has landed on the target branch, integration is rejected with `StaleTargetHead`, requiring re-basing and re-verification.
+
+### 6.6 External Side-Effect Gateway
+1. **State Machine:** External operations transition `PREPARED` → `AUTHORIZED` → `DISPATCHING` → `CONFIRMED` / `UNKNOWN_OUTCOME`.
+2. **Idempotency Across Retries:** Idempotency keys are deterministically generated from `(workflow_id, task_id, logical_op_id, payload_hash)`. Retries with the same logical operation return `AdmitResult::IdempotentSkip`.
+3. **Uncertainty & Reconciliation:** Network drops during dispatch place the effect in `UNKNOWN_OUTCOME`. The gateway blocks uncoordinated retries until provider reconciliation queries status or compensation procedures execute.

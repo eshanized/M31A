@@ -22,5 +22,7 @@ shlex = { workspace = true }
 chrono = { workspace = true }
 libc = { workspace = true }
 tempfile = { workspace = true }
+sha2 = { workspace = true }
+uuid = { workspace = true }
 
 [dev-dependencies]

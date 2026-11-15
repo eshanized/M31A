@@ -4,10 +4,12 @@
 use anyhow::{Context, Result, anyhow, bail};
 use chrono::Utc;
 use m31a_core::workflow::{
-    ConflictKind, ConflictReport, ConflictResolution, IntegrationLifecycleStatus,
-    IntegrationRecord, WorkflowApprovalRequest, WorkflowApprovalStatus, WorkflowArtifact,
-    WorkflowEvent, WorkflowEventType, WorkflowPlan, WorkflowRun, WorkflowState, WorkflowTask,
-    WorkflowTaskStatus, WorkspaceIsolationStrategy, WorktreeRecord, WorktreeStatus,
+    ChangeSetManifest, ConflictKind, ConflictReport, ConflictResolution, DurableVerificationRecord,
+    ExecutionJournalEvent, ExternalEffectIntent, ExternalEffectLifecycleStatus,
+    IntegrationLifecycleStatus, IntegrationRecord, PreIntegrationSnapshotRecord,
+    PreIntegrationSnapshotStatus, WorkflowApprovalRequest, WorkflowApprovalStatus,
+    WorkflowArtifact, WorkflowEvent, WorkflowEventType, WorkflowPlan, WorkflowRun, WorkflowState,
+    WorkflowTask, WorkflowTaskStatus, WorkspaceIsolationStrategy, WorktreeRecord, WorktreeStatus,
 };
 use rusqlite::{Connection, params};
 use sha2::{Digest, Sha256};
@@ -2074,6 +2076,687 @@ impl WorkflowStore {
         Ok(new_plan)
     }
 
+    // ========================================================================
+    // INITIATIVE 2: VERIFIED EXECUTION PERSISTENCE METHODS
+    // ========================================================================
+
+    /// Persists an immutable change-set manifest.
+    pub fn save_change_set_manifest(&self, manifest: &ChangeSetManifest) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let manifest_json = serde_json::to_string(manifest)?;
+        conn.execute(
+            r#"
+            INSERT INTO change_set_manifests (
+                id, workflow_id, task_id, attempt_id, worker_id, agent_id,
+                manifest_hash, source_base_sha, target_commit_sha, is_frozen,
+                manifest_json, created_at_epoch_ms, frozen_at_epoch_ms
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+            ON CONFLICT(manifest_hash) DO UPDATE SET
+                is_frozen = excluded.is_frozen,
+                manifest_json = excluded.manifest_json,
+                frozen_at_epoch_ms = excluded.frozen_at_epoch_ms
+            "#,
+            params![
+                manifest.id,
+                manifest.workflow_id,
+                manifest.task_id,
+                manifest.attempt_id,
+                manifest.worker_id,
+                manifest.agent_id,
+                manifest.manifest_hash,
+                manifest.source_base_sha,
+                manifest.target_commit_sha,
+                if manifest.is_frozen { 1 } else { 0 },
+                manifest_json,
+                manifest.created_at_epoch_ms,
+                manifest.frozen_at_epoch_ms,
+            ],
+        )
+        .context("Failed saving change-set manifest")?;
+        Ok(())
+    }
+
+    /// Fetches a change-set manifest by its unique canonical hash.
+    pub fn get_change_set_manifest(
+        &self,
+        manifest_hash: &str,
+    ) -> Result<Option<ChangeSetManifest>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare("SELECT manifest_json FROM change_set_manifests WHERE manifest_hash = ?1")?;
+        let mut rows = stmt.query(params![manifest_hash])?;
+        if let Some(row) = rows.next()? {
+            let json: String = row.get(0)?;
+            let manifest: ChangeSetManifest = serde_json::from_str(&json)?;
+            Ok(Some(manifest))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Finds a change-set manifest for a specific task and attempt.
+    pub fn find_manifest_for_task(
+        &self,
+        workflow_id: &str,
+        task_id: &str,
+        attempt_id: u32,
+    ) -> Result<Option<ChangeSetManifest>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT manifest_json FROM change_set_manifests
+            WHERE workflow_id = ?1 AND task_id = ?2 AND attempt_id = ?3
+            ORDER BY created_at_epoch_ms DESC
+            LIMIT 1
+            "#,
+        )?;
+        let mut rows = stmt.query(params![workflow_id, task_id, attempt_id])?;
+        if let Some(row) = rows.next()? {
+            let json: String = row.get(0)?;
+            let manifest: ChangeSetManifest = serde_json::from_str(&json)?;
+            Ok(Some(manifest))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Records an execution journal event in append-only storage.
+    pub fn record_execution_journal_event(&self, event: &ExecutionJournalEvent) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            r#"
+            INSERT INTO execution_journal_events (
+                id, workflow_id, task_id, attempt_id, worker_id, operation_id,
+                event_type, previous_state, new_state, resource_identity,
+                manifest_hash, payload_json, timestamp_epoch_ms
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+            "#,
+            params![
+                event.id,
+                event.workflow_id,
+                event.task_id,
+                event.attempt_id,
+                event.worker_id,
+                event.operation_id,
+                event.event_type,
+                event.previous_state,
+                event.new_state,
+                event.resource_identity,
+                event.manifest_hash,
+                event.payload_json,
+                event.timestamp_epoch_ms,
+            ],
+        )
+        .context("Failed inserting execution journal event")?;
+        Ok(())
+    }
+
+    /// Lists execution journal events for a workflow or task.
+    pub fn list_execution_journal_events(
+        &self,
+        workflow_id: &str,
+        task_id: Option<&str>,
+    ) -> Result<Vec<ExecutionJournalEvent>> {
+        let conn = self.conn.lock().unwrap();
+        let (sql, params_vec): (&str, Vec<rusqlite::types::Value>) = match task_id {
+            Some(t) => (
+                "SELECT id, workflow_id, task_id, attempt_id, worker_id, operation_id, event_type, previous_state, new_state, resource_identity, manifest_hash, payload_json, timestamp_epoch_ms FROM execution_journal_events WHERE workflow_id = ?1 AND task_id = ?2 ORDER BY timestamp_epoch_ms ASC",
+                vec![
+                    rusqlite::types::Value::Text(workflow_id.to_string()),
+                    rusqlite::types::Value::Text(t.to_string()),
+                ],
+            ),
+            None => (
+                "SELECT id, workflow_id, task_id, attempt_id, worker_id, operation_id, event_type, previous_state, new_state, resource_identity, manifest_hash, payload_json, timestamp_epoch_ms FROM execution_journal_events WHERE workflow_id = ?1 ORDER BY timestamp_epoch_ms ASC",
+                vec![rusqlite::types::Value::Text(workflow_id.to_string())],
+            ),
+        };
+
+        let mut stmt = conn.prepare(sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(params_vec), |row| {
+            Ok(ExecutionJournalEvent {
+                id: row.get(0)?,
+                workflow_id: row.get(1)?,
+                task_id: row.get(2)?,
+                attempt_id: row.get(3)?,
+                worker_id: row.get(4)?,
+                operation_id: row.get(5)?,
+                event_type: row.get(6)?,
+                previous_state: row.get(7)?,
+                new_state: row.get(8)?,
+                resource_identity: row.get(9)?,
+                manifest_hash: row.get(10)?,
+                payload_json: row.get(11)?,
+                timestamp_epoch_ms: row.get(12)?,
+            })
+        })?;
+
+        let mut list = Vec::new();
+        for r in rows {
+            list.push(r?);
+        }
+        Ok(list)
+    }
+
+    /// Saves a durable pre-integration snapshot record before filesystem mutation.
+    pub fn save_pre_integration_snapshot(
+        &self,
+        snapshot: &PreIntegrationSnapshotRecord,
+        preimage_bytes: Option<&[u8]>,
+    ) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            r#"
+            INSERT INTO pre_integration_snapshots (
+                id, integration_id, workflow_id, task_id, attempt_id,
+                relative_path, original_exists, original_content_hash,
+                original_mode, preimage_storage_path, preimage_blob, status,
+                created_at_epoch_ms
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+            "#,
+            params![
+                snapshot.id,
+                snapshot.integration_id,
+                snapshot.workflow_id,
+                snapshot.task_id,
+                snapshot.attempt_id,
+                snapshot.relative_path.to_string_lossy().to_string(),
+                if snapshot.original_exists { 1 } else { 0 },
+                snapshot.original_content_hash,
+                snapshot.original_mode,
+                snapshot
+                    .preimage_storage_path
+                    .as_ref()
+                    .map(|p| p.to_string_lossy().to_string()),
+                preimage_bytes,
+                snapshot.status.as_str(),
+                snapshot.created_at_epoch_ms,
+            ],
+        )
+        .context("Failed saving pre-integration snapshot record")?;
+        Ok(())
+    }
+
+    /// Lists all pre-integration snapshots for an integration ID.
+    pub fn list_pre_integration_snapshots(
+        &self,
+        integration_id: &str,
+    ) -> Result<Vec<(PreIntegrationSnapshotRecord, Option<Vec<u8>>)>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT id, integration_id, workflow_id, task_id, attempt_id,
+                   relative_path, original_exists, original_content_hash,
+                   original_mode, preimage_storage_path, preimage_blob, status,
+                   created_at_epoch_ms
+            FROM pre_integration_snapshots
+            WHERE integration_id = ?1
+            ORDER BY created_at_epoch_ms ASC
+            "#,
+        )?;
+
+        let rows = stmt.query_map(params![integration_id], |row| {
+            let rel_path_str: String = row.get(5)?;
+            let orig_exists: i64 = row.get(6)?;
+            let storage_path_opt: Option<String> = row.get(9)?;
+            let blob_opt: Option<Vec<u8>> = row.get(10)?;
+            let status_str: String = row.get(11)?;
+
+            let record = PreIntegrationSnapshotRecord {
+                id: row.get(0)?,
+                integration_id: row.get(1)?,
+                workflow_id: row.get(2)?,
+                task_id: row.get(3)?,
+                attempt_id: row.get(4)?,
+                relative_path: PathBuf::from(rel_path_str),
+                original_exists: orig_exists != 0,
+                original_content_hash: row.get(7)?,
+                original_mode: row.get(8)?,
+                preimage_storage_path: storage_path_opt.map(PathBuf::from),
+                status: PreIntegrationSnapshotStatus::from_str(&status_str)
+                    .unwrap_or(PreIntegrationSnapshotStatus::Prepared),
+                created_at_epoch_ms: row.get(12)?,
+            };
+
+            Ok((record, blob_opt))
+        })?;
+
+        let mut list = Vec::new();
+        for r in rows {
+            list.push(r?);
+        }
+        Ok(list)
+    }
+
+    /// Updates status of a pre-integration snapshot (e.g. 'restored' or 'failed').
+    pub fn mark_pre_integration_snapshot_status(
+        &self,
+        id: &str,
+        status: PreIntegrationSnapshotStatus,
+    ) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE pre_integration_snapshots SET status = ?1 WHERE id = ?2",
+            params![status.as_str(), id],
+        )
+        .context("Failed updating pre-integration snapshot status")?;
+        Ok(())
+    }
+
+    /// Finds any integration runs that require recovery or incomplete rollback completion.
+    pub fn find_incomplete_rollbacks(&self) -> Result<Vec<String>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT DISTINCT integration_id FROM pre_integration_snapshots
+            WHERE status != 'restored'
+            "#,
+        )?;
+        let rows = stmt.query_map([], |row| row.get(0))?;
+        let mut list = Vec::new();
+        for r in rows {
+            list.push(r?);
+        }
+        Ok(list)
+    }
+
+    /// Saves an external side effect intent before dispatch.
+    pub fn save_external_effect_intent(&self, intent: &ExternalEffectIntent) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            r#"
+            INSERT INTO external_effect_intents (
+                id, workflow_id, task_id, attempt_id, worker_id, logical_operation_id,
+                tool_name, target_service, authorized_destination, request_fingerprint,
+                idempotency_key, lifecycle_status, is_reversible, compensation_procedure,
+                error_details, created_at_epoch_ms, updated_at_epoch_ms
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
+            ON CONFLICT(id) DO UPDATE SET
+                lifecycle_status = excluded.lifecycle_status,
+                error_details = excluded.error_details,
+                updated_at_epoch_ms = excluded.updated_at_epoch_ms
+            "#,
+            params![
+                intent.id,
+                intent.workflow_id,
+                intent.task_id,
+                intent.attempt_id,
+                intent.worker_id,
+                intent.logical_operation_id,
+                intent.tool_name,
+                intent.target_service,
+                intent.authorized_destination,
+                intent.request_fingerprint,
+                intent.idempotency_key,
+                intent.lifecycle_status.as_str(),
+                if intent.is_reversible { 1 } else { 0 },
+                intent.compensation_procedure,
+                intent.error_details,
+                intent.created_at_epoch_ms,
+                intent.updated_at_epoch_ms,
+            ],
+        )
+        .context("Failed saving external effect intent")?;
+        Ok(())
+    }
+
+    /// Fetches an external side effect intent by ID.
+    pub fn get_external_effect_intent(&self, id: &str) -> Result<Option<ExternalEffectIntent>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT id, workflow_id, task_id, attempt_id, worker_id, logical_operation_id,
+                   tool_name, target_service, authorized_destination, request_fingerprint,
+                   idempotency_key, lifecycle_status, is_reversible, compensation_procedure,
+                   error_details, created_at_epoch_ms, updated_at_epoch_ms
+            FROM external_effect_intents
+            WHERE id = ?1
+            "#,
+        )?;
+        let mut rows = stmt.query(params![id])?;
+        if let Some(row) = rows.next()? {
+            let status_str: String = row.get(11)?;
+            let rev_num: i64 = row.get(12)?;
+            Ok(Some(ExternalEffectIntent {
+                id: row.get(0)?,
+                workflow_id: row.get(1)?,
+                task_id: row.get(2)?,
+                attempt_id: row.get(3)?,
+                worker_id: row.get(4)?,
+                logical_operation_id: row.get(5)?,
+                tool_name: row.get(6)?,
+                target_service: row.get(7)?,
+                authorized_destination: row.get(8)?,
+                request_fingerprint: row.get(9)?,
+                idempotency_key: row.get(10)?,
+                lifecycle_status: ExternalEffectLifecycleStatus::from_str(&status_str)
+                    .unwrap_or(ExternalEffectLifecycleStatus::Prepared),
+                is_reversible: rev_num != 0,
+                compensation_procedure: row.get(13)?,
+                error_details: row.get(14)?,
+                created_at_epoch_ms: row.get(15)?,
+                updated_at_epoch_ms: row.get(16)?,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Finds an existing external effect intent by idempotency key.
+    pub fn find_external_effect_by_idempotency_key(
+        &self,
+        idempotency_key: &str,
+    ) -> Result<Option<ExternalEffectIntent>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT id, workflow_id, task_id, attempt_id, worker_id, logical_operation_id,
+                   tool_name, target_service, authorized_destination, request_fingerprint,
+                   idempotency_key, lifecycle_status, is_reversible, compensation_procedure,
+                   error_details, created_at_epoch_ms, updated_at_epoch_ms
+            FROM external_effect_intents
+            WHERE idempotency_key = ?1
+            LIMIT 1
+            "#,
+        )?;
+        let mut rows = stmt.query(params![idempotency_key])?;
+        if let Some(row) = rows.next()? {
+            let status_str: String = row.get(11)?;
+            let rev_num: i64 = row.get(12)?;
+            Ok(Some(ExternalEffectIntent {
+                id: row.get(0)?,
+                workflow_id: row.get(1)?,
+                task_id: row.get(2)?,
+                attempt_id: row.get(3)?,
+                worker_id: row.get(4)?,
+                logical_operation_id: row.get(5)?,
+                tool_name: row.get(6)?,
+                target_service: row.get(7)?,
+                authorized_destination: row.get(8)?,
+                request_fingerprint: row.get(9)?,
+                idempotency_key: row.get(10)?,
+                lifecycle_status: ExternalEffectLifecycleStatus::from_str(&status_str)
+                    .unwrap_or(ExternalEffectLifecycleStatus::Prepared),
+                is_reversible: rev_num != 0,
+                compensation_procedure: row.get(13)?,
+                error_details: row.get(14)?,
+                created_at_epoch_ms: row.get(15)?,
+                updated_at_epoch_ms: row.get(16)?,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Finds an existing external effect intent by workflow ID and logical operation ID.
+    pub fn find_external_effect_by_logical_op(
+        &self,
+        workflow_id: &str,
+        logical_op_id: &str,
+    ) -> Result<Option<ExternalEffectIntent>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT id, workflow_id, task_id, attempt_id, worker_id, logical_operation_id,
+                   tool_name, target_service, authorized_destination, request_fingerprint,
+                   idempotency_key, lifecycle_status, is_reversible, compensation_procedure,
+                   error_details, created_at_epoch_ms, updated_at_epoch_ms
+            FROM external_effect_intents
+            WHERE workflow_id = ?1 AND logical_operation_id = ?2
+            ORDER BY created_at_epoch_ms DESC
+            LIMIT 1
+            "#,
+        )?;
+        let mut rows = stmt.query(params![workflow_id, logical_op_id])?;
+        if let Some(row) = rows.next()? {
+            let status_str: String = row.get(11)?;
+            let rev_num: i64 = row.get(12)?;
+            Ok(Some(ExternalEffectIntent {
+                id: row.get(0)?,
+                workflow_id: row.get(1)?,
+                task_id: row.get(2)?,
+                attempt_id: row.get(3)?,
+                worker_id: row.get(4)?,
+                logical_operation_id: row.get(5)?,
+                tool_name: row.get(6)?,
+                target_service: row.get(7)?,
+                authorized_destination: row.get(8)?,
+                request_fingerprint: row.get(9)?,
+                idempotency_key: row.get(10)?,
+                lifecycle_status: ExternalEffectLifecycleStatus::from_str(&status_str)
+                    .unwrap_or(ExternalEffectLifecycleStatus::Prepared),
+                is_reversible: rev_num != 0,
+                compensation_procedure: row.get(13)?,
+                error_details: row.get(14)?,
+                created_at_epoch_ms: row.get(15)?,
+                updated_at_epoch_ms: row.get(16)?,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Updates status and error of an external side effect intent.
+    pub fn update_external_effect_status(
+        &self,
+        id: &str,
+        status: ExternalEffectLifecycleStatus,
+        error: Option<&str>,
+    ) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let now = Utc::now().timestamp_millis();
+        conn.execute(
+            r#"
+            UPDATE external_effect_intents
+            SET lifecycle_status = ?1, error_details = ?2, updated_at_epoch_ms = ?3
+            WHERE id = ?4
+            "#,
+            params![status.as_str(), error, now, id],
+        )
+        .context("Failed updating external effect intent status")?;
+        Ok(())
+    }
+
+    /// Lists external effect intents for a task.
+    pub fn list_external_effects_for_task(
+        &self,
+        workflow_id: &str,
+        task_id: &str,
+    ) -> Result<Vec<ExternalEffectIntent>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT id, workflow_id, task_id, attempt_id, worker_id, logical_operation_id,
+                   tool_name, target_service, authorized_destination, request_fingerprint,
+                   idempotency_key, lifecycle_status, is_reversible, compensation_procedure,
+                   error_details, created_at_epoch_ms, updated_at_epoch_ms
+            FROM external_effect_intents
+            WHERE workflow_id = ?1 AND task_id = ?2
+            ORDER BY created_at_epoch_ms ASC
+            "#,
+        )?;
+        let rows = stmt.query_map(params![workflow_id, task_id], |row| {
+            let status_str: String = row.get(11)?;
+            let rev_num: i64 = row.get(12)?;
+            Ok(ExternalEffectIntent {
+                id: row.get(0)?,
+                workflow_id: row.get(1)?,
+                task_id: row.get(2)?,
+                attempt_id: row.get(3)?,
+                worker_id: row.get(4)?,
+                logical_operation_id: row.get(5)?,
+                tool_name: row.get(6)?,
+                target_service: row.get(7)?,
+                authorized_destination: row.get(8)?,
+                request_fingerprint: row.get(9)?,
+                idempotency_key: row.get(10)?,
+                lifecycle_status: ExternalEffectLifecycleStatus::from_str(&status_str)
+                    .unwrap_or(ExternalEffectLifecycleStatus::Prepared),
+                is_reversible: rev_num != 0,
+                compensation_procedure: row.get(13)?,
+                error_details: row.get(14)?,
+                created_at_epoch_ms: row.get(15)?,
+                updated_at_epoch_ms: row.get(16)?,
+            })
+        })?;
+
+        let mut list = Vec::new();
+        for r in rows {
+            list.push(r?);
+        }
+        Ok(list)
+    }
+
+    /// Lists external side effects with uncertain outcomes that require reconciliation.
+    pub fn list_uncertain_external_effects(
+        &self,
+        workflow_id: &str,
+    ) -> Result<Vec<ExternalEffectIntent>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT id, workflow_id, task_id, attempt_id, worker_id, logical_operation_id,
+                   tool_name, target_service, authorized_destination, request_fingerprint,
+                   idempotency_key, lifecycle_status, is_reversible, compensation_procedure,
+                   error_details, created_at_epoch_ms, updated_at_epoch_ms
+            FROM external_effect_intents
+            WHERE workflow_id = ?1 AND lifecycle_status IN ('unknown_outcome', 'reconciling', 'dispatching')
+            ORDER BY created_at_epoch_ms ASC
+            "#,
+        )?;
+        let rows = stmt.query_map(params![workflow_id], |row| {
+            let status_str: String = row.get(11)?;
+            let rev_num: i64 = row.get(12)?;
+            Ok(ExternalEffectIntent {
+                id: row.get(0)?,
+                workflow_id: row.get(1)?,
+                task_id: row.get(2)?,
+                attempt_id: row.get(3)?,
+                worker_id: row.get(4)?,
+                logical_operation_id: row.get(5)?,
+                tool_name: row.get(6)?,
+                target_service: row.get(7)?,
+                authorized_destination: row.get(8)?,
+                request_fingerprint: row.get(9)?,
+                idempotency_key: row.get(10)?,
+                lifecycle_status: ExternalEffectLifecycleStatus::from_str(&status_str)
+                    .unwrap_or(ExternalEffectLifecycleStatus::Prepared),
+                is_reversible: rev_num != 0,
+                compensation_procedure: row.get(13)?,
+                error_details: row.get(14)?,
+                created_at_epoch_ms: row.get(15)?,
+                updated_at_epoch_ms: row.get(16)?,
+            })
+        })?;
+
+        let mut list = Vec::new();
+        for r in rows {
+            list.push(r?);
+        }
+        Ok(list)
+    }
+
+    /// Saves a durable verification evidence record bound to manifest hash.
+    pub fn save_verification_record(&self, record: &DurableVerificationRecord) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let artifact_refs_json = serde_json::to_string(&record.artifact_refs)?;
+        conn.execute(
+            r#"
+            INSERT INTO verification_records (
+                id, workflow_id, task_id, attempt_id, manifest_hash,
+                source_base_sha, target_commit_sha, verification_plan_hash,
+                requirement_id, category, operation, exit_code, status,
+                tests_total, tests_passed, tests_failed, tests_skipped,
+                duration_ms, diagnostics, artifact_refs_json, timestamp_epoch_ms
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)
+            "#,
+            params![
+                record.id,
+                record.workflow_id,
+                record.task_id,
+                record.attempt_id,
+                record.manifest_hash,
+                record.source_base_sha,
+                record.target_commit_sha,
+                record.verification_plan_hash,
+                record.requirement_id,
+                record.category,
+                record.operation,
+                record.exit_code,
+                record.status,
+                record.tests_total.map(|v| v as i64),
+                record.tests_passed.map(|v| v as i64),
+                record.tests_failed.map(|v| v as i64),
+                record.tests_skipped.map(|v| v as i64),
+                record.duration_ms as i64,
+                record.diagnostics,
+                artifact_refs_json,
+                record.timestamp_epoch_ms,
+            ],
+        )
+        .context("Failed saving verification record")?;
+        Ok(())
+    }
+
+    /// Lists durable verification evidence records bound to a specific manifest hash.
+    pub fn list_verification_records_for_manifest(
+        &self,
+        manifest_hash: &str,
+    ) -> Result<Vec<DurableVerificationRecord>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            r#"
+            SELECT id, workflow_id, task_id, attempt_id, manifest_hash,
+                   source_base_sha, target_commit_sha, verification_plan_hash,
+                   requirement_id, category, operation, exit_code, status,
+                   tests_total, tests_passed, tests_failed, tests_skipped,
+                   duration_ms, diagnostics, artifact_refs_json, timestamp_epoch_ms
+            FROM verification_records
+            WHERE manifest_hash = ?1
+            ORDER BY timestamp_epoch_ms ASC
+            "#,
+        )?;
+        let rows = stmt.query_map(params![manifest_hash], |row| {
+            let art_json: String = row.get(19)?;
+            let artifact_refs: Vec<String> = serde_json::from_str(&art_json).unwrap_or_default();
+            let dur: i64 = row.get(17)?;
+            let total: Option<i64> = row.get(13)?;
+            let passed: Option<i64> = row.get(14)?;
+            let failed: Option<i64> = row.get(15)?;
+            let skipped: Option<i64> = row.get(16)?;
+
+            Ok(DurableVerificationRecord {
+                id: row.get(0)?,
+                workflow_id: row.get(1)?,
+                task_id: row.get(2)?,
+                attempt_id: row.get(3)?,
+                manifest_hash: row.get(4)?,
+                source_base_sha: row.get(5)?,
+                target_commit_sha: row.get(6)?,
+                verification_plan_hash: row.get(7)?,
+                requirement_id: row.get(8)?,
+                category: row.get(9)?,
+                operation: row.get(10)?,
+                exit_code: row.get(11)?,
+                status: row.get(12)?,
+                tests_total: total.map(|v| v as usize),
+                tests_passed: passed.map(|v| v as usize),
+                tests_failed: failed.map(|v| v as usize),
+                tests_skipped: skipped.map(|v| v as usize),
+                duration_ms: dur as u64,
+                diagnostics: row.get(18)?,
+                artifact_refs,
+                timestamp_epoch_ms: row.get(20)?,
+            })
+        })?;
+
+        let mut list = Vec::new();
+        for r in rows {
+            list.push(r?);
+        }
+        Ok(list)
+    }
+
     fn parse_conflict_row(row: &rusqlite::Row) -> Result<ConflictReport> {
         let path_str: String = row.get(4)?;
         let kind_str: String = row.get(5)?;
@@ -2095,6 +2778,7 @@ impl WorkflowStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use m31a_core::workflow::FileChangeRecord;
     use tempfile::tempdir;
 
     fn setup_test_db() -> (WorkflowStore, Arc<Mutex<Connection>>) {
@@ -2954,5 +3638,369 @@ mod tests {
         // Attempting to add a cyclic dependency (t1 depends on t2) is rejected transactionally
         let cyclic_res = store.replan_with_dependency(wf_id, "t1", "t2", "invalid cycle addition");
         assert!(cyclic_res.is_err());
+    }
+
+    #[test]
+    fn test_changeset_manifest_persistence_and_query() {
+        let (store, _) = setup_test_db();
+        let wf_id = "wf-manifest-test";
+        let run = WorkflowRun {
+            id: wf_id.to_string(),
+            thread_id: None,
+            workspace_root: PathBuf::from("/workspace"),
+            objective: "Manifest test".into(),
+            workflow_type: "autonomous".into(),
+            state: WorkflowState::Running,
+            plan_revision: 1,
+            configuration_json: "{}".into(),
+            created_at_epoch_ms: 1000,
+            updated_at_epoch_ms: 1000,
+            started_at_epoch_ms: Some(1000),
+            completed_at_epoch_ms: None,
+            cancellation_reason: None,
+            overall_result_json: None,
+            resource_usage_json: None,
+        };
+        store.create_workflow(&run).unwrap();
+
+        let mut manifest = ChangeSetManifest {
+            manifest_version: 1,
+            id: "cs-100".into(),
+            workflow_id: wf_id.into(),
+            plan_revision: 1,
+            task_id: "t-100".into(),
+            attempt_id: 1,
+            worker_id: "worker-100".into(),
+            agent_id: Some("agent-100".into()),
+            repository_root: PathBuf::from("/workspace"),
+            canonical_workspace_id: "ws-main".into(),
+            source_base_sha: "head_sha_1".into(),
+            target_commit_sha: Some("head_sha_1".into()),
+            files: vec![FileChangeRecord {
+                relative_path: PathBuf::from("src/model.rs"),
+                original_path: None,
+                change_type: m31a_core::workflow::FileChangeType::Modified,
+                original_exists: true,
+                original_content_hash: Some("old_sha".into()),
+                new_content_hash: Some("new_sha".into()),
+                original_mode: Some(0o644),
+                new_mode: Some(0o644),
+                symlink_target: None,
+                size_bytes: 512,
+                is_binary: false,
+                patch_artifact_path: None,
+            }],
+            isolation_strategy: WorkspaceIsolationStrategy::Worktree,
+            created_at_epoch_ms: 1000,
+            frozen_at_epoch_ms: None,
+            is_frozen: false,
+            manifest_hash: String::new(),
+        };
+        manifest.freeze();
+
+        store.save_change_set_manifest(&manifest).unwrap();
+
+        let fetched = store
+            .get_change_set_manifest(&manifest.manifest_hash)
+            .unwrap()
+            .expect("Manifest should exist in storage");
+        assert_eq!(fetched.id, "cs-100");
+        assert!(fetched.is_frozen);
+        assert_eq!(fetched.files.len(), 1);
+        assert_eq!(
+            fetched.files[0].relative_path,
+            PathBuf::from("src/model.rs")
+        );
+
+        let by_task = store
+            .find_manifest_for_task(wf_id, "t-100", 1)
+            .unwrap()
+            .expect("Should find manifest by task/attempt");
+        assert_eq!(by_task.manifest_hash, manifest.manifest_hash);
+    }
+
+    #[test]
+    fn test_execution_journal_append_and_ordering() {
+        let (store, _) = setup_test_db();
+        let wf_id = "wf-journal-test";
+        let run = WorkflowRun {
+            id: wf_id.to_string(),
+            thread_id: None,
+            workspace_root: PathBuf::from("/workspace"),
+            objective: "Journal test".into(),
+            workflow_type: "autonomous".into(),
+            state: WorkflowState::Running,
+            plan_revision: 1,
+            configuration_json: "{}".into(),
+            created_at_epoch_ms: 1000,
+            updated_at_epoch_ms: 1000,
+            started_at_epoch_ms: Some(1000),
+            completed_at_epoch_ms: None,
+            cancellation_reason: None,
+            overall_result_json: None,
+            resource_usage_json: None,
+        };
+        store.create_workflow(&run).unwrap();
+
+        let e1 = ExecutionJournalEvent {
+            id: "j-1".into(),
+            workflow_id: wf_id.into(),
+            task_id: "t-1".into(),
+            attempt_id: 1,
+            worker_id: "w-1".into(),
+            operation_id: Some("op-1".into()),
+            event_type: "task_authorized".into(),
+            previous_state: Some("created".into()),
+            new_state: Some("authorized".into()),
+            resource_identity: None,
+            manifest_hash: None,
+            payload_json: "{}".into(),
+            timestamp_epoch_ms: 1000,
+        };
+        let e2 = ExecutionJournalEvent {
+            id: "j-2".into(),
+            workflow_id: wf_id.into(),
+            task_id: "t-1".into(),
+            attempt_id: 1,
+            worker_id: "w-1".into(),
+            operation_id: Some("op-2".into()),
+            event_type: "execution_frozen".into(),
+            previous_state: Some("executing".into()),
+            new_state: Some("frozen".into()),
+            resource_identity: None,
+            manifest_hash: Some("hash123".into()),
+            payload_json: "{}".into(),
+            timestamp_epoch_ms: 2000,
+        };
+
+        store.record_execution_journal_event(&e1).unwrap();
+        store.record_execution_journal_event(&e2).unwrap();
+
+        let events = store
+            .list_execution_journal_events(wf_id, Some("t-1"))
+            .unwrap();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].event_type, "task_authorized");
+        assert_eq!(events[1].event_type, "execution_frozen");
+    }
+
+    #[test]
+    fn test_pre_integration_snapshot_and_rollback_recovery() {
+        let (store, _) = setup_test_db();
+        let wf_id = "wf-snap-test";
+        let run = WorkflowRun {
+            id: wf_id.to_string(),
+            thread_id: None,
+            workspace_root: PathBuf::from("/workspace"),
+            objective: "Snapshot test".into(),
+            workflow_type: "autonomous".into(),
+            state: WorkflowState::Running,
+            plan_revision: 1,
+            configuration_json: "{}".into(),
+            created_at_epoch_ms: 1000,
+            updated_at_epoch_ms: 1000,
+            started_at_epoch_ms: Some(1000),
+            completed_at_epoch_ms: None,
+            cancellation_reason: None,
+            overall_result_json: None,
+            resource_usage_json: None,
+        };
+        store.create_workflow(&run).unwrap();
+
+        let integ_id = "integ-123";
+        let snap1 = PreIntegrationSnapshotRecord {
+            id: "snap-1".into(),
+            integration_id: integ_id.into(),
+            workflow_id: wf_id.into(),
+            task_id: "t-1".into(),
+            attempt_id: 1,
+            relative_path: PathBuf::from("src/main.rs"),
+            original_exists: true,
+            original_content_hash: Some("orig_hash".into()),
+            original_mode: Some(0o644),
+            preimage_storage_path: None,
+            status: PreIntegrationSnapshotStatus::Prepared,
+            created_at_epoch_ms: 1000,
+        };
+        let snap2 = PreIntegrationSnapshotRecord {
+            id: "snap-2".into(),
+            integration_id: integ_id.into(),
+            workflow_id: wf_id.into(),
+            task_id: "t-1".into(),
+            attempt_id: 1,
+            relative_path: PathBuf::from("src/created.rs"),
+            original_exists: false,
+            original_content_hash: None,
+            original_mode: None,
+            preimage_storage_path: None,
+            status: PreIntegrationSnapshotStatus::Prepared,
+            created_at_epoch_ms: 1001,
+        };
+
+        let orig_content = b"fn main() { println!(\"original\"); }";
+        store
+            .save_pre_integration_snapshot(&snap1, Some(orig_content))
+            .unwrap();
+        store.save_pre_integration_snapshot(&snap2, None).unwrap();
+
+        // Query snapshots
+        let list = store.list_pre_integration_snapshots(integ_id).unwrap();
+        assert_eq!(list.len(), 2);
+        assert_eq!(list[0].0.id, "snap-1");
+        assert_eq!(list[0].1.as_deref(), Some(&orig_content[..]));
+        assert_eq!(list[1].0.id, "snap-2");
+        assert_eq!(list[1].1, None);
+
+        // Check incomplete rollbacks
+        let incomplete = store.find_incomplete_rollbacks().unwrap();
+        assert!(incomplete.contains(&integ_id.to_string()));
+
+        // Mark restored
+        store
+            .mark_pre_integration_snapshot_status("snap-1", PreIntegrationSnapshotStatus::Restored)
+            .unwrap();
+        store
+            .mark_pre_integration_snapshot_status("snap-2", PreIntegrationSnapshotStatus::Restored)
+            .unwrap();
+
+        let remaining = store.find_incomplete_rollbacks().unwrap();
+        assert!(!remaining.contains(&integ_id.to_string()));
+    }
+
+    #[test]
+    fn test_external_effect_intent_lifecycle_and_idempotency() {
+        let (store, _) = setup_test_db();
+        let wf_id = "wf-effect-test";
+        let run = WorkflowRun {
+            id: wf_id.to_string(),
+            thread_id: None,
+            workspace_root: PathBuf::from("/workspace"),
+            objective: "Effect test".into(),
+            workflow_type: "autonomous".into(),
+            state: WorkflowState::Running,
+            plan_revision: 1,
+            configuration_json: "{}".into(),
+            created_at_epoch_ms: 1000,
+            updated_at_epoch_ms: 1000,
+            started_at_epoch_ms: Some(1000),
+            completed_at_epoch_ms: None,
+            cancellation_reason: None,
+            overall_result_json: None,
+            resource_usage_json: None,
+        };
+        store.create_workflow(&run).unwrap();
+
+        let fp = ExternalEffectIntent::compute_fingerprint("deploy", "prod", "payload");
+        let idem_key = "idemp-key-xyz";
+        let intent = ExternalEffectIntent {
+            id: "eff-1".into(),
+            workflow_id: wf_id.into(),
+            task_id: "t-deploy".into(),
+            attempt_id: 1,
+            worker_id: "w-1".into(),
+            logical_operation_id: "op-deploy-prod".into(),
+            tool_name: "deploy".into(),
+            target_service: "prod".into(),
+            authorized_destination: "https://api.prod.local".into(),
+            request_fingerprint: fp,
+            idempotency_key: Some(idem_key.into()),
+            lifecycle_status: ExternalEffectLifecycleStatus::Prepared,
+            is_reversible: true,
+            compensation_procedure: Some("revert_deployment".into()),
+            error_details: None,
+            created_at_epoch_ms: 1000,
+            updated_at_epoch_ms: 1000,
+        };
+
+        store.save_external_effect_intent(&intent).unwrap();
+
+        // Lookup by idempotency key
+        let by_key = store
+            .find_external_effect_by_idempotency_key(idem_key)
+            .unwrap()
+            .expect("Should find by idempotency key");
+        assert_eq!(by_key.id, "eff-1");
+
+        // Lookup by logical op
+        let by_op = store
+            .find_external_effect_by_logical_op(wf_id, "op-deploy-prod")
+            .unwrap()
+            .expect("Should find by logical operation ID");
+        assert_eq!(by_op.id, "eff-1");
+
+        // Update to UNKNOWN_OUTCOME
+        store
+            .update_external_effect_status(
+                "eff-1",
+                ExternalEffectLifecycleStatus::UnknownOutcome,
+                Some("Network timeout awaiting ACK"),
+            )
+            .unwrap();
+
+        let uncertain = store.list_uncertain_external_effects(wf_id).unwrap();
+        assert_eq!(uncertain.len(), 1);
+        assert_eq!(
+            uncertain[0].lifecycle_status,
+            ExternalEffectLifecycleStatus::UnknownOutcome
+        );
+    }
+
+    #[test]
+    fn test_verification_record_binding() {
+        let (store, _) = setup_test_db();
+        let wf_id = "wf-verif-test";
+        let run = WorkflowRun {
+            id: wf_id.to_string(),
+            thread_id: None,
+            workspace_root: PathBuf::from("/workspace"),
+            objective: "Verification test".into(),
+            workflow_type: "autonomous".into(),
+            state: WorkflowState::Running,
+            plan_revision: 1,
+            configuration_json: "{}".into(),
+            created_at_epoch_ms: 1000,
+            updated_at_epoch_ms: 1000,
+            started_at_epoch_ms: Some(1000),
+            completed_at_epoch_ms: None,
+            cancellation_reason: None,
+            overall_result_json: None,
+            resource_usage_json: None,
+        };
+        store.create_workflow(&run).unwrap();
+
+        let m_hash = "manifest_hash_xyz";
+        let rec = DurableVerificationRecord {
+            id: "vrec-1".into(),
+            workflow_id: wf_id.into(),
+            task_id: "t-verif".into(),
+            attempt_id: 1,
+            manifest_hash: m_hash.into(),
+            source_base_sha: "base123".into(),
+            target_commit_sha: Some("commit456".into()),
+            verification_plan_hash: "plan_hash_abc".into(),
+            requirement_id: "req-unit-tests".into(),
+            category: "unit_test".into(),
+            operation: "cargo test --lib".into(),
+            exit_code: Some(0),
+            status: "Passed".into(),
+            tests_total: Some(25),
+            tests_passed: Some(25),
+            tests_failed: Some(0),
+            tests_skipped: Some(0),
+            duration_ms: 450,
+            diagnostics: None,
+            artifact_refs: vec!["cargo_test_stdout.log".into()],
+            timestamp_epoch_ms: 1500,
+        };
+
+        store.save_verification_record(&rec).unwrap();
+
+        let records = store
+            .list_verification_records_for_manifest(m_hash)
+            .unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].requirement_id, "req-unit-tests");
+        assert_eq!(records[0].status, "Passed");
+        assert_eq!(records[0].tests_passed, Some(25));
     }
 }

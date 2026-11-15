@@ -4121,7 +4121,10 @@ impl ToolRegistry {
                 }
             }
             "repository_overview" => {
-                let refresh = args.get("refresh").and_then(|v| v.as_bool()).unwrap_or(false);
+                let refresh = args
+                    .get("refresh")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
                 let index = self.get_or_build_repo_index(cwd, refresh).await;
                 let inv = index.inventory();
                 let packages: Vec<serde_json::Value> = inv.map(|i| {
@@ -4133,9 +4136,12 @@ impl ToolRegistry {
                     })).collect()
                 }).unwrap_or_default();
 
-                let mut lang_dist: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+                let mut lang_dist: std::collections::HashMap<String, usize> =
+                    std::collections::HashMap::new();
                 for sym in index.all_symbols() {
-                    *lang_dist.entry(sym.language.as_str().to_string()).or_insert(0) += 1;
+                    *lang_dist
+                        .entry(sym.language.as_str().to_string())
+                        .or_insert(0) += 1;
                 }
 
                 let resp = json!({
@@ -4151,7 +4157,10 @@ impl ToolRegistry {
                 Ok(serde_json::to_string_pretty(&resp)?)
             }
             "symbol_search" => {
-                let query = args.get("query").and_then(|v| v.as_str()).context("Missing 'query'")?;
+                let query = args
+                    .get("query")
+                    .and_then(|v| v.as_str())
+                    .context("Missing 'query'")?;
                 let kind_filter = args.get("kind").and_then(|v| v.as_str());
                 let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(30) as usize;
 
@@ -4185,8 +4194,14 @@ impl ToolRegistry {
                 }))?)
             }
             "symbol_references" => {
-                let symbol = args.get("symbol").and_then(|v| v.as_str()).context("Missing 'symbol'")?;
-                let max_results = args.get("max_results").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
+                let symbol = args
+                    .get("symbol")
+                    .and_then(|v| v.as_str())
+                    .context("Missing 'symbol'")?;
+                let max_results = args
+                    .get("max_results")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(50) as usize;
                 let index = self.get_or_build_repo_index(cwd, false).await;
 
                 let callers = index.symbol_graph().find_callers(symbol);
@@ -4218,22 +4233,31 @@ impl ToolRegistry {
                 }))?)
             }
             "dependency_graph" => {
-                let tier = args.get("tier").and_then(|v| v.as_str()).unwrap_or("package");
+                let tier = args
+                    .get("tier")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("package");
                 let target = args.get("target").and_then(|v| v.as_str());
                 let index = self.get_or_build_repo_index(cwd, false).await;
 
                 let result = match tier {
                     "module" => {
                         let cycles = index.module_graph().detect_cycles();
-                        let modules: Vec<serde_json::Value> = index.module_graph().modules.values().take(100).map(|m| {
-                            json!({
-                                "file": m.relative_path.to_string_lossy(),
-                                "afferent_ca": m.afferent_coupling_ca,
-                                "efferent_ce": m.efferent_coupling_ce,
-                                "instability_i": m.instability_i,
-                                "imports_count": m.imported_modules.len(),
+                        let modules: Vec<serde_json::Value> = index
+                            .module_graph()
+                            .modules
+                            .values()
+                            .take(100)
+                            .map(|m| {
+                                json!({
+                                    "file": m.relative_path.to_string_lossy(),
+                                    "afferent_ca": m.afferent_coupling_ca,
+                                    "efferent_ce": m.efferent_coupling_ce,
+                                    "instability_i": m.instability_i,
+                                    "imports_count": m.imported_modules.len(),
+                                })
                             })
-                        }).collect();
+                            .collect();
                         json!({
                             "tier": "module",
                             "total_modules": index.module_graph().modules.len(),
@@ -4241,7 +4265,7 @@ impl ToolRegistry {
                             "cycles": cycles,
                             "modules": modules
                         })
-                    },
+                    }
                     "symbol" => {
                         let target_sym = target.unwrap_or("");
                         let callers = if !target_sym.is_empty() {
@@ -4262,7 +4286,7 @@ impl ToolRegistry {
                             "callers": callers,
                             "callees": callees,
                         })
-                    },
+                    }
                     _ => {
                         let cycles = index.package_graph().detect_cycles();
                         json!({
@@ -4275,14 +4299,21 @@ impl ToolRegistry {
                 Ok(serde_json::to_string_pretty(&result)?)
             }
             "call_graph" => {
-                let symbol = args.get("symbol").and_then(|v| v.as_str()).context("Missing 'symbol'")?;
-                let max_depth = args.get("max_depth").and_then(|v| v.as_u64()).unwrap_or(4) as usize;
+                let symbol = args
+                    .get("symbol")
+                    .and_then(|v| v.as_str())
+                    .context("Missing 'symbol'")?;
+                let max_depth =
+                    args.get("max_depth").and_then(|v| v.as_u64()).unwrap_or(4) as usize;
                 let index = self.get_or_build_repo_index(cwd, false).await;
                 let call_tree = index.build_call_graph(symbol, max_depth);
                 Ok(serde_json::to_string_pretty(&call_tree)?)
             }
             "analyze_change_impact" => {
-                let files_val = args.get("files").and_then(|v| v.as_array()).context("Missing 'files'")?;
+                let files_val = args
+                    .get("files")
+                    .and_then(|v| v.as_array())
+                    .context("Missing 'files'")?;
                 let files_vec: Vec<std::path::PathBuf> = files_val
                     .iter()
                     .filter_map(|v| v.as_str())
@@ -4291,10 +4322,18 @@ impl ToolRegistry {
                 let candidate_syms: Vec<String> = args
                     .get("symbols")
                     .and_then(|v| v.as_array())
-                    .map(|arr| arr.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|v| v.as_str().map(str::to_string))
+                            .collect()
+                    })
                     .unwrap_or_default();
                 let index = self.get_or_build_repo_index(cwd, false).await;
-                let impact = m31a_ast::SemanticImpactAnalyzer::analyze_impact(&index, &files_vec, &candidate_syms);
+                let impact = m31a_ast::SemanticImpactAnalyzer::analyze_impact(
+                    &index,
+                    &files_vec,
+                    &candidate_syms,
+                );
                 Ok(serde_json::to_string_pretty(&impact)?)
             }
             "related_tests" => {
@@ -4302,7 +4341,9 @@ impl ToolRegistry {
                 let file_opt = args.get("file").and_then(|v| v.as_str());
                 let index = self.get_or_build_repo_index(cwd, false).await;
 
-                let target_file = file_opt.map(|f| resolve_path(cwd, f)).unwrap_or_else(|| cwd.to_path_buf());
+                let target_file = file_opt
+                    .map(|f| resolve_path(cwd, f))
+                    .unwrap_or_else(|| cwd.to_path_buf());
                 let target_sym = symbol.unwrap_or("");
                 let tests = index.find_related_tests(target_sym, &target_file);
                 Ok(serde_json::to_string_pretty(&tests)?)
@@ -4340,7 +4381,10 @@ impl ToolRegistry {
                 let error = args.get("error").and_then(|v| v.as_str());
                 let symbol = args.get("symbol").and_then(|v| v.as_str());
                 let file = args.get("file").and_then(|v| v.as_str());
-                let token_budget = args.get("token_budget").and_then(|v| v.as_u64()).unwrap_or(3000) as usize;
+                let token_budget = args
+                    .get("token_budget")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(3000) as usize;
 
                 let index = self.get_or_build_repo_index(cwd, false).await;
                 let query = m31a_ast::RetrievalQuery {
@@ -8100,13 +8144,23 @@ fn test_addition() {
 
         // 6. Dependency Graph
         let dep_pkg = registry
-            .execute("dependency_graph", r#"{"tier": "package"}"#, ws, SandboxPolicy::ReadOnly)
+            .execute(
+                "dependency_graph",
+                r#"{"tier": "package"}"#,
+                ws,
+                SandboxPolicy::ReadOnly,
+            )
             .await
             .unwrap();
         assert!(dep_pkg.contains("sample-repo"));
 
         let dep_mod = registry
-            .execute("dependency_graph", r#"{"tier": "module"}"#, ws, SandboxPolicy::ReadOnly)
+            .execute(
+                "dependency_graph",
+                r#"{"tier": "module"}"#,
+                ws,
+                SandboxPolicy::ReadOnly,
+            )
             .await
             .unwrap();
         assert!(dep_mod.contains("total_modules"));
@@ -8114,7 +8168,12 @@ fn test_addition() {
         // 7. Change Impact
         let impact_args = r#"{"files": ["src/lib.rs"], "symbols": ["add_numbers"]}"#;
         let impact_res = registry
-            .execute("analyze_change_impact", impact_args, ws, SandboxPolicy::ReadOnly)
+            .execute(
+                "analyze_change_impact",
+                impact_args,
+                ws,
+                SandboxPolicy::ReadOnly,
+            )
             .await
             .unwrap();
         assert!(impact_res.contains("target_files") && impact_res.contains("blast_radius_score"));
@@ -8137,9 +8196,17 @@ fn test_addition() {
         // 10. Context Retrieval
         let ctx_args = r#"{"task": "Optimize add_numbers implementation"}"#;
         let ctx_res = registry
-            .execute("retrieve_repository_context", ctx_args, ws, SandboxPolicy::ReadOnly)
+            .execute(
+                "retrieve_repository_context",
+                ctx_args,
+                ws,
+                SandboxPolicy::ReadOnly,
+            )
             .await
             .unwrap();
-        assert!(ctx_res.contains("Repository Intelligence Context Packet") || ctx_res.contains("Task Context"));
+        assert!(
+            ctx_res.contains("Repository Intelligence Context Packet")
+                || ctx_res.contains("Task Context")
+        );
     }
 }

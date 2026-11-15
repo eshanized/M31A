@@ -22,6 +22,77 @@ pub enum ToolEffect {
     PrivilegedOperation,
 }
 
+/// Granular typed effect classification of a tool invocation.
+///
+/// Refines `ToolEffect` into specific execution impact classes for
+/// immutable auditing, external idempotency, compensation, and risk policies.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GranularToolEffect {
+    /// Purely read-only inspection: file reads, symbols, diagnostics, searches.
+    ReadOnly,
+    /// Mutating workspace files or worktree state.
+    WorkspaceMutation,
+    /// Local subprocess / terminal command execution.
+    ProcessExecution,
+    /// External network I/O: web requests, browser navigation, remote API queries.
+    ExternalNetworkOperation,
+    /// External mutation: PR creation, issue tracking, remote cloud API writes.
+    ExternalStateMutation,
+    /// Deployment or release: cloud deployments, registry publishes, CI triggering.
+    DeploymentOrRelease,
+    /// Database schema or data mutation: SQL executions, migrations.
+    DatabaseMutation,
+    /// Privileged or credential operations: secret management, permission changes.
+    CredentialOrPrivileged,
+    /// Irreversible or destructive operations: permanent deletions, resource teardown.
+    IrreversibleOrDestructive,
+}
+
+impl GranularToolEffect {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::ReadOnly => "read_only",
+            Self::WorkspaceMutation => "workspace_mutation",
+            Self::ProcessExecution => "process_execution",
+            Self::ExternalNetworkOperation => "external_network_operation",
+            Self::ExternalStateMutation => "external_state_mutation",
+            Self::DeploymentOrRelease => "deployment_or_release",
+            Self::DatabaseMutation => "database_mutation",
+            Self::CredentialOrPrivileged => "credential_or_privileged",
+            Self::IrreversibleOrDestructive => "irreversible_or_destructive",
+        }
+    }
+
+    /// Converts to the broad ToolEffect category for backward compatibility.
+    pub fn to_broad(&self) -> ToolEffect {
+        match self {
+            Self::ReadOnly => ToolEffect::ReadOnly,
+            Self::WorkspaceMutation => ToolEffect::WorkspaceMutation,
+            Self::ProcessExecution => ToolEffect::ExternalSideEffect,
+            Self::ExternalNetworkOperation => ToolEffect::ExternalSideEffect,
+            Self::ExternalStateMutation => ToolEffect::ExternalSideEffect,
+            Self::DeploymentOrRelease => ToolEffect::ExternalSideEffect,
+            Self::DatabaseMutation => ToolEffect::WorkspaceMutation,
+            Self::CredentialOrPrivileged => ToolEffect::PrivilegedOperation,
+            Self::IrreversibleOrDestructive => ToolEffect::PrivilegedOperation,
+        }
+    }
+
+    pub fn is_external(&self) -> bool {
+        matches!(
+            self,
+            Self::ExternalNetworkOperation
+                | Self::ExternalStateMutation
+                | Self::DeploymentOrRelease
+        )
+    }
+
+    pub fn is_reversible(&self) -> bool {
+        !matches!(self, Self::IrreversibleOrDestructive)
+    }
+}
+
 impl ToolEffect {
     /// Returns true if this effect is permitted during Plan Mode.
     pub fn is_allowed_in_plan_mode(&self) -> bool {
@@ -218,6 +289,53 @@ pub fn classify_tool(tool_name: &str, tool_args: Option<&str>) -> ToolEffect {
 
         // Default fail-closed for any unclassified or unknown tool
         _ => ToolEffect::PrivilegedOperation,
+    }
+}
+
+/// Classifies a tool invocation into a granular effect category for auditing and idempotency tracking.
+pub fn classify_granular_tool(tool_name: &str, tool_args: Option<&str>) -> GranularToolEffect {
+    // 1. MCP Tools
+    if tool_name.starts_with("mcp__") || tool_name.starts_with("mcp_") {
+        return GranularToolEffect::ExternalStateMutation;
+    }
+
+    // 2. Destructive and irreversible operations
+    match tool_name {
+        "delete_secret" | "kill_process" | "stop_background_process" => {
+            return GranularToolEffect::IrreversibleOrDestructive;
+        }
+        "cloud_deploy" => return GranularToolEffect::DeploymentOrRelease,
+        "supabase_migrate" => return GranularToolEffect::DatabaseMutation,
+        "create_pull_request" => return GranularToolEffect::ExternalStateMutation,
+        "web_search"
+        | "web_fetch"
+        | "browser_navigate"
+        | "browser_click"
+        | "browser_type"
+        | "browser_screenshot"
+        | "browser_evaluate"
+        | "verify_visual_state" => {
+            return GranularToolEffect::ExternalNetworkOperation;
+        }
+        "store_secret" | "retrieve_secret" | "list_stored_secrets" | "request_permissions" => {
+            return GranularToolEffect::CredentialOrPrivileged;
+        }
+        _ => {}
+    }
+
+    // 3. Fallback to broad mapping
+    let broad = classify_tool(tool_name, tool_args);
+    match broad {
+        ToolEffect::ReadOnly => GranularToolEffect::ReadOnly,
+        ToolEffect::WorkspaceMutation => GranularToolEffect::WorkspaceMutation,
+        ToolEffect::ExternalSideEffect => {
+            if tool_name == "exec_command" || tool_name == "bash" || tool_name == "sh" {
+                GranularToolEffect::ProcessExecution
+            } else {
+                GranularToolEffect::ExternalStateMutation
+            }
+        }
+        ToolEffect::PrivilegedOperation => GranularToolEffect::CredentialOrPrivileged,
     }
 }
 
@@ -759,5 +877,41 @@ mod tests {
             Some(&format!(r#"{{"command": "{mixed_find}"}}"#)),
         );
         assert_eq!(effect, ToolEffect::WorkspaceMutation);
+    }
+
+    #[test]
+    fn test_classify_granular_tool() {
+        assert_eq!(
+            classify_granular_tool("cloud_deploy", None),
+            GranularToolEffect::DeploymentOrRelease
+        );
+        assert_eq!(
+            classify_granular_tool("supabase_migrate", None),
+            GranularToolEffect::DatabaseMutation
+        );
+        assert_eq!(
+            classify_granular_tool("web_search", None),
+            GranularToolEffect::ExternalNetworkOperation
+        );
+        assert_eq!(
+            classify_granular_tool("create_pull_request", None),
+            GranularToolEffect::ExternalStateMutation
+        );
+        assert_eq!(
+            classify_granular_tool("store_secret", None),
+            GranularToolEffect::CredentialOrPrivileged
+        );
+        assert_eq!(
+            classify_granular_tool("delete_secret", None),
+            GranularToolEffect::IrreversibleOrDestructive
+        );
+        assert_eq!(
+            classify_granular_tool("read_file", None),
+            GranularToolEffect::ReadOnly
+        );
+        assert_eq!(
+            classify_granular_tool("write_file", None),
+            GranularToolEffect::WorkspaceMutation
+        );
     }
 }

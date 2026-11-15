@@ -1,4 +1,5 @@
 //! `m31a-tools`: Tool registry, execution dispatchers, and external integrations.
+#![allow(clippy::collapsible_if, clippy::unnecessary_map_or)]
 //!
 //! Houses built-in tools for filesystem operations, git repository management, code search,
 //! patch application, and provides bridges to external Model Context Protocol (MCP) servers.

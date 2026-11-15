@@ -1259,6 +1259,9 @@ impl AgentRuntime for EngineAgentRuntime {
             source_branch: Some(child_wt.branch.clone()),
             source_base_sha: child_wt.base_sha.clone(),
             target_base_sha: None,
+            worker_id: None,
+            manifest: None,
+            expected_target_head_sha: None,
         };
 
         let outcome = svc.integrate(&req).await?;

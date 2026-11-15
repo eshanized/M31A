@@ -46,14 +46,22 @@ fn test_scenario_a_pure_rust_workspace() {
     };
     let index = AstCodebaseIndex::build_with_options(&repo_root, options);
     assert_eq!(index.status(), IndexStatus::Complete);
-    assert!(index.files_indexed() > 10, "Expected > 10 indexed files, got {}", index.files_indexed());
-    assert!(index.total_symbols() > 50, "Expected > 50 symbols, got {}", index.total_symbols());
+    assert!(
+        index.files_indexed() > 10,
+        "Expected > 10 indexed files, got {}",
+        index.files_indexed()
+    );
+    assert!(
+        index.total_symbols() > 50,
+        "Expected > 50 symbols, got {}",
+        index.total_symbols()
+    );
 
     // 4. Cross-file/cross-crate caller discovery
     let callers = index.find_references_to("parse_file");
     // At least one caller or reference exists in workspace
     assert!(
-        !callers.is_empty() || index.find_symbols_by_name("parse_file").len() >= 1,
+        !callers.is_empty() || !index.find_symbols_by_name("parse_file").is_empty(),
         "Expected symbol resolution for parse_file"
     );
 
@@ -171,7 +179,10 @@ describe("UserService", () => {
 
     // Check test association
     let tests = index.find_related_tests("createDefaultUser", &ws.join("src/user.ts"));
-    assert!(!tests.is_empty(), "Expected tests to be found for createDefaultUser");
+    assert!(
+        !tests.is_empty(),
+        "Expected tests to be found for createDefaultUser"
+    );
 }
 
 /// Scenario C: Python Package
@@ -248,8 +259,14 @@ def test_normalize():
     assert_eq!(method_syms[0].kind, AstSymbolKind::Method);
 
     // Related test discovery
-    let tests = index.find_related_tests("normalize_dataset", &ws.join("src/math_analytics/engine.py"));
-    assert!(!tests.is_empty(), "Expected related test for normalize_dataset");
+    let tests = index.find_related_tests(
+        "normalize_dataset",
+        &ws.join("src/math_analytics/engine.py"),
+    );
+    assert!(
+        !tests.is_empty(),
+        "Expected related test for normalize_dataset"
+    );
 }
 
 /// Scenario D: Go Module
@@ -313,7 +330,10 @@ func TestGatewayServerStart(t *testing.T) {
     // Discovery & Indexing
     let inventory = WorkspaceDiscovery::discover_workspace(ws);
     assert_eq!(inventory.packages.len(), 1);
-    assert_eq!(inventory.packages[0].name, "github.com/example/streamgateway");
+    assert_eq!(
+        inventory.packages[0].name,
+        "github.com/example/streamgateway"
+    );
 
     let index = AstCodebaseIndex::build_with_options(ws, TraversalOptions::default());
     assert_eq!(index.status(), IndexStatus::Complete);
@@ -333,7 +353,10 @@ func TestGatewayServerStart(t *testing.T) {
 
     // Tests
     let tests = index.find_related_tests("NewGatewayServer", &ws.join("server/server.go"));
-    assert!(!tests.is_empty(), "Expected related test for NewGatewayServer");
+    assert!(
+        !tests.is_empty(),
+        "Expected related test for NewGatewayServer"
+    );
 }
 
 /// Scenario E: Incremental Persistence and Recovery
@@ -354,7 +377,11 @@ edition = "2024"
     let file_b = ws.join("src/b.rs");
 
     fs::write(&file_a, "pub fn helper_one() -> i32 { 101 }\n").unwrap();
-    fs::write(&file_b, "use crate::a::helper_one;\npub fn helper_two() -> i32 { helper_one() + 1 }\n").unwrap();
+    fs::write(
+        &file_b,
+        "use crate::a::helper_one;\npub fn helper_two() -> i32 { helper_one() + 1 }\n",
+    )
+    .unwrap();
 
     // 1. Initial build & timing
     let start_initial = Instant::now();
@@ -376,7 +403,10 @@ edition = "2024"
 
     // 3. Confirm only file_a was updated and new symbol is present
     let hash_a_after = index.file_hashes().get(&file_a).cloned().unwrap();
-    assert_ne!(hash_a_before, hash_a_after, "Hash of modified file must change");
+    assert_ne!(
+        hash_a_before, hash_a_after,
+        "Hash of modified file must change"
+    );
 
     let extra_syms = index.find_symbols_by_name("extra_func");
     assert_eq!(extra_syms.len(), 1, "New symbol must be indexed");
@@ -445,19 +475,31 @@ fn test_jwt_verification() {
     };
     let packet_feature = index.retrieve_context(&query_feature);
     assert!(packet_feature.total_estimated_tokens <= 2000);
-    assert!(packet_feature.symbols.iter().any(|s| s.symbol.name == "verify_jwt"));
+    assert!(
+        packet_feature
+            .symbols
+            .iter()
+            .any(|s| s.symbol.name == "verify_jwt")
+    );
     assert!(!packet_feature.formatted_markdown.is_empty());
 
     // Task 2: Bug report with stack trace
     let query_bug = RetrievalQuery {
-        error_message: Some("Error: Zero amount invalid in PaymentProcessor charge_credit_card".to_string()),
+        error_message: Some(
+            "Error: Zero amount invalid in PaymentProcessor charge_credit_card".to_string(),
+        ),
         stack_trace: Some("at billing::PaymentProcessor::charge_credit_card(line 5)".to_string()),
         token_budget: Some(1500),
         ..Default::default()
     };
     let packet_bug = index.retrieve_context(&query_bug);
     assert!(packet_bug.total_estimated_tokens <= 1500);
-    assert!(packet_bug.symbols.iter().any(|s| s.symbol.name == "charge_credit_card" || s.symbol.name == "PaymentProcessor"));
+    assert!(
+        packet_bug
+            .symbols
+            .iter()
+            .any(|s| s.symbol.name == "charge_credit_card" || s.symbol.name == "PaymentProcessor")
+    );
 
     // Task 3: Cross-module refactoring
     let query_refactor = RetrievalQuery {
@@ -468,5 +510,10 @@ fn test_jwt_verification() {
     };
     let packet_refactor = index.retrieve_context(&query_refactor);
     assert!(packet_refactor.total_estimated_tokens <= 1000);
-    assert!(packet_refactor.symbols.iter().any(|s| s.symbol.name == "revoke_session"));
+    assert!(
+        packet_refactor
+            .symbols
+            .iter()
+            .any(|s| s.symbol.name == "revoke_session")
+    );
 }

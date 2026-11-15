@@ -163,12 +163,7 @@ impl<'a> Visit<'_> for SynCallVisitor<'a> {
     }
 }
 
-fn parse_rust_file_syn(
-    file: &syn::File,
-    path: &Path,
-    lines: &[&str],
-    result: &mut ParseResult,
-) {
+fn parse_rust_file_syn(file: &syn::File, path: &Path, lines: &[&str], result: &mut ParseResult) {
     // 1. Visit calls with AST visitor
     let mut call_visitor = SynCallVisitor {
         current_caller: None,
@@ -251,15 +246,31 @@ fn process_syn_items(
                     f.sig.ident.to_string(),
                     kind,
                     path.to_path_buf(),
-                    SourceRange::new(start_line, end_line, 0, lines.get(start_line.saturating_sub(1)).map(|l| l.len()).unwrap_or(0)),
-                    lines.get(start_line.saturating_sub(1)).unwrap_or(&"").trim().to_string(),
+                    SourceRange::new(
+                        start_line,
+                        end_line,
+                        0,
+                        lines
+                            .get(start_line.saturating_sub(1))
+                            .map(|l| l.len())
+                            .unwrap_or(0),
+                    ),
+                    lines
+                        .get(start_line.saturating_sub(1))
+                        .unwrap_or(&"")
+                        .trim()
+                        .to_string(),
                 );
                 sym.is_public = is_public;
                 sym.doc_comment = extract_syn_doc(&f.attrs);
                 if let Some(scope) = parent_scope {
                     sym = sym.with_parent_scope(scope);
                 }
-                sym.visibility = if is_public { SymbolVisibility::Public } else { SymbolVisibility::Private };
+                sym.visibility = if is_public {
+                    SymbolVisibility::Public
+                } else {
+                    SymbolVisibility::Private
+                };
 
                 let sym_id = sym.id.clone();
                 let sym_name = sym.name.clone();
@@ -285,12 +296,28 @@ fn process_syn_items(
                     s.ident.to_string(),
                     AstSymbolKind::Struct,
                     path.to_path_buf(),
-                    SourceRange::new(start_line, end_line, 0, lines.get(start_line.saturating_sub(1)).map(|l| l.len()).unwrap_or(0)),
-                    lines.get(start_line.saturating_sub(1)).unwrap_or(&"").trim().to_string(),
+                    SourceRange::new(
+                        start_line,
+                        end_line,
+                        0,
+                        lines
+                            .get(start_line.saturating_sub(1))
+                            .map(|l| l.len())
+                            .unwrap_or(0),
+                    ),
+                    lines
+                        .get(start_line.saturating_sub(1))
+                        .unwrap_or(&"")
+                        .trim()
+                        .to_string(),
                 );
                 sym.is_public = is_public;
                 sym.doc_comment = extract_syn_doc(&s.attrs);
-                sym.visibility = if is_public { SymbolVisibility::Public } else { SymbolVisibility::Private };
+                sym.visibility = if is_public {
+                    SymbolVisibility::Public
+                } else {
+                    SymbolVisibility::Private
+                };
                 result.symbols.push(sym);
             }
             syn::Item::Enum(e) => {
@@ -301,12 +328,28 @@ fn process_syn_items(
                     e.ident.to_string(),
                     AstSymbolKind::Enum,
                     path.to_path_buf(),
-                    SourceRange::new(start_line, end_line, 0, lines.get(start_line.saturating_sub(1)).map(|l| l.len()).unwrap_or(0)),
-                    lines.get(start_line.saturating_sub(1)).unwrap_or(&"").trim().to_string(),
+                    SourceRange::new(
+                        start_line,
+                        end_line,
+                        0,
+                        lines
+                            .get(start_line.saturating_sub(1))
+                            .map(|l| l.len())
+                            .unwrap_or(0),
+                    ),
+                    lines
+                        .get(start_line.saturating_sub(1))
+                        .unwrap_or(&"")
+                        .trim()
+                        .to_string(),
                 );
                 sym.is_public = is_public;
                 sym.doc_comment = extract_syn_doc(&e.attrs);
-                sym.visibility = if is_public { SymbolVisibility::Public } else { SymbolVisibility::Private };
+                sym.visibility = if is_public {
+                    SymbolVisibility::Public
+                } else {
+                    SymbolVisibility::Private
+                };
                 result.symbols.push(sym);
             }
             syn::Item::Trait(t) => {
@@ -317,12 +360,28 @@ fn process_syn_items(
                     t.ident.to_string(),
                     AstSymbolKind::Trait,
                     path.to_path_buf(),
-                    SourceRange::new(start_line, end_line, 0, lines.get(start_line.saturating_sub(1)).map(|l| l.len()).unwrap_or(0)),
-                    lines.get(start_line.saturating_sub(1)).unwrap_or(&"").trim().to_string(),
+                    SourceRange::new(
+                        start_line,
+                        end_line,
+                        0,
+                        lines
+                            .get(start_line.saturating_sub(1))
+                            .map(|l| l.len())
+                            .unwrap_or(0),
+                    ),
+                    lines
+                        .get(start_line.saturating_sub(1))
+                        .unwrap_or(&"")
+                        .trim()
+                        .to_string(),
                 );
                 sym.is_public = is_public;
                 sym.doc_comment = extract_syn_doc(&t.attrs);
-                sym.visibility = if is_public { SymbolVisibility::Public } else { SymbolVisibility::Private };
+                sym.visibility = if is_public {
+                    SymbolVisibility::Public
+                } else {
+                    SymbolVisibility::Private
+                };
                 result.symbols.push(sym);
 
                 for trait_item in &t.items {
@@ -333,13 +392,29 @@ fn process_syn_items(
                             tf.sig.ident.to_string(),
                             AstSymbolKind::Method,
                             path.to_path_buf(),
-                            SourceRange::new(start_line, end_line, 0, lines.get(start_line.saturating_sub(1)).map(|l| l.len()).unwrap_or(0)),
-                            lines.get(start_line.saturating_sub(1)).unwrap_or(&"").trim().to_string(),
+                            SourceRange::new(
+                                start_line,
+                                end_line,
+                                0,
+                                lines
+                                    .get(start_line.saturating_sub(1))
+                                    .map(|l| l.len())
+                                    .unwrap_or(0),
+                            ),
+                            lines
+                                .get(start_line.saturating_sub(1))
+                                .unwrap_or(&"")
+                                .trim()
+                                .to_string(),
                         );
                         method_sym.is_public = is_public;
                         method_sym.doc_comment = extract_syn_doc(&tf.attrs);
                         method_sym = method_sym.with_parent_scope(&t.ident.to_string());
-                        method_sym.visibility = if is_public { SymbolVisibility::Public } else { SymbolVisibility::Private };
+                        method_sym.visibility = if is_public {
+                            SymbolVisibility::Public
+                        } else {
+                            SymbolVisibility::Private
+                        };
                         result.symbols.push(method_sym);
                     }
                 }
@@ -383,13 +458,29 @@ fn process_syn_items(
                             f.sig.ident.to_string(),
                             AstSymbolKind::Method,
                             path.to_path_buf(),
-                            SourceRange::new(start_line, end_line, 0, lines.get(start_line.saturating_sub(1)).map(|l| l.len()).unwrap_or(0)),
-                            lines.get(start_line.saturating_sub(1)).unwrap_or(&"").trim().to_string(),
+                            SourceRange::new(
+                                start_line,
+                                end_line,
+                                0,
+                                lines
+                                    .get(start_line.saturating_sub(1))
+                                    .map(|l| l.len())
+                                    .unwrap_or(0),
+                            ),
+                            lines
+                                .get(start_line.saturating_sub(1))
+                                .unwrap_or(&"")
+                                .trim()
+                                .to_string(),
                         );
                         sym.is_public = is_public;
                         sym.doc_comment = extract_syn_doc(&f.attrs);
                         sym = sym.with_parent_scope(&self_ty_name);
-                        sym.visibility = if is_public { SymbolVisibility::Public } else { SymbolVisibility::Private };
+                        sym.visibility = if is_public {
+                            SymbolVisibility::Public
+                        } else {
+                            SymbolVisibility::Private
+                        };
                         result.symbols.push(sym);
                     }
                 }
@@ -558,7 +649,9 @@ fn parse_rust_scanner(path: &Path, lines: &[&str], result: &mut ParseResult) {
         let trimmed = line.trim();
         let line_num = idx + 1;
         if trimmed.starts_with("fn ") || trimmed.starts_with("pub fn ") {
-            if let Some(rest) = trimmed.strip_prefix("pub fn ").or_else(|| trimmed.strip_prefix("fn "))
+            if let Some(rest) = trimmed
+                .strip_prefix("pub fn ")
+                .or_else(|| trimmed.strip_prefix("fn "))
                 && let Some((name, _)) = rest.split_once('(')
             {
                 let clean = name.trim();
@@ -574,8 +667,15 @@ fn parse_rust_scanner(path: &Path, lines: &[&str], result: &mut ParseResult) {
                 result.symbols.push(sym);
             }
         } else if trimmed.starts_with("struct ") || trimmed.starts_with("pub struct ") {
-            if let Some(rest) = trimmed.strip_prefix("pub struct ").or_else(|| trimmed.strip_prefix("struct ")) {
-                let name = rest.split(&['<', '{', ';', '('][..]).next().unwrap_or("").trim();
+            if let Some(rest) = trimmed
+                .strip_prefix("pub struct ")
+                .or_else(|| trimmed.strip_prefix("struct "))
+            {
+                let name = rest
+                    .split(&['<', '{', ';', '('][..])
+                    .next()
+                    .unwrap_or("")
+                    .trim();
                 if !name.is_empty() {
                     let mut sym = AstSymbol::new(
                         name,
@@ -674,7 +774,11 @@ impl LanguageAdapter for TypeScriptAdapter {
                     .unwrap_or(trimmed)
                     .trim();
 
-                let name = clean.split(&['<', '{', ' '][..]).next().unwrap_or("").trim();
+                let name = clean
+                    .split(&['<', '{', ' '][..])
+                    .next()
+                    .unwrap_or("")
+                    .trim();
                 if !name.is_empty() {
                     let mut sym = AstSymbol::new(
                         name,
@@ -698,7 +802,11 @@ impl LanguageAdapter for TypeScriptAdapter {
                     .or_else(|| trimmed.strip_prefix("interface "))
                     .unwrap_or(trimmed)
                     .trim();
-                let name = clean.split(&['<', '{', ' '][..]).next().unwrap_or("").trim();
+                let name = clean
+                    .split(&['<', '{', ' '][..])
+                    .next()
+                    .unwrap_or("")
+                    .trim();
                 if !name.is_empty() {
                     let mut sym = AstSymbol::new(
                         name,
@@ -720,7 +828,11 @@ impl LanguageAdapter for TypeScriptAdapter {
                     .or_else(|| trimmed.strip_prefix("type "))
                     .unwrap_or(trimmed)
                     .trim();
-                let name = clean.split(&['<', '=', ' '][..]).next().unwrap_or("").trim();
+                let name = clean
+                    .split(&['<', '=', ' '][..])
+                    .next()
+                    .unwrap_or("")
+                    .trim();
                 if !name.is_empty() {
                     let mut sym = AstSymbol::new(
                         name,
@@ -736,9 +848,23 @@ impl LanguageAdapter for TypeScriptAdapter {
             }
 
             // 5. Method inside class
-            if current_class.is_some() && trimmed.contains('(') && !trimmed.starts_with("if") && !trimmed.starts_with("for") && !trimmed.starts_with("while") && !trimmed.starts_with("switch") {
+            if current_class.is_some()
+                && trimmed.contains('(')
+                && !trimmed.starts_with("if")
+                && !trimmed.starts_with("for")
+                && !trimmed.starts_with("while")
+                && !trimmed.starts_with("switch")
+            {
                 let mut clean = trimmed;
-                for kw in &["public ", "private ", "protected ", "static ", "async ", "override ", "readonly "] {
+                for kw in &[
+                    "public ",
+                    "private ",
+                    "protected ",
+                    "static ",
+                    "async ",
+                    "override ",
+                    "readonly ",
+                ] {
                     while let Some(r) = clean.strip_prefix(kw) {
                         clean = r.trim_start();
                     }
@@ -747,7 +873,9 @@ impl LanguageAdapter for TypeScriptAdapter {
                     let method_name = name_part.trim();
                     if !method_name.is_empty()
                         && !method_name.contains(' ')
-                        && method_name.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '$')
+                        && method_name
+                            .chars()
+                            .all(|c| c.is_alphanumeric() || c == '_' || c == '$')
                     {
                         let mut sym = AstSymbol::new(
                             method_name,
@@ -759,7 +887,8 @@ impl LanguageAdapter for TypeScriptAdapter {
                         if let Some(ref c) = current_class {
                             sym = sym.with_parent_scope(c);
                         }
-                        sym.is_public = !trimmed.starts_with("private") && !trimmed.starts_with('#');
+                        sym.is_public =
+                            !trimmed.starts_with("private") && !trimmed.starts_with('#');
                         result.symbols.push(sym);
                         current_caller = Some(method_name.to_string());
                         continue;
@@ -768,13 +897,19 @@ impl LanguageAdapter for TypeScriptAdapter {
             }
 
             // 6. Function (standard or arrow)
-            if trimmed.contains("function ") || (trimmed.contains("const ") && trimmed.contains("=>")) {
+            if trimmed.contains("function ")
+                || (trimmed.contains("const ") && trimmed.contains("=>"))
+            {
                 let is_export = trimmed.starts_with("export");
                 let fn_name = if let Some((before_paren, _)) = trimmed.split_once('(') {
                     let tokens: Vec<&str> = before_paren.split_whitespace().collect();
                     tokens.last().copied().unwrap_or("")
                 } else if let Some((before_eq, _)) = trimmed.split_once('=') {
-                    before_eq.split_whitespace().last().unwrap_or("").trim_matches(':')
+                    before_eq
+                        .split_whitespace()
+                        .last()
+                        .unwrap_or("")
+                        .trim_matches(':')
                 } else {
                     ""
                 };
@@ -782,9 +917,17 @@ impl LanguageAdapter for TypeScriptAdapter {
                 let clean_name = fn_name.trim_start_matches('*').trim();
                 if !clean_name.is_empty()
                     && !clean_name.contains('(')
-                    && clean_name.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '$')
+                    && clean_name
+                        .chars()
+                        .all(|c| c.is_alphanumeric() || c == '_' || c == '$')
                 {
-                    let kind = if clean_name.starts_with("use") && clean_name.chars().nth(3).map(|c| c.is_uppercase()).unwrap_or(false) {
+                    let kind = if clean_name.starts_with("use")
+                        && clean_name
+                            .chars()
+                            .nth(3)
+                            .map(|c| c.is_uppercase())
+                            .unwrap_or(false)
+                    {
                         AstSymbolKind::Function // React hook
                     } else if current_class.is_some() {
                         AstSymbolKind::Method
@@ -831,14 +974,20 @@ impl LanguageAdapter for TypeScriptAdapter {
 
             // 7. Method / Function Call sites
             if let Some(ref caller) = current_caller {
-                if trimmed.contains('(') && !trimmed.starts_with("function") && !trimmed.starts_with("const") {
+                if trimmed.contains('(')
+                    && !trimmed.starts_with("function")
+                    && !trimmed.starts_with("const")
+                {
                     for part in trimmed.split(&[' ', '.', ';', '=', '{', '}', ','][..]) {
                         if let Some((callee, _)) = part.split_once('(') {
                             let callee = callee.trim();
                             if !callee.is_empty()
                                 && callee.chars().all(|c| c.is_alphanumeric() || c == '_')
                                 && callee != caller
-                                && !matches!(callee, "if" | "for" | "while" | "switch" | "catch" | "return")
+                                && !matches!(
+                                    callee,
+                                    "if" | "for" | "while" | "switch" | "catch" | "return"
+                                )
                             {
                                 result.calls.push(CallSite {
                                     caller_name: caller.clone(),
@@ -879,10 +1028,7 @@ fn parse_ts_import(path: &Path, line: &str, line_num: usize, result: &mut ParseR
             .trim_matches(&['\'', '"', ';', ' '][..])
             .to_string();
 
-        let symbols_part = clause
-            .strip_prefix("import ")
-            .unwrap_or(clause)
-            .trim();
+        let symbols_part = clause.strip_prefix("import ").unwrap_or(clause).trim();
 
         if symbols_part.starts_with('{') {
             let inner = symbols_part.trim_matches(&['{', '}', ' '][..]);
@@ -1083,13 +1229,19 @@ impl LanguageAdapter for PythonAdapter {
 
             // 4. Calls inside function
             if let Some(ref caller) = current_caller {
-                if trimmed.contains('(') && !trimmed.starts_with("def ") && !trimmed.starts_with("class ") {
+                if trimmed.contains('(')
+                    && !trimmed.starts_with("def ")
+                    && !trimmed.starts_with("class ")
+                {
                     for part in trimmed.split(&[' ', '=', '+', '-', '*', '/', ',', '(', ')'][..]) {
                         let token = part.trim();
                         if !token.is_empty()
                             && token.chars().all(|c| c.is_alphanumeric() || c == '_')
                             && token != caller
-                            && !matches!(token, "if" | "for" | "while" | "return" | "with" | "try" | "except")
+                            && !matches!(
+                                token,
+                                "if" | "for" | "while" | "return" | "with" | "try" | "except"
+                            )
                         {
                             result.calls.push(CallSite {
                                 caller_name: caller.clone(),
@@ -1262,7 +1414,11 @@ impl LanguageAdapter for GoAdapter {
                 continue;
             }
             if trimmed.starts_with("import ") {
-                let mod_path = trimmed.strip_prefix("import ").unwrap_or("").trim().trim_matches('"');
+                let mod_path = trimmed
+                    .strip_prefix("import ")
+                    .unwrap_or("")
+                    .trim()
+                    .trim_matches('"');
                 result.imports.push(ImportItem {
                     source_file: path.to_path_buf(),
                     imported_symbol: mod_path.split('/').last().unwrap_or(mod_path).to_string(),
@@ -1288,7 +1444,11 @@ impl LanguageAdapter for GoAdapter {
                         _ => AstSymbolKind::TypeAlias,
                     };
 
-                    let is_public = name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false);
+                    let is_public = name
+                        .chars()
+                        .next()
+                        .map(|c| c.is_uppercase())
+                        .unwrap_or(false);
                     let mut sym = AstSymbol::new(
                         name,
                         kind,
@@ -1318,7 +1478,11 @@ impl LanguageAdapter for GoAdapter {
                             .unwrap_or("")
                             .trim_start_matches('*');
 
-                        let is_public = name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false);
+                        let is_public = name
+                            .chars()
+                            .next()
+                            .map(|c| c.is_uppercase())
+                            .unwrap_or(false);
                         let mut sym = AstSymbol::new(
                             name,
                             AstSymbolKind::Method,
@@ -1333,7 +1497,11 @@ impl LanguageAdapter for GoAdapter {
                     }
                 } else if let Some((name_part, _)) = rest.split_once('(') {
                     let name = name_part.trim();
-                    let is_public = name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false);
+                    let is_public = name
+                        .chars()
+                        .next()
+                        .map(|c| c.is_uppercase())
+                        .unwrap_or(false);
                     let is_test = name.starts_with("Test");
                     let mut sym = AstSymbol::new(
                         name,
@@ -1473,7 +1641,10 @@ impl LanguageAdapterRegistry {
     }
 
     pub fn get_adapter(&self, path: &Path) -> Option<&dyn LanguageAdapter> {
-        self.adapters.iter().find(|a| a.can_parse(path)).map(|b| b.as_ref())
+        self.adapters
+            .iter()
+            .find(|a| a.can_parse(path))
+            .map(|b| b.as_ref())
     }
 
     pub fn parse_file(&self, path: &Path, content: &str) -> ParseResult {
@@ -1520,11 +1691,31 @@ fn test_engine_start() {
 
         assert_eq!(result.imports.len(), 2);
         assert_eq!(result.exports.len(), 1);
-        assert!(result.symbols.iter().any(|s| s.name == "Engine" && s.kind == AstSymbolKind::Struct));
-        assert!(result.symbols.iter().any(|s| s.name == "start" && s.kind == AstSymbolKind::Method));
+        assert!(
+            result
+                .symbols
+                .iter()
+                .any(|s| s.name == "Engine" && s.kind == AstSymbolKind::Struct)
+        );
+        assert!(
+            result
+                .symbols
+                .iter()
+                .any(|s| s.name == "start" && s.kind == AstSymbolKind::Method)
+        );
         assert!(result.symbols.iter().any(|s| s.name == "test_engine_start"));
-        assert!(result.relationships.iter().any(|r| r.kind == RelationshipKind::Calls && r.target_symbol == "helper"));
-        assert!(result.relationships.iter().any(|r| r.kind == RelationshipKind::Tests));
+        assert!(
+            result
+                .relationships
+                .iter()
+                .any(|r| r.kind == RelationshipKind::Calls && r.target_symbol == "helper")
+        );
+        assert!(
+            result
+                .relationships
+                .iter()
+                .any(|r| r.kind == RelationshipKind::Tests)
+        );
     }
 
     #[test]
@@ -1553,9 +1744,19 @@ describe("TaskRunner", () => {
         let result = adapter.parse(Path::new("src/runner.ts"), code);
 
         assert_eq!(result.imports.len(), 3); // Task, Status, axios
-        assert!(result.symbols.iter().any(|s| s.name == "TaskRunner" && s.kind == AstSymbolKind::Class));
+        assert!(
+            result
+                .symbols
+                .iter()
+                .any(|s| s.name == "TaskRunner" && s.kind == AstSymbolKind::Class)
+        );
         assert!(result.symbols.iter().any(|s| s.name == "runTask"));
-        assert!(result.symbols.iter().any(|s| s.name.contains("runs task correctly")));
+        assert!(
+            result
+                .symbols
+                .iter()
+                .any(|s| s.name.contains("runs task correctly"))
+        );
     }
 
     #[test]
@@ -1583,9 +1784,24 @@ def test_user_service():
         let result = adapter.parse(Path::new("service.py"), code);
 
         assert_eq!(result.imports.len(), 2);
-        assert!(result.symbols.iter().any(|s| s.name == "UserService" && s.kind == AstSymbolKind::Class));
-        assert!(result.relationships.iter().any(|r| r.kind == RelationshipKind::Extends && r.target_symbol == "BaseService"));
-        assert!(result.relationships.iter().any(|r| r.kind == RelationshipKind::Tests));
+        assert!(
+            result
+                .symbols
+                .iter()
+                .any(|s| s.name == "UserService" && s.kind == AstSymbolKind::Class)
+        );
+        assert!(
+            result
+                .relationships
+                .iter()
+                .any(|r| r.kind == RelationshipKind::Extends && r.target_symbol == "BaseService")
+        );
+        assert!(
+            result
+                .relationships
+                .iter()
+                .any(|r| r.kind == RelationshipKind::Tests)
+        );
     }
 
     #[test]
@@ -1618,8 +1834,23 @@ func TestServerStart(t *testing.T) {
         let result = adapter.parse(Path::new("server.go"), code);
 
         assert_eq!(result.imports.len(), 2);
-        assert!(result.symbols.iter().any(|s| s.name == "ServerConfig" && s.kind == AstSymbolKind::Struct));
-        assert!(result.symbols.iter().any(|s| s.name == "Start" && s.kind == AstSymbolKind::Method));
-        assert!(result.relationships.iter().any(|r| r.kind == RelationshipKind::Tests));
+        assert!(
+            result
+                .symbols
+                .iter()
+                .any(|s| s.name == "ServerConfig" && s.kind == AstSymbolKind::Struct)
+        );
+        assert!(
+            result
+                .symbols
+                .iter()
+                .any(|s| s.name == "Start" && s.kind == AstSymbolKind::Method)
+        );
+        assert!(
+            result
+                .relationships
+                .iter()
+                .any(|r| r.kind == RelationshipKind::Tests)
+        );
     }
 }

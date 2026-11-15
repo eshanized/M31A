@@ -3,6 +3,7 @@
 pub mod agents;
 pub mod delta_batcher;
 pub mod dispatcher;
+pub mod effect_gateway;
 pub mod history_normalizer;
 pub mod integration;
 pub mod oscillation;
@@ -16,6 +17,7 @@ pub mod workflow;
 pub use agents::EngineAgentRuntime;
 pub use delta_batcher::DeltaBatcher;
 pub use dispatcher::{AuthoritativeToolDispatcher, CodeModeDispatcherBridge, DispatchContext};
+pub use effect_gateway::{EffectAdmissionOutcome, EffectDispatchRequest, ExternalEffectGateway};
 pub use history_normalizer::normalize_tool_history;
 pub use integration::{
     FileSnapshot, IntegrationOutcome, IntegrationRequest, RollbackResult,

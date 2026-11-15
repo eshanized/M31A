@@ -187,11 +187,158 @@ CREATE INDEX IF NOT EXISTS idx_wf_artifacts_sha ON workflow_artifacts(content_sh
 
 ---
 
-## 3. Storage Invariants and Concurrency Guarantees
+## 4. Migration 20 — Verified Execution Engine Schema
 
-1. **ACID Transactions:**  
-   Task state transitions, worker lease claiming, and dependency resolutions execute inside immediate SQLite transactions.
-2. **Lease Query Performance:**  
-   `idx_workflow_tasks_lease` ensures worker claiming (`claim_ready_task`) and stale task detection (`reconcile_stale_tasks`) execute in sub-millisecond time.
-3. **Foreign Key Cascading:**  
-   Deleting a workflow cleanly cascades deletions to its plans, tasks, dependencies, events, and artifact records without orphaned rows.
+Migration 20 adds durable storage for verified execution, immutable change manifests, crash-safe rollback snapshots, external side-effect intent tracking, and cryptographically bound verification records.
+
+```
+┌─────────────────────────┐       1:N       ┌───────────────────────────────┐
+│     workflow_tasks      │────────────────>│   execution_journal_events    │
+└────────────┬────────────┘                 └───────────────────────────────┘
+             │
+             ├─────────────────────────────>┌───────────────────────────────┐
+             │ 1:N                          │      change_set_manifests     │
+             │                              └───────────────┬───────────────┘
+             │                                              │
+             │                                              │ 1:N
+             │                                              ▼
+             ├─────────────────────────────>┌───────────────────────────────┐
+             │ 1:N                          │      verification_records     │
+             │                              └───────────────────────────────┘
+             │
+             ├─────────────────────────────>┌───────────────────────────────┐
+             │ 1:N                          │   pre_integration_snapshots   │
+             │                              └───────────────────────────────┘
+             │
+             └─────────────────────────────>┌───────────────────────────────┐
+               1:N                          │    external_effect_intents    │
+                                            └───────────────────────────────┘
+```
+
+### 1. `execution_journal_events`
+Append-only log of every granular task execution state transition with causality links and worker fencing.
+
+```sql
+CREATE TABLE IF NOT EXISTS execution_journal_events (
+    id TEXT PRIMARY KEY,
+    workflow_id TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    attempt_id INTEGER NOT NULL,
+    worker_id TEXT NOT NULL,
+    state TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    timestamp_epoch_ms INTEGER NOT NULL,
+    parent_event_id TEXT,
+    payload_json TEXT NOT NULL DEFAULT '{}',
+    FOREIGN KEY (workflow_id) REFERENCES workflows(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_exec_journal_task ON execution_journal_events(workflow_id, task_id, attempt_id);
+CREATE INDEX IF NOT EXISTS idx_exec_journal_state ON execution_journal_events(state);
+```
+
+### 2. `change_set_manifests`
+Immutable, content-addressed change-set manifest with sorted file-level hashes, permissions, and metadata.
+
+```sql
+CREATE TABLE IF NOT EXISTS change_set_manifests (
+    id TEXT PRIMARY KEY,
+    workflow_id TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    attempt_id INTEGER NOT NULL,
+    worker_id TEXT NOT NULL,
+    base_commit TEXT NOT NULL,
+    manifest_hash TEXT NOT NULL,
+    frozen INTEGER NOT NULL DEFAULT 0,
+    created_at_epoch_ms INTEGER NOT NULL,
+    frozen_at_epoch_ms INTEGER,
+    manifest_json TEXT NOT NULL,
+    FOREIGN KEY (workflow_id) REFERENCES workflows(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_cs_manifest_lookup ON change_set_manifests(workflow_id, task_id, attempt_id);
+CREATE INDEX IF NOT EXISTS idx_cs_manifest_hash ON change_set_manifests(manifest_hash);
+```
+
+### 3. `pre_integration_snapshots`
+Durable preimages of workspace files prior to patch application, enabling crash-safe rollback across process restarts.
+
+```sql
+CREATE TABLE IF NOT EXISTS pre_integration_snapshots (
+    id TEXT PRIMARY KEY,
+    workflow_id TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    integration_id TEXT NOT NULL,
+    file_path TEXT NOT NULL,
+    original_exists INTEGER NOT NULL,
+    original_content_hash TEXT,
+    original_content_bytes BLOB,
+    original_permissions INTEGER,
+    status TEXT NOT NULL DEFAULT 'captured',
+    created_at_epoch_ms INTEGER NOT NULL,
+    restored_at_epoch_ms INTEGER,
+    FOREIGN KEY (workflow_id) REFERENCES workflows(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_pre_int_snap_lookup ON pre_integration_snapshots(integration_id, status);
+CREATE INDEX IF NOT EXISTS idx_pre_int_snap_wf ON pre_integration_snapshots(workflow_id, task_id);
+```
+
+### 4. `external_effect_intents`
+Tracks external side-effects with idempotent keys, request fingerprints, provider reconciliation, and compensation procedures.
+
+```sql
+CREATE TABLE IF NOT EXISTS external_effect_intents (
+    id TEXT PRIMARY KEY,
+    workflow_id TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    attempt_id INTEGER NOT NULL,
+    worker_id TEXT NOT NULL,
+    effect_category TEXT NOT NULL,
+    logical_op_id TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL,
+    payload_hash TEXT NOT NULL,
+    lifecycle_status TEXT NOT NULL DEFAULT 'prepared',
+    response_payload_json TEXT,
+    reconciliation_data_json TEXT,
+    compensation_data_json TEXT,
+    created_at_epoch_ms INTEGER NOT NULL,
+    updated_at_epoch_ms INTEGER NOT NULL,
+    FOREIGN KEY (workflow_id) REFERENCES workflows(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_ext_effect_idemp ON external_effect_intents(idempotency_key);
+CREATE INDEX IF NOT EXISTS idx_ext_effect_lookup ON external_effect_intents(workflow_id, task_id, attempt_id);
+CREATE INDEX IF NOT EXISTS idx_ext_effect_status ON external_effect_intents(lifecycle_status);
+```
+
+### 5. `verification_records`
+Cryptographically bound verification execution records linking verification criteria to candidate manifest hashes and plan revisions.
+
+```sql
+CREATE TABLE IF NOT EXISTS verification_records (
+    id TEXT PRIMARY KEY,
+    workflow_id TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    attempt_id INTEGER NOT NULL,
+    manifest_id TEXT NOT NULL,
+    category TEXT NOT NULL,
+    status TEXT NOT NULL,
+    command TEXT,
+    exit_code INTEGER,
+    stdout_digest TEXT,
+    stderr_digest TEXT,
+    duration_ms INTEGER NOT NULL,
+    tests_total INTEGER,
+    tests_passed INTEGER,
+    tests_failed INTEGER,
+    tests_skipped INTEGER,
+    evidence_payload_json TEXT NOT NULL DEFAULT '{}',
+    created_at_epoch_ms INTEGER NOT NULL,
+    FOREIGN KEY (workflow_id) REFERENCES workflows(id) ON DELETE CASCADE,
+    FOREIGN KEY (manifest_id) REFERENCES change_set_manifests(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_verif_rec_manifest ON verification_records(manifest_id, category);
+CREATE INDEX IF NOT EXISTS idx_verif_rec_task ON verification_records(workflow_id, task_id, attempt_id);
+```

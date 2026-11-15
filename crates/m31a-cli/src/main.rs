@@ -1,4 +1,5 @@
 //! M31A CLI binary entry point.
+#![allow(clippy::collapsible_if)]
 //!
 //! Parses command line options, configures logging and sandboxes, loads user configuration,
 //! and dispatches execution to interactive TUI modes, daemon commands, or batch subcommands.
@@ -38,11 +39,11 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 mod doctor;
 mod gsd;
+mod repo_cli;
 mod setup;
 mod speculate;
 mod vibe;
 mod workflow;
-mod repo_cli;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -374,7 +375,9 @@ enum Commands {
         #[command(subcommand)]
         cmd: HooksCommands,
     },
-    #[command(about = "Repository intelligence, code graph navigation, impact analysis, and context retrieval")]
+    #[command(
+        about = "Repository intelligence, code graph navigation, impact analysis, and context retrieval"
+    )]
     Repo {
         #[arg(long = "json", global = true, help = "Output structured JSON")]
         json: bool,
@@ -5066,14 +5069,39 @@ mod tests {
     #[test]
     fn test_cli_parse_repo_commands() {
         let cli_status = Cli::try_parse_from(["m31a", "repo", "status"]).unwrap();
-        assert!(matches!(cli_status.command, Some(Commands::Repo { json: false, cmd: repo_cli::RepoCommands::Status })));
+        assert!(matches!(
+            cli_status.command,
+            Some(Commands::Repo {
+                json: false,
+                cmd: repo_cli::RepoCommands::Status
+            })
+        ));
 
         let cli_overview = Cli::try_parse_from(["m31a", "repo", "--json", "overview"]).unwrap();
-        assert!(matches!(cli_overview.command, Some(Commands::Repo { json: true, cmd: repo_cli::RepoCommands::Overview })));
+        assert!(matches!(
+            cli_overview.command,
+            Some(Commands::Repo {
+                json: true,
+                cmd: repo_cli::RepoCommands::Overview
+            })
+        ));
 
-        let cli_symbols = Cli::try_parse_from(["m31a", "repo", "symbols", "AstParser", "--kind", "struct", "--limit", "10"]).unwrap();
+        let cli_symbols = Cli::try_parse_from([
+            "m31a",
+            "repo",
+            "symbols",
+            "AstParser",
+            "--kind",
+            "struct",
+            "--limit",
+            "10",
+        ])
+        .unwrap();
         match cli_symbols.command {
-            Some(Commands::Repo { json: false, cmd: repo_cli::RepoCommands::Symbols { query, kind, limit } }) => {
+            Some(Commands::Repo {
+                json: false,
+                cmd: repo_cli::RepoCommands::Symbols { query, kind, limit },
+            }) => {
                 assert_eq!(query, "AstParser");
                 assert_eq!(kind, Some("struct".to_string()));
                 assert_eq!(limit, 10);
@@ -5081,9 +5109,14 @@ mod tests {
             _ => panic!("Expected RepoCommands::Symbols"),
         }
 
-        let cli_impact = Cli::try_parse_from(["m31a", "repo", "impact", "src/lib.rs", "-s", "parse_file"]).unwrap();
+        let cli_impact =
+            Cli::try_parse_from(["m31a", "repo", "impact", "src/lib.rs", "-s", "parse_file"])
+                .unwrap();
         match cli_impact.command {
-            Some(Commands::Repo { json: false, cmd: repo_cli::RepoCommands::Impact { files, symbols } }) => {
+            Some(Commands::Repo {
+                json: false,
+                cmd: repo_cli::RepoCommands::Impact { files, symbols },
+            }) => {
                 assert_eq!(files, vec!["src/lib.rs".to_string()]);
                 assert_eq!(symbols, vec!["parse_file".to_string()]);
             }

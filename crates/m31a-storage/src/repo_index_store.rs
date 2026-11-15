@@ -3,8 +3,8 @@
 use anyhow::Result;
 use chrono::Utc;
 use m31a_ast::{
-    AstCodebaseIndex, AstSymbol, AstSymbolKind, LanguageId, RelationshipKind,
-    ResolutionStatus, SourceRange, SymbolRelationship,
+    AstCodebaseIndex, AstSymbol, AstSymbolKind, LanguageId, RelationshipKind, ResolutionStatus,
+    SourceRange, SymbolRelationship,
 };
 use rusqlite::{Connection, params};
 use std::fs;
@@ -41,7 +41,11 @@ impl RepoIndexStore {
             .to_string();
 
         let (branch, sha, is_monorepo) = if let Some(inv) = index.inventory() {
-            (inv.git_branch.clone(), inv.git_head_sha.clone(), inv.is_monorepo)
+            (
+                inv.git_branch.clone(),
+                inv.git_head_sha.clone(),
+                inv.is_monorepo,
+            )
         } else {
             (None, None, false)
         };
@@ -81,9 +85,18 @@ impl RepoIndexStore {
         )?;
 
         // 2. Clear previous entries for this repo to maintain consistency
-        tx.execute("DELETE FROM repo_symbols WHERE repo_id = ?1;", params![repo_id])?;
-        tx.execute("DELETE FROM repo_relationships WHERE repo_id = ?1;", params![repo_id])?;
-        tx.execute("DELETE FROM repo_indexed_files WHERE repo_id = ?1;", params![repo_id])?;
+        tx.execute(
+            "DELETE FROM repo_symbols WHERE repo_id = ?1;",
+            params![repo_id],
+        )?;
+        tx.execute(
+            "DELETE FROM repo_relationships WHERE repo_id = ?1;",
+            params![repo_id],
+        )?;
+        tx.execute(
+            "DELETE FROM repo_indexed_files WHERE repo_id = ?1;",
+            params![repo_id],
+        )?;
 
         // 3. Insert indexed files
         {
@@ -189,11 +202,13 @@ impl RepoIndexStore {
         let repo_id = Self::derive_repo_id(root);
         let guard = self.conn.lock().unwrap();
 
-        let exists: bool = guard.query_row(
-            "SELECT 1 FROM repo_indexes WHERE repo_id = ?1;",
-            params![repo_id],
-            |_| Ok(true),
-        ).unwrap_or(false);
+        let exists: bool = guard
+            .query_row(
+                "SELECT 1 FROM repo_indexes WHERE repo_id = ?1;",
+                params![repo_id],
+                |_| Ok(true),
+            )
+            .unwrap_or(false);
 
         if !exists {
             return Ok(None);

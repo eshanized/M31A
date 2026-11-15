@@ -113,7 +113,10 @@ impl TestDiscoveryEngine {
                             explanation: format!(
                                 "In-file test `{}` co-located in `{}`",
                                 sym.name,
-                                target_file.file_name().and_then(|n| n.to_str()).unwrap_or("")
+                                target_file
+                                    .file_name()
+                                    .and_then(|n| n.to_str())
+                                    .unwrap_or("")
                             ),
                         });
                     }
@@ -133,10 +136,8 @@ impl TestDiscoveryEngine {
                 || (tf_name.starts_with("test_") && tf_name.contains(target_stem))
             {
                 // Find test functions inside this test file
-                let tests_in_file: Vec<&AstSymbol> = all_symbols
-                    .iter()
-                    .filter(|s| &s.file_path == tf)
-                    .collect();
+                let tests_in_file: Vec<&AstSymbol> =
+                    all_symbols.iter().filter(|s| &s.file_path == tf).collect();
 
                 if tests_in_file.is_empty() {
                     let key = format!("{}:1", tf.display());
@@ -172,7 +173,11 @@ impl TestDiscoveryEngine {
         }
 
         // Sort by confidence descending
-        results.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap_or(std::cmp::Ordering::Equal));
+        results.sort_by(|a, b| {
+            b.confidence
+                .partial_cmp(&a.confidence)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         results
     }
 }
@@ -223,7 +228,10 @@ mod tests {
 
         assert!(!results.is_empty());
         assert_eq!(results[0].test_name, "test_hash_password_valid");
-        assert_eq!(results[0].rationale, TestSelectionRationale::DirectCallEvidence);
+        assert_eq!(
+            results[0].rationale,
+            TestSelectionRationale::DirectCallEvidence
+        );
         assert!(results[0].confidence >= 0.90);
     }
 }

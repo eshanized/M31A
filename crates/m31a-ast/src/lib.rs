@@ -1,4 +1,12 @@
 //! `m31a-ast`: Codebase AST, syntax tree intelligence, and semantic chunking engine.
+#![allow(
+    clippy::collapsible_if,
+    clippy::needless_borrows_for_generic_args,
+    clippy::assign_op_pattern,
+    clippy::op_ref,
+    clippy::doc_lazy_continuation,
+    clippy::double_ended_iterator_last
+)]
 
 pub mod architecture;
 pub mod chunker;

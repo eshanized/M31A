@@ -9,8 +9,9 @@ use anyhow::{Context, Result, anyhow, bail};
 use chrono::Utc;
 use futures::future::BoxFuture;
 use m31a_core::workflow::{
-    VerificationStatus, WorkflowEvent, WorkflowEventType, WorkflowPlan, WorkflowRun, WorkflowState,
-    WorkflowTask, WorkflowTaskStatus, WorkspaceIsolationStrategy,
+    ChangeSetManifest, ExecutionJournalEvent, FileChangeRecord, FileChangeType, VerificationStatus,
+    WorkflowEvent, WorkflowEventType, WorkflowPlan, WorkflowRun, WorkflowState, WorkflowTask,
+    WorkflowTaskStatus, WorkspaceIsolationStrategy,
 };
 use m31a_execpolicy::ExecPolicy;
 use m31a_provider::ProviderClient;
@@ -18,8 +19,8 @@ use m31a_storage::worktree::WorktreeManager;
 use m31a_storage::{Storage, WorkflowStore};
 use m31a_tools::agent_runtime::AgentRuntime;
 use m31a_tools::registry::ToolRegistry;
-use m31a_verify::AutonomousVerifier;
 use m31a_verify::runners::ProjectRunner;
+use m31a_verify::{AutonomousVerifier, IndependentVerificationEngine};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -697,6 +698,41 @@ impl WorkflowOrchestrator {
 
         if run.state.is_terminal() {
             return Ok(run);
+        }
+
+        // 0. Recover any incomplete rollbacks from pre-integration snapshots across crash boundary
+        let incomplete_rollbacks = self.store().find_incomplete_rollbacks().unwrap_or_default();
+        if !incomplete_rollbacks.is_empty() {
+            info!(
+                workflow_id = %workflow_id,
+                count = incomplete_rollbacks.len(),
+                "Recovering incomplete pre-integration rollback snapshots across crash boundary"
+            );
+            let recovery_svc = WorkflowIntegrationService::new().with_store(self.store());
+            for integ_id in &incomplete_rollbacks {
+                if let Err(e) =
+                    recovery_svc.resume_incomplete_rollbacks(&run.workspace_root, integ_id)
+                {
+                    warn!(
+                        workflow_id = %workflow_id,
+                        integration_id = %integ_id,
+                        "Failed resuming incomplete rollback snapshot: {e}"
+                    );
+                }
+            }
+        }
+
+        // 0.1 Check for uncertain external effect intents requiring reconciliation
+        let uncertain_effects = self
+            .store()
+            .list_uncertain_external_effects(workflow_id)
+            .unwrap_or_default();
+        if !uncertain_effects.is_empty() {
+            warn!(
+                workflow_id = %workflow_id,
+                count = uncertain_effects.len(),
+                "Workflow has uncertain external effects pending provider reconciliation prior to execution"
+            );
         }
 
         // Register cancellation token for this workflow
@@ -1438,6 +1474,140 @@ impl WorkflowOrchestrator {
                                     worktree_record.as_ref().map(|w| w.base_sha.clone());
                                 let svc =
                                     WorkflowIntegrationService::new().with_store(self.store());
+
+                                // Construct, freeze, and journal the canonical ChangeSetManifest
+                                let affected_rel_paths = svc
+                                    .extract_and_validate_paths(&run.workspace_root, &diff_text)
+                                    .unwrap_or_default();
+                                let mut file_records = Vec::new();
+                                for rel_path in &affected_rel_paths {
+                                    let full = run.workspace_root.join(rel_path);
+                                    let original_exists = full.exists();
+                                    let original_content_hash = if original_exists {
+                                        fs::read(&full).ok().map(|b| {
+                                            let mut h = Sha256::new();
+                                            h.update(&b);
+                                            format!("{:x}", h.finalize())
+                                        })
+                                    } else {
+                                        None
+                                    };
+                                    let change_type = if !original_exists {
+                                        FileChangeType::Added
+                                    } else {
+                                        FileChangeType::Modified
+                                    };
+                                    file_records.push(FileChangeRecord {
+                                        relative_path: rel_path.clone(),
+                                        original_path: None,
+                                        change_type,
+                                        original_exists,
+                                        original_content_hash,
+                                        new_content_hash: None,
+                                        original_mode: None,
+                                        new_mode: None,
+                                        symlink_target: None,
+                                        size_bytes: 0,
+                                        is_binary: false,
+                                        patch_artifact_path: None,
+                                    });
+                                }
+
+                                let mut manifest = ChangeSetManifest {
+                                    manifest_version: 1,
+                                    id: format!("manifest-{}", Uuid::new_v4().simple()),
+                                    workflow_id: wf_id.clone(),
+                                    plan_revision: run.plan_revision,
+                                    task_id: task_id.clone(),
+                                    attempt_id: claimed_task.attempt_id,
+                                    worker_id: worker_id.clone(),
+                                    agent_id: executed_agent_id.clone(),
+                                    repository_root: run.workspace_root.clone(),
+                                    canonical_workspace_id: format!("ws-{}", wf_id),
+                                    source_base_sha: source_base_sha
+                                        .clone()
+                                        .unwrap_or_else(|| "head".into()),
+                                    target_commit_sha: None,
+                                    files: file_records,
+                                    isolation_strategy: task.workspace_isolation,
+                                    created_at_epoch_ms: Utc::now().timestamp_millis(),
+                                    frozen_at_epoch_ms: None,
+                                    is_frozen: false,
+                                    manifest_hash: String::new(),
+                                };
+                                manifest.freeze();
+                                let _ = self.store().save_change_set_manifest(&manifest);
+
+                                // Record manifest frozen in durable execution journal
+                                let _ = self
+                                    .store()
+                                    .record_execution_journal_event(&ExecutionJournalEvent {
+                                    id: format!("jrn-{}", Uuid::new_v4().simple()),
+                                    workflow_id: wf_id.clone(),
+                                    task_id: task_id.clone(),
+                                    attempt_id: claimed_task.attempt_id,
+                                    worker_id: worker_id.clone(),
+                                    operation_id: None,
+                                    event_type: "manifest_frozen".into(),
+                                    previous_state: Some("result_captured".into()),
+                                    new_state: Some("frozen".into()),
+                                    resource_identity: None,
+                                    manifest_hash: Some(manifest.manifest_hash.clone()),
+                                    payload_json:
+                                        serde_json::json!({ "files_count": manifest.files.len() })
+                                            .to_string(),
+                                    timestamp_epoch_ms: Utc::now().timestamp_millis(),
+                                });
+
+                                // Independent Verification Engine execution
+                                let verif_plan = IndependentVerificationEngine::generate_plan(
+                                    &run.workspace_root,
+                                    &manifest,
+                                    &["verify_check".into(), "verify_tests".into()],
+                                );
+                                let verif_report = if let Ok(ref plan) = verif_plan {
+                                    let records = IndependentVerificationEngine::execute_plan(
+                                        &run.workspace_root,
+                                        plan,
+                                        &manifest,
+                                        Duration::from_secs(30),
+                                    )
+                                    .await
+                                    .unwrap_or_default();
+                                    for rec in &records {
+                                        let _ = self.store().save_verification_record(rec);
+                                    }
+                                    let eval = IndependentVerificationEngine::evaluate_evidence(
+                                        plan, &manifest, &records,
+                                    );
+                                    Some(eval)
+                                } else {
+                                    None
+                                };
+
+                                let verif_passed =
+                                    verif_report.as_ref().map(|r| r.success).unwrap_or(false);
+
+                                // Record verification event in execution journal
+                                let _ = self.store().record_execution_journal_event(&ExecutionJournalEvent {
+                                    id: format!("jrn-{}", Uuid::new_v4().simple()),
+                                    workflow_id: wf_id.clone(),
+                                    task_id: task_id.clone(),
+                                    attempt_id: claimed_task.attempt_id,
+                                    worker_id: worker_id.clone(),
+                                    operation_id: None,
+                                    event_type: "verification_evaluated".into(),
+                                    previous_state: Some("verifying".into()),
+                                    new_state: Some(if verif_passed { "verified" } else { "failed" }.into()),
+                                    resource_identity: None,
+                                    manifest_hash: Some(manifest.manifest_hash.clone()),
+                                    payload_json: serde_json::json!({
+                                        "passed": verif_passed,
+                                        "summary": verif_report.as_ref().map(|r| r.summary.clone()).unwrap_or_default(),
+                                    }).to_string(),
+                                    timestamp_epoch_ms: Utc::now().timestamp_millis(),
+                                });
+
                                 let req = IntegrationRequest {
                                     workspace_root: run.workspace_root.clone(),
                                     patch_content: diff_text.clone(),
@@ -1459,6 +1629,9 @@ impl WorkflowOrchestrator {
                                     source_branch,
                                     source_base_sha,
                                     target_base_sha: None,
+                                    worker_id: Some(worker_id.clone()),
+                                    manifest: Some(manifest),
+                                    expected_target_head_sha: None,
                                 };
 
                                 let v_start = Instant::now();
@@ -2063,6 +2236,41 @@ impl WorkflowOrchestrator {
 
         if run.state.is_terminal() {
             return Ok(run);
+        }
+
+        // 0. Recover any incomplete rollbacks from pre-integration snapshots across crash boundary
+        let incomplete_rollbacks = self.store().find_incomplete_rollbacks().unwrap_or_default();
+        if !incomplete_rollbacks.is_empty() {
+            info!(
+                workflow_id = %workflow_id,
+                count = incomplete_rollbacks.len(),
+                "Recovering incomplete pre-integration rollback snapshots across crash boundary"
+            );
+            let recovery_svc = WorkflowIntegrationService::new().with_store(self.store());
+            for integ_id in &incomplete_rollbacks {
+                if let Err(e) =
+                    recovery_svc.resume_incomplete_rollbacks(&run.workspace_root, integ_id)
+                {
+                    warn!(
+                        workflow_id = %workflow_id,
+                        integration_id = %integ_id,
+                        "Failed resuming incomplete rollback snapshot: {e}"
+                    );
+                }
+            }
+        }
+
+        // 0.1 Check for uncertain external effect intents requiring reconciliation
+        let uncertain_effects = self
+            .store()
+            .list_uncertain_external_effects(workflow_id)
+            .unwrap_or_default();
+        if !uncertain_effects.is_empty() {
+            warn!(
+                workflow_id = %workflow_id,
+                count = uncertain_effects.len(),
+                "Workflow has uncertain external effects pending provider reconciliation prior to execution"
+            );
         }
 
         info!(workflow_id = %workflow_id, "Resuming interrupted workflow");

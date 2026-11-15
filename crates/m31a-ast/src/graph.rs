@@ -5,9 +5,7 @@
 //! 2. Module Graph: File/module imports, re-exports, circular dependencies, Martin coupling (Ca/Ce/Instability).
 //! 3. Symbol Graph: Function/method calls, type usage, interface implementations, transitive caller/callee traversal.
 
-use crate::types::{
-    AstSymbol, AstSymbolKind, CallReference, RelationshipKind, SymbolRelationship,
-};
+use crate::types::{AstSymbol, AstSymbolKind, CallReference, RelationshipKind, SymbolRelationship};
 use crate::workspace::{PackageDependency, WorkspaceInventory};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -121,13 +119,7 @@ impl PackageGraph {
 
         for node in self.packages.keys() {
             if !visited.contains(node) {
-                self.dfs_cycles(
-                    node,
-                    &mut visited,
-                    &mut on_stack,
-                    &mut path,
-                    &mut cycles,
-                );
+                self.dfs_cycles(node, &mut visited, &mut on_stack, &mut path, &mut cycles);
             }
         }
 
@@ -259,13 +251,7 @@ impl ModuleGraph {
 
         for node in self.edges.keys() {
             if !visited.contains(node) {
-                self.dfs_module_cycles(
-                    node,
-                    &mut visited,
-                    &mut on_stack,
-                    &mut path,
-                    &mut cycles,
-                );
+                self.dfs_module_cycles(node, &mut visited, &mut on_stack, &mut path, &mut cycles);
             }
         }
 

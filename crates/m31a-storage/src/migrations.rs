@@ -648,6 +648,115 @@ pub const BUILTIN_MIGRATIONS: &[Migration] = &[
         CREATE INDEX IF NOT EXISTS idx_repo_rel_source ON repo_relationships(source_symbol);
         "#,
     ),
+    Migration::new(
+        20,
+        "verified_execution_engine",
+        r#"
+        CREATE TABLE IF NOT EXISTS execution_journal_events (
+            id TEXT PRIMARY KEY,
+            workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+            task_id TEXT NOT NULL,
+            attempt_id INTEGER NOT NULL,
+            worker_id TEXT NOT NULL,
+            operation_id TEXT,
+            event_type TEXT NOT NULL,
+            previous_state TEXT,
+            new_state TEXT,
+            resource_identity TEXT,
+            manifest_hash TEXT,
+            payload_json TEXT NOT NULL DEFAULT '{}',
+            timestamp_epoch_ms INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS change_set_manifests (
+            id TEXT PRIMARY KEY,
+            workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+            task_id TEXT NOT NULL,
+            attempt_id INTEGER NOT NULL,
+            worker_id TEXT NOT NULL,
+            agent_id TEXT,
+            manifest_hash TEXT NOT NULL UNIQUE,
+            source_base_sha TEXT NOT NULL,
+            target_commit_sha TEXT,
+            is_frozen INTEGER NOT NULL DEFAULT 0,
+            manifest_json TEXT NOT NULL,
+            created_at_epoch_ms INTEGER NOT NULL,
+            frozen_at_epoch_ms INTEGER
+        );
+
+        CREATE TABLE IF NOT EXISTS pre_integration_snapshots (
+            id TEXT PRIMARY KEY,
+            integration_id TEXT NOT NULL,
+            workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+            task_id TEXT NOT NULL,
+            attempt_id INTEGER NOT NULL,
+            relative_path TEXT NOT NULL,
+            original_exists INTEGER NOT NULL,
+            original_content_hash TEXT,
+            original_mode INTEGER,
+            preimage_storage_path TEXT,
+            preimage_blob BLOB,
+            status TEXT NOT NULL CHECK(status IN ('prepared', 'restored', 'failed')),
+            created_at_epoch_ms INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS external_effect_intents (
+            id TEXT PRIMARY KEY,
+            workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+            task_id TEXT NOT NULL,
+            attempt_id INTEGER NOT NULL,
+            worker_id TEXT NOT NULL,
+            logical_operation_id TEXT NOT NULL,
+            tool_name TEXT NOT NULL,
+            target_service TEXT NOT NULL,
+            authorized_destination TEXT NOT NULL,
+            request_fingerprint TEXT NOT NULL,
+            idempotency_key TEXT,
+            lifecycle_status TEXT NOT NULL,
+            is_reversible INTEGER NOT NULL DEFAULT 0,
+            compensation_procedure TEXT,
+            error_details TEXT,
+            created_at_epoch_ms INTEGER NOT NULL,
+            updated_at_epoch_ms INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS verification_records (
+            id TEXT PRIMARY KEY,
+            workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+            task_id TEXT NOT NULL,
+            attempt_id INTEGER NOT NULL,
+            manifest_hash TEXT NOT NULL,
+            source_base_sha TEXT NOT NULL,
+            target_commit_sha TEXT,
+            verification_plan_hash TEXT NOT NULL,
+            requirement_id TEXT NOT NULL,
+            category TEXT NOT NULL,
+            operation TEXT NOT NULL,
+            exit_code INTEGER,
+            status TEXT NOT NULL,
+            tests_total INTEGER,
+            tests_passed INTEGER,
+            tests_failed INTEGER,
+            tests_skipped INTEGER,
+            duration_ms INTEGER NOT NULL,
+            diagnostics TEXT,
+            artifact_refs_json TEXT NOT NULL DEFAULT '[]',
+            timestamp_epoch_ms INTEGER NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_exec_journal_wf_task ON execution_journal_events(workflow_id, task_id, attempt_id);
+        CREATE INDEX IF NOT EXISTS idx_exec_journal_ts ON execution_journal_events(timestamp_epoch_ms ASC);
+        CREATE INDEX IF NOT EXISTS idx_manifests_wf_task ON change_set_manifests(workflow_id, task_id, attempt_id);
+        CREATE INDEX IF NOT EXISTS idx_manifests_hash ON change_set_manifests(manifest_hash);
+        CREATE INDEX IF NOT EXISTS idx_pre_snapshots_integ ON pre_integration_snapshots(integration_id);
+        CREATE INDEX IF NOT EXISTS idx_pre_snapshots_wf_task ON pre_integration_snapshots(workflow_id, task_id, attempt_id);
+        CREATE INDEX IF NOT EXISTS idx_external_intents_wf_task ON external_effect_intents(workflow_id, task_id, attempt_id);
+        CREATE INDEX IF NOT EXISTS idx_external_intents_logical ON external_effect_intents(workflow_id, logical_operation_id);
+        CREATE INDEX IF NOT EXISTS idx_external_intents_idempotency ON external_effect_intents(idempotency_key);
+        CREATE INDEX IF NOT EXISTS idx_verif_records_wf_task ON verification_records(workflow_id, task_id, attempt_id);
+        CREATE INDEX IF NOT EXISTS idx_verif_records_manifest ON verification_records(manifest_hash);
+        "#,
+    ),
 ];
 
 /// Migration engine responsible for running and validating SQLite migrations.
@@ -816,5 +925,10 @@ mod tests {
         assert!(tables.contains(&"session_inbox".to_string()));
         assert!(tables.contains(&"evidence_records".to_string()));
         assert!(tables.contains(&"session_memories".to_string()));
+        assert!(tables.contains(&"execution_journal_events".to_string()));
+        assert!(tables.contains(&"change_set_manifests".to_string()));
+        assert!(tables.contains(&"pre_integration_snapshots".to_string()));
+        assert!(tables.contains(&"external_effect_intents".to_string()));
+        assert!(tables.contains(&"verification_records".to_string()));
     }
 }

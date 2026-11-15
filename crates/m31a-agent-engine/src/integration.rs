@@ -18,9 +18,12 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use chrono::Utc;
-use m31a_core::workflow::{IntegrationLifecycleStatus, IntegrationRecord};
+use m31a_core::workflow::{
+    ChangeSetManifest, ExecutionJournalEvent, IntegrationLifecycleStatus, IntegrationRecord,
+    PreIntegrationSnapshotRecord, PreIntegrationSnapshotStatus,
+};
 use m31a_storage::{WorkflowStore, WorktreeManager, WorktreeSettings};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -68,8 +71,14 @@ pub struct IntegrationRequest {
     pub task_id: Option<String>,
     /// Attempt identifier for fencing checks.
     pub attempt_id: Option<u32>,
+    /// Worker identifier for fencing checks.
+    pub worker_id: Option<String>,
+    /// Immutable ChangeSetManifest if promoting a canonical candidate.
+    pub manifest: Option<ChangeSetManifest>,
     /// Expected change-set hash for immutable binding.
     pub expected_change_set_hash: Option<String>,
+    /// Expected target repository HEAD commit SHA immediately prior to integration (Compare-And-Swap).
+    pub expected_target_head_sha: Option<String>,
     /// Source Git branch of the child worktree, if applicable.
     pub source_branch: Option<String>,
     /// Base commit SHA from which the child worktree was branched.
@@ -94,7 +103,10 @@ impl Default for IntegrationRequest {
             workflow_id: None,
             task_id: None,
             attempt_id: None,
+            worker_id: None,
+            manifest: None,
             expected_change_set_hash: None,
+            expected_target_head_sha: None,
             source_branch: None,
             source_base_sha: None,
             target_base_sha: None,
@@ -497,6 +509,151 @@ impl WorkflowIntegrationService {
             });
         }
 
+        // 0.2 Authoritative worker attempt fencing check
+        if let (Some(store), Some(wf_id), Some(task_id)) =
+            (&self.store, &req.workflow_id, &req.task_id)
+            && let Ok(Some(task)) = store.get_task(wf_id, task_id)
+        {
+            if let Some(req_attempt) = req.attempt_id
+                && task.attempt_id != req_attempt
+            {
+                let err_msg = format!(
+                    "Fencing violation: integration request attempt {} is superseded by authoritative attempt {}",
+                    req_attempt, task.attempt_id
+                );
+                warn!(workflow_id = %wf_id, task_id = %task_id, "{}", err_msg);
+                return Ok(IntegrationOutcome {
+                    success: false,
+                    pre_check_clean: false,
+                    approval_granted: false,
+                    patch_applied: false,
+                    verification_passed: false,
+                    commit_completed: false,
+                    rollback_performed: false,
+                    commit_sha: None,
+                    modified_files: Vec::new(),
+                    error: Some(err_msg.clone()),
+                    summary: err_msg,
+                });
+            }
+            if let Some(ref req_worker) = req.worker_id
+                && task.worker_id.as_deref() != Some(req_worker)
+            {
+                let err_msg = format!(
+                    "Fencing violation: worker '{}' does not own task (authoritative worker: '{:?}')",
+                    req_worker, task.worker_id
+                );
+                warn!(workflow_id = %wf_id, task_id = %task_id, "{}", err_msg);
+                return Ok(IntegrationOutcome {
+                    success: false,
+                    pre_check_clean: false,
+                    approval_granted: false,
+                    patch_applied: false,
+                    verification_passed: false,
+                    commit_completed: false,
+                    rollback_performed: false,
+                    commit_sha: None,
+                    modified_files: Vec::new(),
+                    error: Some(err_msg.clone()),
+                    summary: err_msg,
+                });
+            }
+        }
+
+        // 0.3 ChangeSetManifest integrity and freeze validation
+        if let Some(ref manifest) = req.manifest {
+            if !manifest.is_frozen {
+                let err_msg = "Integration rejected: Candidate manifest is not frozen".to_string();
+                return Ok(IntegrationOutcome {
+                    success: false,
+                    pre_check_clean: false,
+                    approval_granted: false,
+                    patch_applied: false,
+                    verification_passed: false,
+                    commit_completed: false,
+                    rollback_performed: false,
+                    commit_sha: None,
+                    modified_files: Vec::new(),
+                    error: Some(err_msg.clone()),
+                    summary: err_msg,
+                });
+            }
+            if let Err(e) = manifest.validate_integrity() {
+                let err_msg =
+                    format!("Integration rejected: Manifest integrity validation failed: {e}");
+                return Ok(IntegrationOutcome {
+                    success: false,
+                    pre_check_clean: false,
+                    approval_granted: false,
+                    patch_applied: false,
+                    verification_passed: false,
+                    commit_completed: false,
+                    rollback_performed: false,
+                    commit_sha: None,
+                    modified_files: Vec::new(),
+                    error: Some(err_msg.clone()),
+                    summary: err_msg,
+                });
+            }
+        }
+
+        // 0.4 Target Revision Compare-And-Swap (CAS) Precondition Check
+        if is_git
+            && let (Some(expected_head), Some(actual_head)) =
+                (&req.expected_target_head_sha, &current_target_sha)
+            && expected_head != actual_head
+        {
+            let err_msg = format!(
+                "Target revision mismatch (CAS check failed): target HEAD advanced from expected {expected_head} to {actual_head}; re-verification required"
+            );
+            warn!(workflow_id = ?req.workflow_id, "{}", err_msg);
+            return Ok(IntegrationOutcome {
+                success: false,
+                pre_check_clean: false,
+                approval_granted: false,
+                patch_applied: false,
+                verification_passed: false,
+                commit_completed: false,
+                rollback_performed: false,
+                commit_sha: None,
+                modified_files: Vec::new(),
+                error: Some(err_msg.clone()),
+                summary: err_msg,
+            });
+        }
+
+        // 0.5 Dirty workspace check (fail closed if target workspace contains uncommitted changes)
+        let is_clean = if is_git && !req.skip_dirty_check {
+            let settings = WorktreeSettings::new(&req.workspace_root);
+            let mgr = WorktreeManager::new(settings);
+            match mgr.is_dirty(&req.workspace_root) {
+                Ok(dirty) => !dirty,
+                Err(e) => {
+                    warn!(err = %e, "Failed inspecting workspace cleanliness; failing closed");
+                    false
+                }
+            }
+        } else {
+            true
+        };
+
+        if !is_clean {
+            let err_msg = "Target workspace contains uncommitted changes or cleanliness check failed; clean workspace required".to_string();
+            return Ok(IntegrationOutcome {
+                success: false,
+                pre_check_clean: false,
+                approval_granted: true,
+                patch_applied: false,
+                verification_passed: false,
+                commit_completed: false,
+                rollback_performed: false,
+                commit_sha: None,
+                modified_files: Vec::new(),
+                error: Some(err_msg),
+                summary: "Integration blocked: target workspace is dirty".into(),
+            });
+        }
+
         // 1. Path extraction and containment verification
         let affected_rel_paths =
             match self.extract_and_validate_paths(&req.workspace_root, &req.patch_content) {
@@ -721,49 +878,43 @@ impl WorkflowIntegrationService {
             }
         }
 
-        // 7. Dirty workspace check (fail closed if target workspace contains uncommitted changes)
-        let is_clean = if is_git && !req.skip_dirty_check {
-            let settings = WorktreeSettings::new(&req.workspace_root);
-            let mgr = WorktreeManager::new(settings);
-            match mgr.is_dirty(&req.workspace_root) {
-                Ok(dirty) => !dirty,
-                Err(e) => {
-                    warn!(err = %e, "Failed inspecting workspace cleanliness; failing closed");
-                    false
-                }
-            }
-        } else {
-            true
-        };
-
-        if !is_clean {
-            let err_msg = "Target workspace contains uncommitted changes or cleanliness check failed; clean workspace required".to_string();
-            self.update_record_status(
-                &integration_id,
-                IntegrationLifecycleStatus::Failed,
-                current_target_sha.as_deref(),
-                Some(&err_msg),
-            );
-            return Ok(IntegrationOutcome {
-                success: false,
-                pre_check_clean: false,
-                approval_granted: true,
-                patch_applied: false,
-                verification_passed: false,
-                commit_completed: false,
-                rollback_performed: false,
-                commit_sha: None,
-                modified_files: Vec::new(),
-                error: Some(err_msg),
-                summary: "Integration blocked: target workspace is dirty".into(),
-            });
-        }
-
-        // 8. Pre-integration snapshotting
+        // 8. Pre-integration snapshotting and durable preimage persistence
         let mut snapshots = Vec::new();
         for rel_path in &affected_rel_paths {
             match FileSnapshot::snapshot(&req.workspace_root, rel_path) {
-                Ok(snap) => snapshots.push(snap),
+                Ok(snap) => {
+                    // Durable snapshotting: persist preimage into SQLite before target workspace is modified
+                    if let (Some(store), Some(wf_id), Some(task_id)) =
+                        (&self.store, &req.workflow_id, &req.task_id)
+                    {
+                        let snap_id = format!("snap-{}", Uuid::new_v4().simple());
+                        let (orig_exists, orig_hash, orig_mode, preimage_bytes) = match &snap {
+                            FileSnapshot::Existing {
+                                content,
+                                sha256,
+                                mode,
+                                ..
+                            } => (true, Some(sha256.clone()), *mode, Some(content.as_slice())),
+                            FileSnapshot::NonExistent { .. } => (false, None, None, None),
+                        };
+                        let snap_record = PreIntegrationSnapshotRecord {
+                            id: snap_id,
+                            integration_id: integration_id.clone(),
+                            workflow_id: wf_id.clone(),
+                            task_id: task_id.clone(),
+                            attempt_id: req.attempt_id.unwrap_or(1),
+                            relative_path: rel_path.clone(),
+                            original_exists: orig_exists,
+                            original_content_hash: orig_hash,
+                            original_mode: orig_mode,
+                            preimage_storage_path: None,
+                            status: PreIntegrationSnapshotStatus::Prepared,
+                            created_at_epoch_ms: now_ms,
+                        };
+                        let _ = store.save_pre_integration_snapshot(&snap_record, preimage_bytes);
+                    }
+                    snapshots.push(snap);
+                }
                 Err(e) => {
                     let err_msg = format!("Failed taking pre-integration snapshot: {e}");
                     self.update_record_status(
@@ -1025,6 +1176,40 @@ impl WorkflowIntegrationService {
             None,
         );
 
+        // Mark pre-integration snapshots as reconciled in durable storage
+        if let Some(ref store) = self.store {
+            if let Ok(snaps) = store.list_pre_integration_snapshots(&integration_id) {
+                for (snap, _) in snaps {
+                    let _ = store.mark_pre_integration_snapshot_status(
+                        &snap.id,
+                        PreIntegrationSnapshotStatus::Restored,
+                    );
+                }
+            }
+            if let (Some(wf_id), Some(task_id)) = (&req.workflow_id, &req.task_id) {
+                let _ = store.record_execution_journal_event(&ExecutionJournalEvent {
+                    id: format!("ej-{}", Uuid::new_v4().simple()),
+                    workflow_id: wf_id.clone(),
+                    task_id: task_id.clone(),
+                    attempt_id: req.attempt_id.unwrap_or(1),
+                    worker_id: req.worker_id.clone().unwrap_or_else(|| "promoter".into()),
+                    operation_id: Some("promote".into()),
+                    event_type: "candidate_promoted".into(),
+                    previous_state: Some("verified".into()),
+                    new_state: Some("promoted".into()),
+                    resource_identity: commit_sha.clone(),
+                    manifest_hash: Some(actual_hash.clone()),
+                    payload_json: serde_json::json!({
+                        "commit_sha": commit_sha,
+                        "files_count": affected_rel_paths.len(),
+                        "integration_id": integration_id,
+                    })
+                    .to_string(),
+                    timestamp_epoch_ms: Utc::now().timestamp_millis(),
+                });
+            }
+        }
+
         info!(
             source = %req.source_label,
             files_count = affected_rel_paths.len(),
@@ -1049,7 +1234,7 @@ impl WorkflowIntegrationService {
     }
 
     /// Extract and strictly validate paths affected by a patch, rejecting traversal and symlink escapes.
-    fn extract_and_validate_paths(
+    pub fn extract_and_validate_paths(
         &self,
         workspace_root: &Path,
         patch_content: &str,
@@ -1182,6 +1367,134 @@ impl WorkflowIntegrationService {
         }
     }
 
+    /// Resumes incomplete rollback operations from durable SQLite pre-integration snapshots after process restart.
+    pub fn resume_incomplete_rollbacks(
+        &self,
+        workspace_root: &Path,
+        integration_id: &str,
+    ) -> Result<RollbackResult> {
+        let store = self
+            .store
+            .as_ref()
+            .ok_or_else(|| anyhow!("WorkflowStore required to resume incomplete rollbacks"))?;
+
+        let snapshot_entries = store.list_pre_integration_snapshots(integration_id)?;
+        let mut restored_files = Vec::new();
+        let mut removed_created_files = Vec::new();
+        let mut failed_files = Vec::new();
+
+        for (rec, blob_opt) in snapshot_entries {
+            if rec.status == PreIntegrationSnapshotStatus::Restored {
+                continue;
+            }
+
+            let full_path = workspace_root.join(&rec.relative_path);
+            if rec.original_exists {
+                if let Some(content) = blob_opt {
+                    if let Some(parent) = full_path.parent() {
+                        let _ = fs::create_dir_all(parent);
+                    }
+                    let tmp = full_path
+                        .with_extension(format!("tmp_recover_{}", Uuid::new_v4().simple()));
+                    if let Err(e) = fs::write(&tmp, &content) {
+                        failed_files.push((rec.relative_path.clone(), e.to_string()));
+                        let _ = store.mark_pre_integration_snapshot_status(
+                            &rec.id,
+                            PreIntegrationSnapshotStatus::Failed,
+                        );
+                        continue;
+                    }
+                    #[cfg(unix)]
+                    if let Some(m) = rec.original_mode {
+                        use std::os::unix::fs::PermissionsExt;
+                        let _ = fs::set_permissions(&tmp, fs::Permissions::from_mode(m));
+                    }
+                    if let Err(e) = fs::rename(&tmp, &full_path) {
+                        failed_files.push((rec.relative_path.clone(), e.to_string()));
+                        let _ = store.mark_pre_integration_snapshot_status(
+                            &rec.id,
+                            PreIntegrationSnapshotStatus::Failed,
+                        );
+                        continue;
+                    }
+                    // Verify sha256
+                    if let (Ok(bytes), Some(expected_hash)) =
+                        (fs::read(&full_path), rec.original_content_hash.as_ref())
+                    {
+                        let mut h = Sha256::new();
+                        h.update(&bytes);
+                        let actual_hash = format!("{:x}", h.finalize());
+                        if &actual_hash != expected_hash {
+                            failed_files
+                                .push((rec.relative_path.clone(), "Restored hash mismatch".into()));
+                            let _ = store.mark_pre_integration_snapshot_status(
+                                &rec.id,
+                                PreIntegrationSnapshotStatus::Failed,
+                            );
+                            continue;
+                        }
+                    }
+                    let _ = store.mark_pre_integration_snapshot_status(
+                        &rec.id,
+                        PreIntegrationSnapshotStatus::Restored,
+                    );
+                    restored_files.push(rec.relative_path);
+                } else {
+                    failed_files.push((
+                        rec.relative_path.clone(),
+                        "Preimage bytes missing in storage".into(),
+                    ));
+                    let _ = store.mark_pre_integration_snapshot_status(
+                        &rec.id,
+                        PreIntegrationSnapshotStatus::Failed,
+                    );
+                }
+            } else {
+                if full_path.exists() || full_path.is_symlink() {
+                    let _ = if full_path.is_dir() {
+                        fs::remove_dir_all(&full_path)
+                    } else {
+                        fs::remove_file(&full_path)
+                    };
+                }
+                if full_path.exists() || full_path.is_symlink() {
+                    failed_files.push((
+                        rec.relative_path.clone(),
+                        "Failed to remove newly created file".into(),
+                    ));
+                    let _ = store.mark_pre_integration_snapshot_status(
+                        &rec.id,
+                        PreIntegrationSnapshotStatus::Failed,
+                    );
+                } else {
+                    let _ = store.mark_pre_integration_snapshot_status(
+                        &rec.id,
+                        PreIntegrationSnapshotStatus::Restored,
+                    );
+                    removed_created_files.push(rec.relative_path);
+                }
+            }
+        }
+
+        let complete = failed_files.is_empty();
+        let diagnostics = if complete {
+            None
+        } else {
+            Some(format!(
+                "Incomplete rollback recovery: {} failures",
+                failed_files.len()
+            ))
+        };
+
+        Ok(RollbackResult {
+            restored_files,
+            removed_created_files,
+            failed_files,
+            complete,
+            diagnostics,
+        })
+    }
+
     /// Commit verified changes with structured M31A trailers.
     fn commit_integrated_changes(
         &self,
@@ -1264,6 +1577,9 @@ mod tests {
             source_branch: None,
             source_base_sha: None,
             target_base_sha: None,
+            worker_id: None,
+            manifest: None,
+            expected_target_head_sha: None,
         };
 
         let res = svc.integrate(&req).await.unwrap();
@@ -1349,10 +1665,306 @@ mod tests {
             source_branch: None,
             source_base_sha: None,
             target_base_sha: None,
+            worker_id: None,
+            manifest: None,
+            expected_target_head_sha: None,
         };
 
         let res = svc.integrate(&req).await.unwrap();
         assert!(!res.success);
         assert!(res.error.unwrap().contains("traversal"));
+    }
+
+    #[tokio::test]
+    async fn test_fencing_rejects_stale_worker_attempt() {
+        let temp = tempdir().unwrap();
+        let db_path = temp.path().join("test.db");
+        let storage = m31a_storage::Storage::open(&db_path).unwrap();
+        let store = storage.workflow_store();
+
+        let wf_id = "wf-fence-1";
+        let task_id = "task-fence-1";
+        let run = m31a_core::workflow::WorkflowRun {
+            id: wf_id.to_string(),
+            thread_id: None,
+            workspace_root: temp.path().to_path_buf(),
+            objective: "Fencing test".into(),
+            workflow_type: "autonomous".into(),
+            state: m31a_core::workflow::WorkflowState::Running,
+            plan_revision: 1,
+            configuration_json: "{}".into(),
+            created_at_epoch_ms: 1000,
+            updated_at_epoch_ms: 1000,
+            started_at_epoch_ms: Some(1000),
+            completed_at_epoch_ms: None,
+            cancellation_reason: None,
+            overall_result_json: None,
+            resource_usage_json: None,
+        };
+        store.create_workflow(&run).unwrap();
+
+        let plan = m31a_core::workflow::WorkflowPlan {
+            workflow_id: wf_id.to_string(),
+            revision: 1,
+            rationale: "Initial plan".into(),
+            tasks: vec![m31a_core::workflow::WorkflowTask {
+                id: task_id.into(),
+                workflow_id: wf_id.into(),
+                plan_revision: 1,
+                task_kind: m31a_core::workflow::WorkflowTaskKind::Implementation,
+                name: "Fenced Task".into(),
+                description: "Test".into(),
+                assigned_role: "coder".into(),
+                assigned_agent_id: None,
+                priority: 10,
+                wave_index: 1,
+                dependencies: vec![],
+                acceptance_criteria: vec![],
+                required_verification: vec![],
+                declared_read_paths: vec![],
+                declared_write_paths: vec![],
+                workspace_isolation: m31a_core::workflow::WorkspaceIsolationStrategy::Worktree,
+                status: m31a_core::workflow::WorkflowTaskStatus::Ready,
+                retry_count: 0,
+                max_retries: 3,
+                attempt_id: 1,
+                started_at_epoch_ms: None,
+                completed_at_epoch_ms: None,
+                worker_id: None,
+                lease_expires_at_epoch_ms: None,
+                error_details: None,
+                input_artifacts: vec![],
+                output_artifacts: vec![],
+                verification_result_json: None,
+                execution_result_json: None,
+            }],
+            created_at_epoch_ms: 1000,
+        };
+        store.save_workflow_plan(&plan).unwrap();
+
+        // Worker A claims attempt 1
+        store.claim_task(wf_id, task_id, "worker-A", 60).unwrap();
+
+        let svc = WorkflowIntegrationService::new().with_store(store);
+
+        // Worker B attempts to integrate with attempt 1 -> Rejected
+        let req = IntegrationRequest {
+            workspace_root: temp.path().to_path_buf(),
+            patch_content: "*** Begin Patch\n*** End Patch\n".into(),
+            source_label: "test".into(),
+            workflow_id: Some(wf_id.to_string()),
+            task_id: Some(task_id.to_string()),
+            attempt_id: Some(1),
+            worker_id: Some("worker-B".into()), // Stale worker!
+            skip_dirty_check: true,
+            skip_verification: true,
+            is_approved: true,
+            ..Default::default()
+        };
+
+        let res = svc.integrate(&req).await.unwrap();
+        assert!(!res.success);
+        assert!(res.error.unwrap().contains("Fencing violation"));
+    }
+
+    #[tokio::test]
+    async fn test_unfrozen_manifest_rejected() {
+        let temp = tempdir().unwrap();
+        let svc = WorkflowIntegrationService::new();
+
+        let manifest = ChangeSetManifest {
+            manifest_version: 1,
+            id: "manifest-1".into(),
+            workflow_id: "wf-1".into(),
+            plan_revision: 1,
+            task_id: "task-1".into(),
+            attempt_id: 1,
+            worker_id: "worker-1".into(),
+            agent_id: None,
+            repository_root: temp.path().to_path_buf(),
+            canonical_workspace_id: "ws-1".into(),
+            source_base_sha: "base-sha".into(),
+            target_commit_sha: None,
+            files: vec![],
+            isolation_strategy: m31a_core::workflow::WorkspaceIsolationStrategy::Worktree,
+            created_at_epoch_ms: 1000,
+            frozen_at_epoch_ms: None,
+            is_frozen: false,
+            manifest_hash: String::new(),
+        };
+
+        let req = IntegrationRequest {
+            workspace_root: temp.path().to_path_buf(),
+            patch_content: "*** Begin Patch\n*** End Patch\n".into(),
+            source_label: "test".into(),
+            manifest: Some(manifest),
+            skip_dirty_check: true,
+            skip_verification: true,
+            is_approved: true,
+            ..Default::default()
+        };
+
+        let res = svc.integrate(&req).await.unwrap();
+        assert!(!res.success);
+        assert!(
+            res.error
+                .unwrap()
+                .to_lowercase()
+                .contains("manifest is not frozen")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_target_head_cas_rejection() {
+        let temp = tempdir().unwrap();
+        let svc = WorkflowIntegrationService::new();
+
+        // Initialize git repo in temp
+        let _ = Command::new("git")
+            .args(["init"])
+            .current_dir(temp.path())
+            .output()
+            .unwrap();
+        let _ = Command::new("git")
+            .args(["config", "user.name", "Tester"])
+            .current_dir(temp.path())
+            .output()
+            .unwrap();
+        let _ = Command::new("git")
+            .args(["config", "user.email", "tester@test.local"])
+            .current_dir(temp.path())
+            .output()
+            .unwrap();
+        fs::write(temp.path().join("init.txt"), "init").unwrap();
+        let _ = Command::new("git")
+            .args(["add", "."])
+            .current_dir(temp.path())
+            .output()
+            .unwrap();
+        let _ = Command::new("git")
+            .args(["commit", "-m", "init"])
+            .current_dir(temp.path())
+            .output()
+            .unwrap();
+
+        let req = IntegrationRequest {
+            workspace_root: temp.path().to_path_buf(),
+            patch_content: "*** Begin Patch\n*** End Patch\n".into(),
+            source_label: "test".into(),
+            expected_target_head_sha: Some("deadbeefdeadbeefdeadbeefdeadbeefdeadbeef".into()),
+            skip_dirty_check: true,
+            skip_verification: true,
+            is_approved: true,
+            ..Default::default()
+        };
+
+        let res = svc.integrate(&req).await.unwrap();
+        assert!(!res.success);
+        assert!(res.error.unwrap().contains("CAS check failed"));
+    }
+
+    #[tokio::test]
+    async fn test_resume_incomplete_rollbacks_restores_snapshot_bytes() {
+        let temp = tempdir().unwrap();
+        let db_path = temp.path().join("test.db");
+        let storage = m31a_storage::Storage::open(&db_path).unwrap();
+        let store = storage.workflow_store();
+
+        let wf_id = "wf-rollback-1";
+        let run = m31a_core::workflow::WorkflowRun {
+            id: wf_id.to_string(),
+            thread_id: None,
+            workspace_root: temp.path().to_path_buf(),
+            objective: "Rollback test".into(),
+            workflow_type: "autonomous".into(),
+            state: m31a_core::workflow::WorkflowState::Running,
+            plan_revision: 1,
+            configuration_json: "{}".into(),
+            created_at_epoch_ms: 1000,
+            updated_at_epoch_ms: 1000,
+            started_at_epoch_ms: Some(1000),
+            completed_at_epoch_ms: None,
+            cancellation_reason: None,
+            overall_result_json: None,
+            resource_usage_json: None,
+        };
+        store.create_workflow(&run).unwrap();
+
+        let integration_id = "test-integ-123";
+        let file1_rel = PathBuf::from("src/main.rs");
+        let file2_rel = PathBuf::from("src/unwanted.rs");
+
+        let file1_abs = temp.path().join(&file1_rel);
+        let file2_abs = temp.path().join(&file2_rel);
+        fs::create_dir_all(file1_abs.parent().unwrap()).unwrap();
+
+        // Mutate files as if a crash occurred mid-patch
+        fs::write(&file1_abs, "corrupted content").unwrap();
+        fs::write(&file2_abs, "unwanted new file").unwrap();
+
+        let clean_bytes = b"original clean content\n";
+        let mut hasher = Sha256::new();
+        hasher.update(clean_bytes);
+        let expected_hash = format!("{:x}", hasher.finalize());
+
+        // Record pre-integration snapshots in SQLite
+        let rec1 = PreIntegrationSnapshotRecord {
+            id: Uuid::new_v4().to_string(),
+            integration_id: integration_id.to_string(),
+            workflow_id: wf_id.into(),
+            task_id: "task-1".into(),
+            attempt_id: 1,
+            relative_path: file1_rel,
+            original_exists: true,
+            original_content_hash: Some(expected_hash),
+            original_mode: None,
+            preimage_storage_path: None,
+            status: PreIntegrationSnapshotStatus::Prepared,
+            created_at_epoch_ms: 1000,
+        };
+        store
+            .save_pre_integration_snapshot(&rec1, Some(clean_bytes))
+            .unwrap();
+
+        let rec2 = PreIntegrationSnapshotRecord {
+            id: Uuid::new_v4().to_string(),
+            integration_id: integration_id.to_string(),
+            workflow_id: wf_id.into(),
+            task_id: "task-1".into(),
+            attempt_id: 1,
+            relative_path: file2_rel,
+            original_exists: false,
+            original_content_hash: None,
+            original_mode: None,
+            preimage_storage_path: None,
+            status: PreIntegrationSnapshotStatus::Prepared,
+            created_at_epoch_ms: 1000,
+        };
+        store.save_pre_integration_snapshot(&rec2, None).unwrap();
+
+        // Service resumes rollback
+        let svc = WorkflowIntegrationService::new().with_store(store.clone());
+        let outcome = svc
+            .resume_incomplete_rollbacks(temp.path(), integration_id)
+            .unwrap();
+
+        assert_eq!(outcome.restored_files.len(), 1);
+        assert_eq!(outcome.removed_created_files.len(), 1);
+        assert!(outcome.failed_files.is_empty());
+
+        // Verify disk state
+        assert_eq!(
+            fs::read_to_string(&file1_abs).unwrap(),
+            "original clean content\n"
+        );
+        assert!(!file2_abs.exists());
+
+        // Verify SQLite state is now Restored
+        let list = store
+            .list_pre_integration_snapshots(integration_id)
+            .unwrap();
+        for (rec, _) in list {
+            assert_eq!(rec.status, PreIntegrationSnapshotStatus::Restored);
+        }
     }
 }
