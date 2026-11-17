@@ -802,6 +802,18 @@ pub const CANONICAL_SLASH_COMMANDS: &[SlashCommand] = &[
         execution_class: CommandExecutionClass::ClientLocal,
         availability: ContextAvailability::Always,
     },
+    SlashCommand {
+        name: "/maintenance",
+        aliases: &["/maint"],
+        description: "Autonomous repository maintenance status, cases, scans, and schedules",
+        usage: "/maintenance [status|scan|cases|triage|schedules|pause|resume]",
+        category: "Repository",
+        capability: OperationCapability::HarmlessUI,
+        subcommands: &["status", "scan", "cases", "triage", "schedules", "pause", "resume"],
+        requires_confirmation: false,
+        execution_class: CommandExecutionClass::ClientLocal,
+        availability: ContextAvailability::Always,
+    },
 ];
 
 /// Backward compatibility alias.
