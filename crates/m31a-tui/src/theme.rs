@@ -182,7 +182,7 @@ impl Theme {
                 // Selection & Disabled
                 selection: Color::Rgb(0x6c, 0xbf, 0xbf), // #6cbfbf - Everblush cyan
                 selection_fg: Color::Rgb(0x14, 0x1b, 0x1e), // #141b1e - dark text on cyan
-                disabled: Color::Rgb(0x67, 0x6e, 0x71), // #676e71 - muted gray
+                disabled: Color::Rgb(0x67, 0x6e, 0x71),  // #676e71 - muted gray
 
                 // Code syntax — Everblush token styling
                 code_keyword: Color::Rgb(0xc4, 0x7f, 0xd5), // #c47fd5 - Everblush magenta
@@ -246,7 +246,7 @@ impl Theme {
                 // Selection & Disabled
                 selection: Color::Rgb(0x25, 0x63, 0xeb), // blue-600
                 selection_fg: Color::Rgb(0xff, 0xff, 0xff), // white
-                disabled: Color::Rgb(0x9e, 0x9e, 0x9e), // gray-400
+                disabled: Color::Rgb(0x9e, 0x9e, 0x9e),  // gray-400
 
                 code_keyword: Color::Rgb(0x93, 0x33, 0xea),
                 code_string: Color::Rgb(0x16, 0xa3, 0x4a),
@@ -662,7 +662,10 @@ mod tests {
     fn test_design_system_tokens_and_roles() {
         for theme in [Theme::everblush(), Theme::light(), Theme::high_contrast()] {
             assert_eq!(theme.color(ColorRole::Selection), theme.colors.selection);
-            assert_eq!(theme.color(ColorRole::SelectionFg), theme.colors.selection_fg);
+            assert_eq!(
+                theme.color(ColorRole::SelectionFg),
+                theme.colors.selection_fg
+            );
             assert_eq!(theme.color(ColorRole::Disabled), theme.colors.disabled);
 
             let sel_style = theme.style_selection();

@@ -4,13 +4,13 @@
 //! local scanning, deterministic triage, plan synthesis, verified execution,
 //! approval management, and scheduling.
 
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use anyhow::{Result, anyhow};
 use clap::Subcommand;
 use colored::*;
 use serde_json::json;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use m31a_agent_engine::workflow::WorkflowOrchestrator;
 use m31a_maintenance::{
@@ -35,7 +35,12 @@ pub enum MaintenanceCommands {
     Cases {
         #[arg(short = 's', long = "status", help = "Filter by case status")]
         status: Option<String>,
-        #[arg(short = 'n', long = "limit", default_value = "50", help = "Max cases to list")]
+        #[arg(
+            short = 'n',
+            long = "limit",
+            default_value = "50",
+            help = "Max cases to list"
+        )]
         limit: usize,
     },
     /// Inspect details of a case, its signals, and plan
@@ -52,7 +57,10 @@ pub enum MaintenanceCommands {
     Run {
         #[arg(help = "Case ID")]
         case_id: String,
-        #[arg(long = "plan-id", help = "Specific plan ID. If omitted, uses active plan.")]
+        #[arg(
+            long = "plan-id",
+            help = "Specific plan ID. If omitted, uses active plan."
+        )]
         plan_id: Option<String>,
     },
     /// List or manage scheduled maintenance jobs
@@ -116,13 +124,13 @@ pub async fn run_maintenance_command(
             let _ = scheduler.ensure_default_schedules(&repo_id);
             let schedules = maint_store.list_schedules(Some(&repo_id))?;
 
-            let open_count = cases
-                .iter()
-                .filter(|c| !c.status.is_terminal())
-                .count();
+            let open_count = cases.iter().filter(|c| !c.status.is_terminal()).count();
             let critical_count = cases
                 .iter()
-                .filter(|c| c.priority == m31a_maintenance::MaintenancePriority::Critical && !c.status.is_terminal())
+                .filter(|c| {
+                    c.priority == m31a_maintenance::MaintenancePriority::Critical
+                        && !c.status.is_terminal()
+                })
                 .count();
             let awaiting_approval = cases
                 .iter()
@@ -145,21 +153,53 @@ pub async fn run_maintenance_command(
             } else {
                 println!(
                     "{}",
-                    format!("🛡️  M31A Autonomous Repository Maintenance — Status").cyan().bold()
+                    format!("🛡️  M31A Autonomous Repository Maintenance — Status")
+                        .cyan()
+                        .bold()
                 );
                 println!("  Repository ID:    {}", repo_id.green());
                 println!("  Workspace:        {}", cwd.display());
-                println!("  Autonomy Tier:    {}", policy.autonomy_tier.as_str().yellow().bold());
-                println!("  Open Cases:       {}", if open_count > 0 { open_count.to_string().yellow() } else { "0".green() });
-                println!("  Critical Cases:   {}", if critical_count > 0 { critical_count.to_string().red().bold() } else { "0".green() });
-                println!("  Awaiting Approval:{}", if awaiting_approval > 0 { awaiting_approval.to_string().bright_magenta().bold() } else { "0".green() });
-                println!("  Active Schedules: {}", schedules.iter().filter(|s| s.is_enabled).count());
+                println!(
+                    "  Autonomy Tier:    {}",
+                    policy.autonomy_tier.as_str().yellow().bold()
+                );
+                println!(
+                    "  Open Cases:       {}",
+                    if open_count > 0 {
+                        open_count.to_string().yellow()
+                    } else {
+                        "0".green()
+                    }
+                );
+                println!(
+                    "  Critical Cases:   {}",
+                    if critical_count > 0 {
+                        critical_count.to_string().red().bold()
+                    } else {
+                        "0".green()
+                    }
+                );
+                println!(
+                    "  Awaiting Approval:{}",
+                    if awaiting_approval > 0 {
+                        awaiting_approval.to_string().bright_magenta().bold()
+                    } else {
+                        "0".green()
+                    }
+                );
+                println!(
+                    "  Active Schedules: {}",
+                    schedules.iter().filter(|s| s.is_enabled).count()
+                );
             }
         }
 
         MaintenanceCommands::Scan => {
             if !json_output {
-                println!("{}", "🔍 Running local repository maintenance scanner...".yellow());
+                println!(
+                    "{}",
+                    "🔍 Running local repository maintenance scanner...".yellow()
+                );
             }
             let scanner = LocalRepositorySignalSource::new(cwd);
             let signals = scanner.scan(&repo_id).await?;
@@ -209,13 +249,19 @@ pub async fn run_maintenance_command(
                 if json_output {
                     println!("{}", serde_json::to_string_pretty(&eval)?);
                 } else {
-                    println!("{}", format!("Triage Evaluation for Case '{}':", id).cyan().bold());
+                    println!(
+                        "{}",
+                        format!("Triage Evaluation for Case '{}':", id)
+                            .cyan()
+                            .bold()
+                    );
                     println!("  Priority:    {}", eval.priority.as_str().yellow().bold());
                     println!("  Confidence:  {:.0}%", eval.confidence_score * 100.0);
                     println!("  Rationale:   {}", eval.rationale);
                 }
             } else {
-                let open_cases = maint_store.list_cases(Some(&repo_id), Some(CaseStatus::Open), 100)?;
+                let open_cases =
+                    maint_store.list_cases(Some(&repo_id), Some(CaseStatus::Open), 100)?;
                 let mut evals = Vec::new();
                 for c in open_cases {
                     if let Ok(eval) = triage_engine.triage_case(&c.id) {
@@ -225,7 +271,12 @@ pub async fn run_maintenance_command(
                 if json_output {
                     println!("{}", serde_json::to_string_pretty(&evals)?);
                 } else {
-                    println!("{}", format!("Triaged {} open maintenance cases.", evals.len()).green().bold());
+                    println!(
+                        "{}",
+                        format!("Triaged {} open maintenance cases.", evals.len())
+                            .green()
+                            .bold()
+                    );
                 }
             }
         }
@@ -237,12 +288,26 @@ pub async fn run_maintenance_command(
             if json_output {
                 println!("{}", serde_json::to_string_pretty(&cases)?);
             } else {
-                println!("{}", format!("Maintenance Cases for '{}' (Total: {}):", repo_id, cases.len()).cyan().bold());
-                println!("{:<14} {:<10} {:<16} {:<24} {}", "ID", "PRIORITY", "STATUS", "CATEGORY", "TITLE");
+                println!(
+                    "{}",
+                    format!(
+                        "Maintenance Cases for '{}' (Total: {}):",
+                        repo_id,
+                        cases.len()
+                    )
+                    .cyan()
+                    .bold()
+                );
+                println!(
+                    "{:<14} {:<10} {:<16} {:<24} {}",
+                    "ID", "PRIORITY", "STATUS", "CATEGORY", "TITLE"
+                );
                 println!("{}", "-".repeat(80).dimmed());
                 for c in cases {
                     let prio_color = match c.priority {
-                        m31a_maintenance::MaintenancePriority::Critical => c.priority.as_str().red().bold(),
+                        m31a_maintenance::MaintenancePriority::Critical => {
+                            c.priority.as_str().red().bold()
+                        }
                         m31a_maintenance::MaintenancePriority::High => c.priority.as_str().yellow(),
                         _ => c.priority.as_str().normal(),
                     };
@@ -283,7 +348,12 @@ pub async fn run_maintenance_command(
                 println!("  Problem:     {}", case.problem_statement);
                 println!("  Signals:     {} linked signal(s)", signals.len());
                 if let Some(p) = plan {
-                    println!("  Plan:        {} ({}, hash: {})", p.id, p.selected_strategy, &p.plan_hash[..8]);
+                    println!(
+                        "  Plan:        {} ({}, hash: {})",
+                        p.id,
+                        p.selected_strategy,
+                        &p.plan_hash[..8]
+                    );
                     println!("  Requires Approval: {}", p.requires_approval);
                 } else {
                     println!("  Plan:        None");
@@ -306,9 +376,17 @@ pub async fn run_maintenance_command(
             if json_output {
                 println!("{}", serde_json::to_string_pretty(&plan)?);
             } else {
-                println!("{}", format!("Maintenance Plan Generated: {}", plan.id).green().bold());
+                println!(
+                    "{}",
+                    format!("Maintenance Plan Generated: {}", plan.id)
+                        .green()
+                        .bold()
+                );
                 println!("  Case ID:             {}", plan.case_id);
-                println!("  Selected Strategy:   {}", plan.selected_strategy.cyan().bold());
+                println!(
+                    "  Selected Strategy:   {}",
+                    plan.selected_strategy.cyan().bold()
+                );
                 println!("  Baseline SHA:        {}", plan.baseline_sha);
                 println!("  Plan Hash:           {}", plan.plan_hash);
                 println!("  Estimated Risk:      {:?}", plan.estimated_risk);
@@ -324,20 +402,41 @@ pub async fn run_maintenance_command(
                 let case = maint_store
                     .get_case(&case_id)?
                     .ok_or_else(|| anyhow!("Case '{}' not found", case_id))?;
-                case.active_plan_id
-                    .ok_or_else(|| anyhow!("Case '{}' has no active plan. Run `m31a maintenance plan {}` first.", case_id, case_id))?
+                case.active_plan_id.ok_or_else(|| {
+                    anyhow!(
+                        "Case '{}' has no active plan. Run `m31a maintenance plan {}` first.",
+                        case_id,
+                        case_id
+                    )
+                })?
             };
 
             let wf_store = storage.workflow_store();
-            let orchestrator = Arc::new(WorkflowOrchestrator::new(storage.clone(), None, None, None, None));
-            let runner = MaintenanceWorkflowRunner::new(maint_store.clone(), wf_store, orchestrator, policy.clone());
+            let orchestrator = Arc::new(WorkflowOrchestrator::new(
+                storage.clone(),
+                None,
+                None,
+                None,
+                None,
+            ));
+            let runner = MaintenanceWorkflowRunner::new(
+                maint_store.clone(),
+                wf_store,
+                orchestrator,
+                policy.clone(),
+            );
 
-            let exec = runner.start_execution(&case_id, &target_plan_id, cwd).await?;
+            let exec = runner
+                .start_execution(&case_id, &target_plan_id, cwd)
+                .await?;
 
             if json_output {
                 println!("{}", serde_json::to_string_pretty(&exec)?);
             } else {
-                println!("{}", format!("Maintenance Execution Started!").green().bold());
+                println!(
+                    "{}",
+                    format!("Maintenance Execution Started!").green().bold()
+                );
                 println!("  Execution ID: {}", exec.id);
                 println!("  Workflow ID:  {}", exec.workflow_id.cyan().bold());
                 println!("  Case ID:      {}", exec.case_id);
@@ -352,15 +451,27 @@ pub async fn run_maintenance_command(
             if json_output {
                 println!("{}", serde_json::to_string_pretty(&schedules)?);
             } else {
-                println!("{}", format!("Maintenance Schedules for '{}':", repo_id).cyan().bold());
-                println!("{:<24} {:<24} {:<10} {:<14}", "ID", "JOB", "ENABLED", "INTERVAL");
+                println!(
+                    "{}",
+                    format!("Maintenance Schedules for '{}':", repo_id)
+                        .cyan()
+                        .bold()
+                );
+                println!(
+                    "{:<24} {:<24} {:<10} {:<14}",
+                    "ID", "JOB", "ENABLED", "INTERVAL"
+                );
                 println!("{}", "-".repeat(74).dimmed());
                 for s in schedules {
                     println!(
                         "{:<24} {:<24} {:<10} {}s",
                         s.id,
                         s.job_kind,
-                        if s.is_enabled { "true".green() } else { "false".red() },
+                        if s.is_enabled {
+                            "true".green()
+                        } else {
+                            "false".red()
+                        },
                         s.cron_or_interval_secs
                     );
                 }
@@ -371,7 +482,10 @@ pub async fn run_maintenance_command(
             let scheduler = MaintenanceScheduler::new(maint_store, policy);
             scheduler.pause_schedule(&schedule_id)?;
             if json_output {
-                println!("{}", json!({"status": "paused", "schedule_id": schedule_id}));
+                println!(
+                    "{}",
+                    json!({"status": "paused", "schedule_id": schedule_id})
+                );
             } else {
                 println!("{}", format!("Paused schedule '{}'", schedule_id).yellow());
             }
@@ -381,7 +495,10 @@ pub async fn run_maintenance_command(
             let scheduler = MaintenanceScheduler::new(maint_store, policy);
             scheduler.resume_schedule(&schedule_id)?;
             if json_output {
-                println!("{}", json!({"status": "resumed", "schedule_id": schedule_id}));
+                println!(
+                    "{}",
+                    json!({"status": "resumed", "schedule_id": schedule_id})
+                );
             } else {
                 println!("{}", format!("Resumed schedule '{}'", schedule_id).green());
             }
@@ -410,7 +527,12 @@ pub async fn run_maintenance_command(
             if json_output {
                 println!("{}", serde_json::to_string_pretty(&all_attempts)?);
             } else {
-                println!("{}", format!("Remediation History ({} attempts):", all_attempts.len()).cyan().bold());
+                println!(
+                    "{}",
+                    format!("Remediation History ({} attempts):", all_attempts.len())
+                        .cyan()
+                        .bold()
+                );
                 for item in all_attempts {
                     println!("  - {}", item);
                 }
@@ -421,21 +543,44 @@ pub async fn run_maintenance_command(
             let cases = maint_store.list_cases(Some(&repo_id), None, 100)?;
             let mut report = String::new();
             report.push_str(&format!("# Autonomous Maintenance Report: {}\n\n", repo_id));
-            report.push_str(&format!("Generated at: {}\n\n", chrono::Utc::now().to_rfc3339()));
+            report.push_str(&format!(
+                "Generated at: {}\n\n",
+                chrono::Utc::now().to_rfc3339()
+            ));
             report.push_str("## Summary\n");
             report.push_str(&format!("- **Total Cases:** {}\n", cases.len()));
-            report.push_str(&format!("- **Open Cases:** {}\n", cases.iter().filter(|c| !c.status.is_terminal()).count()));
-            report.push_str(&format!("- **Resolved Cases:** {}\n\n", cases.iter().filter(|c| c.status == CaseStatus::Resolved).count()));
+            report.push_str(&format!(
+                "- **Open Cases:** {}\n",
+                cases.iter().filter(|c| !c.status.is_terminal()).count()
+            ));
+            report.push_str(&format!(
+                "- **Resolved Cases:** {}\n\n",
+                cases
+                    .iter()
+                    .filter(|c| c.status == CaseStatus::Resolved)
+                    .count()
+            ));
 
             report.push_str("## Active Cases\n");
             for c in cases.iter().filter(|c| !c.status.is_terminal()) {
-                report.push_str(&format!("- **{}** (`{}`): {} [Priority: {:?}]\n", c.id, c.category.as_str(), c.title, c.priority));
+                report.push_str(&format!(
+                    "- **{}** (`{}`): {} [Priority: {:?}]\n",
+                    c.id,
+                    c.category.as_str(),
+                    c.title,
+                    c.priority
+                ));
             }
 
             if let Some(out_path) = output {
                 fs::write(&out_path, &report)?;
                 if !json_output {
-                    println!("{}", format!("Report written to {}", out_path.display()).green().bold());
+                    println!(
+                        "{}",
+                        format!("Report written to {}", out_path.display())
+                            .green()
+                            .bold()
+                    );
                 }
             } else if json_output {
                 println!("{}", json!({"report_markdown": report}));
@@ -469,7 +614,14 @@ pub async fn run_maintenance_command(
             } else {
                 println!("{}", "Configured Maintenance Signal Sources:".cyan().bold());
                 println!("  1. Local Analysis:   Active (zero-credential local scanner)");
-                println!("  2. GitHub Provider:  {}", if config.sources.github_repository.is_some() { "Configured".green() } else { "Standby (configure in .m31a/maintenance.toml)".dimmed() });
+                println!(
+                    "  2. GitHub Provider:  {}",
+                    if config.sources.github_repository.is_some() {
+                        "Configured".green()
+                    } else {
+                        "Standby (configure in .m31a/maintenance.toml)".dimmed()
+                    }
+                );
                 println!("  3. Vibe Loop:        Integrated (verified execution & escalation)");
             }
         }
@@ -498,7 +650,12 @@ pub async fn run_maintenance_command(
             if json_output {
                 println!("{}", json!({"status": "approved", "plan_id": plan.id}));
             } else {
-                println!("{}", format!("Maintenance plan '{}' approved successfully!", plan.id).green().bold());
+                println!(
+                    "{}",
+                    format!("Maintenance plan '{}' approved successfully!", plan.id)
+                        .green()
+                        .bold()
+                );
             }
         }
 
@@ -517,9 +674,17 @@ pub async fn run_maintenance_command(
             }
 
             if json_output {
-                println!("{}", json!({"status": "cancelled", "id": id, "reason": reason}));
+                println!(
+                    "{}",
+                    json!({"status": "cancelled", "id": id, "reason": reason})
+                );
             } else {
-                println!("{}", format!("Maintenance item '{}' cancelled: {}", id, reason).yellow().bold());
+                println!(
+                    "{}",
+                    format!("Maintenance item '{}' cancelled: {}", id, reason)
+                        .yellow()
+                        .bold()
+                );
             }
         }
     }

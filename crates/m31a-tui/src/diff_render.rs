@@ -57,7 +57,9 @@ impl DiffRenderer {
                         stats.new_files += 1;
                     } else if item.content.starts_with("deleted file mode") {
                         stats.deleted_files += 1;
-                    } else if item.content.starts_with("rename from") || item.content.starts_with("rename to") {
+                    } else if item.content.starts_with("rename from")
+                        || item.content.starts_with("rename to")
+                    {
                         stats.renamed_files += 1;
                     }
                 }
@@ -67,7 +69,9 @@ impl DiffRenderer {
         if stats.files == 0 && (stats.additions > 0 || stats.deletions > 0 || stats.hunks > 0) {
             stats.files = 1;
         }
-        stats.modified_files = stats.files.saturating_sub(stats.new_files + stats.deleted_files);
+        stats.modified_files = stats
+            .files
+            .saturating_sub(stats.new_files + stats.deleted_files);
         stats
     }
 

@@ -6,12 +6,12 @@
 //! 3. Replay and freshness validation.
 //! 4. Untrusted input isolation for issue descriptions, logs, and comments.
 
-use std::collections::HashMap;
 use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
 use chrono::Utc;
 use m31a_core::aws_auth::hmac_sha256;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use super::SignalSource;
 use crate::domain::{
@@ -130,8 +130,8 @@ impl SignalSource for GitHubSignalAdapter {
         event_name: &str,
         body: &[u8],
     ) -> Result<Vec<MaintenanceSignal>> {
-        let payload: Value = serde_json::from_slice(body)
-            .context("Failed to parse GitHub webhook JSON payload")?;
+        let payload: Value =
+            serde_json::from_slice(body).context("Failed to parse GitHub webhook JSON payload")?;
 
         let mut signals = Vec::new();
 
@@ -143,7 +143,10 @@ impl SignalSource for GitHubSignalAdapter {
 
                 // We care about completed workflow runs that failed
                 if (action == "completed" || action.is_empty())
-                    && matches!(conclusion, Some("failure") | Some("timed_out") | Some("startup_failure"))
+                    && matches!(
+                        conclusion,
+                        Some("failure") | Some("timed_out") | Some("startup_failure")
+                    )
                 {
                     let run_id = run
                         .get("id")
@@ -162,10 +165,8 @@ impl SignalSource for GitHubSignalAdapter {
                         .get("html_url")
                         .and_then(|v| v.as_str())
                         .map(|s| s.to_string());
-                    let updated_at_str = run
-                        .get("updated_at")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("");
+                    let updated_at_str =
+                        run.get("updated_at").and_then(|v| v.as_str()).unwrap_or("");
                     let timestamp_ms = chrono::DateTime::parse_from_rfc3339(updated_at_str)
                         .map(|dt| dt.timestamp_millis())
                         .unwrap_or_else(|_| Utc::now().timestamp_millis());
@@ -223,9 +224,15 @@ impl SignalSource for GitHubSignalAdapter {
                         })
                         .unwrap_or_default();
 
-                    let is_bug = labels.iter().any(|l| l.contains("bug") || l.contains("defect"));
-                    let is_maint = labels.iter().any(|l| l.contains("maintenance") || l.contains("chore"));
-                    let is_security = labels.iter().any(|l| l.contains("security") || l.contains("vulnerability"));
+                    let is_bug = labels
+                        .iter()
+                        .any(|l| l.contains("bug") || l.contains("defect"));
+                    let is_maint = labels
+                        .iter()
+                        .any(|l| l.contains("maintenance") || l.contains("chore"));
+                    let is_security = labels
+                        .iter()
+                        .any(|l| l.contains("security") || l.contains("vulnerability"));
 
                     let category = if is_security {
                         MaintenanceCategory::SecurityAdvisory
@@ -281,7 +288,10 @@ impl SignalSource for GitHubSignalAdapter {
                         .and_then(|l| l.as_str())
                         .unwrap_or("");
                     let title = pr.get("title").and_then(|v| v.as_str()).unwrap_or("");
-                    let html_url = pr.get("html_url").and_then(|v| v.as_str()).map(|s| s.to_string());
+                    let html_url = pr
+                        .get("html_url")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
                     let head_sha = pr
                         .get("head")
                         .and_then(|h| h.get("sha"))
@@ -319,7 +329,10 @@ impl SignalSource for GitHubSignalAdapter {
             }
 
             "dependabot_alert" | "security_advisory" => {
-                let alert = payload.get("alert").or_else(|| payload.get("security_advisory")).unwrap_or(&payload);
+                let alert = payload
+                    .get("alert")
+                    .or_else(|| payload.get("security_advisory"))
+                    .unwrap_or(&payload);
                 let alert_id = alert
                     .get("number")
                     .or_else(|| alert.get("ghsa_id"))
@@ -331,10 +344,17 @@ impl SignalSource for GitHubSignalAdapter {
                     .or_else(|| alert.get("title"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("Security Advisory");
-                let html_url = alert.get("html_url").and_then(|v| v.as_str()).map(|s| s.to_string());
+                let html_url = alert
+                    .get("html_url")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
                 let severity_str = alert
                     .get("severity")
-                    .or_else(|| alert.get("security_advisory").and_then(|sa| sa.get("severity")))
+                    .or_else(|| {
+                        alert
+                            .get("security_advisory")
+                            .and_then(|sa| sa.get("severity"))
+                    })
                     .and_then(|v| v.as_str())
                     .unwrap_or("high");
 
@@ -418,15 +438,30 @@ mod tests {
 
         // Tampered body fails
         let tampered_body = b"{\"action\":\"completed\",\"workflow_run\":{\"id\":99999,\"conclusion\":\"failure\"}}";
-        assert!(!adapter.validate_webhook(&headers, tampered_body, secret).unwrap());
+        assert!(
+            !adapter
+                .validate_webhook(&headers, tampered_body, secret)
+                .unwrap()
+        );
 
         // Tampered secret fails
-        assert!(!adapter.validate_webhook(&headers, body, "wrong_secret").unwrap());
+        assert!(
+            !adapter
+                .validate_webhook(&headers, body, "wrong_secret")
+                .unwrap()
+        );
 
         // Missing or invalid header fails
         let mut bad_headers = HashMap::new();
-        bad_headers.insert("X-Hub-Signature-256".to_string(), "sha256=invalidhex".to_string());
-        assert!(!adapter.validate_webhook(&bad_headers, body, secret).unwrap());
+        bad_headers.insert(
+            "X-Hub-Signature-256".to_string(),
+            "sha256=invalidhex".to_string(),
+        );
+        assert!(
+            !adapter
+                .validate_webhook(&bad_headers, body, secret)
+                .unwrap()
+        );
     }
 
     #[test]
@@ -454,7 +489,10 @@ mod tests {
         assert_eq!(sig.category, MaintenanceCategory::BrokenCi);
         assert_eq!(sig.severity, SignalSeverity::High);
         assert_eq!(sig.observed_revision.as_deref(), Some("d3adb33f1234"));
-        assert_eq!(sig.provider_event_id.as_deref(), Some("workflow_run_987654"));
+        assert_eq!(
+            sig.provider_event_id.as_deref(),
+            Some("workflow_run_987654")
+        );
     }
 
     #[test]

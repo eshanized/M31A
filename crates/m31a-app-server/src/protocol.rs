@@ -11,13 +11,13 @@ use m31a_core::types::ChatMessage;
 use m31a_core::{ApprovalPolicy, CollaborationMode, Config, SkillLoader, SystemPromptBuilder};
 use m31a_execpolicy::ExecPolicy;
 use m31a_guardian::GuardianReviewer;
-use m31a_provider::get_nvidia_model_catalog;
-use m31a_provider::{ProviderBuilder, ProviderConfig, ProviderType};
 use m31a_maintenance::{
     CaseStatus, LocalRepositorySignalSource, MaintenanceConfigFile, MaintenancePlanner,
     MaintenanceScheduler, MaintenanceStore, MaintenanceWorkflowRunner, PlanApprovalState,
     SignalIntakeManager, TriageEngine,
 };
+use m31a_provider::get_nvidia_model_catalog;
+use m31a_provider::{ProviderBuilder, ProviderConfig, ProviderType};
 use m31a_storage::RepoIndexStore;
 use m31a_storage::Storage;
 use m31a_tools::ToolRegistry;
@@ -2360,13 +2360,14 @@ impl AppServer {
             // -------------------------------------------------------------------------------------
             // AUTONOMOUS REPOSITORY MAINTENANCE RPC METHODS
             // -------------------------------------------------------------------------------------
-
             "maintenance/status" => {
                 let cwd = params
                     .get("cwd")
                     .and_then(|v| v.as_str())
                     .map(PathBuf::from)
-                    .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+                    .unwrap_or_else(|| {
+                        std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+                    });
                 let maint_store = MaintenanceStore::new(self.storage.connection());
                 let repo_id = RepoIndexStore::derive_repo_id(&cwd);
                 let config = MaintenanceConfigFile::load_from_workspace(&cwd).unwrap_or_default();
@@ -2380,9 +2381,15 @@ impl AppServer {
                 let open_count = cases.iter().filter(|c| !c.status.is_terminal()).count();
                 let critical_count = cases
                     .iter()
-                    .filter(|c| c.priority == m31a_maintenance::MaintenancePriority::Critical && !c.status.is_terminal())
+                    .filter(|c| {
+                        c.priority == m31a_maintenance::MaintenancePriority::Critical
+                            && !c.status.is_terminal()
+                    })
                     .count();
-                let awaiting_approval = cases.iter().filter(|c| c.status == CaseStatus::AwaitingApproval).count();
+                let awaiting_approval = cases
+                    .iter()
+                    .filter(|c| c.status == CaseStatus::AwaitingApproval)
+                    .count();
 
                 Ok(serde_json::json!({
                     "repository_id": repo_id,
@@ -2402,7 +2409,9 @@ impl AppServer {
                     .get("cwd")
                     .and_then(|v| v.as_str())
                     .map(PathBuf::from)
-                    .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+                    .unwrap_or_else(|| {
+                        std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+                    });
                 let maint_store = MaintenanceStore::new(self.storage.connection());
                 let repo_id = RepoIndexStore::derive_repo_id(&cwd);
 
@@ -2433,7 +2442,10 @@ impl AppServer {
 
             "maintenance/cases/list" => {
                 let repo_id = params.get("repo_id").and_then(|v| v.as_str());
-                let status = params.get("status").and_then(|v| v.as_str()).and_then(CaseStatus::from_str);
+                let status = params
+                    .get("status")
+                    .and_then(|v| v.as_str())
+                    .and_then(CaseStatus::from_str);
                 let limit = params.get("limit").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
 
                 let maint_store = MaintenanceStore::new(self.storage.connection());
@@ -2475,7 +2487,9 @@ impl AppServer {
                     .get("cwd")
                     .and_then(|v| v.as_str())
                     .map(PathBuf::from)
-                    .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+                    .unwrap_or_else(|| {
+                        std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+                    });
                 let config = MaintenanceConfigFile::load_from_workspace(&cwd).unwrap_or_default();
                 let policy = config.to_policy();
 
@@ -2497,7 +2511,9 @@ impl AppServer {
                     .get("cwd")
                     .and_then(|v| v.as_str())
                     .map(PathBuf::from)
-                    .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+                    .unwrap_or_else(|| {
+                        std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+                    });
                 let config = MaintenanceConfigFile::load_from_workspace(&cwd).unwrap_or_default();
                 let policy = config.to_policy();
 
@@ -2526,26 +2542,31 @@ impl AppServer {
                     .get("cwd")
                     .and_then(|v| v.as_str())
                     .map(PathBuf::from)
-                    .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+                    .unwrap_or_else(|| {
+                        std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+                    });
                 let config = MaintenanceConfigFile::load_from_workspace(&cwd).unwrap_or_default();
                 let policy = config.to_policy();
 
                 let maint_store = MaintenanceStore::new(self.storage.connection());
-                let target_plan_id = if let Some(pid) = params.get("plan_id").and_then(|v| v.as_str()) {
-                    pid.to_string()
-                } else {
-                    let case = maint_store
-                        .get_case(case_id)?
-                        .ok_or_else(|| anyhow!("Case '{}' not found", case_id))?;
-                    case.active_plan_id
-                        .ok_or_else(|| anyhow!("Case '{}' has no active plan", case_id))?
-                };
+                let target_plan_id =
+                    if let Some(pid) = params.get("plan_id").and_then(|v| v.as_str()) {
+                        pid.to_string()
+                    } else {
+                        let case = maint_store
+                            .get_case(case_id)?
+                            .ok_or_else(|| anyhow!("Case '{}' not found", case_id))?;
+                        case.active_plan_id
+                            .ok_or_else(|| anyhow!("Case '{}' has no active plan", case_id))?
+                    };
 
                 let wf_store = self.storage.workflow_store();
                 let orch = Arc::new(self.workflow_orchestrator(Some(&cwd)));
                 let runner = MaintenanceWorkflowRunner::new(maint_store, wf_store, orch, policy);
 
-                let exec = runner.start_execution(case_id, &target_plan_id, &cwd).await?;
+                let exec = runner
+                    .start_execution(case_id, &target_plan_id, &cwd)
+                    .await?;
                 Ok(serde_json::to_value(exec)?)
             }
 
@@ -2567,7 +2588,8 @@ impl AppServer {
                     }
                 }
 
-                let mut plan = plan_opt.ok_or_else(|| anyhow!("Plan or case '{}' not found", id))?;
+                let mut plan =
+                    plan_opt.ok_or_else(|| anyhow!("Plan or case '{}' not found", id))?;
                 plan.approval_state = PlanApprovalState::Approved;
                 maint_store.update_plan_approval(&plan.id, PlanApprovalState::Approved)?;
 
@@ -3153,7 +3175,11 @@ mod tests {
             params: Some(serde_json::json!({ "cwd": ws_path })),
         };
         let res_maint_status = server.handle_request(req_maint_status).await;
-        assert!(res_maint_status.error.is_none(), "maintenance/status error: {:?}", res_maint_status.error);
+        assert!(
+            res_maint_status.error.is_none(),
+            "maintenance/status error: {:?}",
+            res_maint_status.error
+        );
         let status_val = res_maint_status.result.unwrap();
         assert!(status_val.get("repository_id").is_some());
         assert!(status_val.get("autonomy_tier").is_some());
@@ -3166,7 +3192,11 @@ mod tests {
             params: Some(serde_json::json!({ "cwd": ws_path })),
         };
         let res_maint_scan = server.handle_request(req_maint_scan).await;
-        assert!(res_maint_scan.error.is_none(), "maintenance/scan error: {:?}", res_maint_scan.error);
+        assert!(
+            res_maint_scan.error.is_none(),
+            "maintenance/scan error: {:?}",
+            res_maint_scan.error
+        );
 
         // 10. maintenance/cases/list
         let req_cases = JsonRpcRequest {

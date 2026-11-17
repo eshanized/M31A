@@ -478,7 +478,8 @@ impl VibeEngine {
             match resp {
                 Ok((resp_msg, _usage)) => {
                     if let Some(ref patch_text) = resp_msg.content
-                        && (patch_text.contains("*** Begin Patch") || patch_text.contains("diff --git"))
+                        && (patch_text.contains("*** Begin Patch")
+                            || patch_text.contains("diff --git"))
                     {
                         let integ_svc = crate::integration::WorkflowIntegrationService::new();
                         let req = crate::integration::IntegrationRequest {

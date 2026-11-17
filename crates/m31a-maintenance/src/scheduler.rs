@@ -54,7 +54,10 @@ impl MaintenanceScheduler {
         }
 
         // 2. Weekly Dependency Review (every 604,800s)
-        if !existing.iter().any(|s| s.job_kind == "weekly_dependency_review") {
+        if !existing
+            .iter()
+            .any(|s| s.job_kind == "weekly_dependency_review")
+        {
             let sched = MaintenanceSchedule {
                 id: format!("sched_deps_{}", Uuid::now_v7()),
                 repo_id: repo_id.to_string(),
@@ -72,7 +75,10 @@ impl MaintenanceScheduler {
         }
 
         // 3. Documentation Consistency Check (every 172,800s / 2 days)
-        if !existing.iter().any(|s| s.job_kind == "doc_consistency_check") {
+        if !existing
+            .iter()
+            .any(|s| s.job_kind == "doc_consistency_check")
+        {
             let sched = MaintenanceSchedule {
                 id: format!("sched_doc_{}", Uuid::now_v7()),
                 repo_id: repo_id.to_string(),
@@ -106,11 +112,7 @@ impl MaintenanceScheduler {
     }
 
     /// Dispatches a completed schedule run update.
-    pub fn mark_schedule_executed(
-        &self,
-        sched_id: &str,
-        success: bool,
-    ) -> Result<()> {
+    pub fn mark_schedule_executed(&self, sched_id: &str, success: bool) -> Result<()> {
         let sched = self
             .store
             .get_schedule(sched_id)?
@@ -119,7 +121,8 @@ impl MaintenanceScheduler {
         let now = Utc::now().timestamp_millis();
         let next_run = now + (sched.cron_or_interval_secs * 1000);
 
-        self.store.update_schedule_run(sched_id, next_run, success)?;
+        self.store
+            .update_schedule_run(sched_id, next_run, success)?;
         info!(sched_id = %sched_id, success, "Updated persistent maintenance schedule execution");
         Ok(())
     }
@@ -156,9 +159,9 @@ impl MaintenanceScheduler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use m31a_storage::{BUILTIN_MIGRATIONS, MigrationEngine};
     use rusqlite::Connection;
     use std::sync::{Arc, Mutex};
-    use m31a_storage::{BUILTIN_MIGRATIONS, MigrationEngine};
 
     fn setup_test_scheduler() -> MaintenanceScheduler {
         let mut conn = Connection::open_in_memory().unwrap();
@@ -176,7 +179,10 @@ mod tests {
         let due = sched.get_due_schedules(Some("repo_test")).unwrap();
         assert!(!due.is_empty(), "Daily check should be immediately due");
 
-        let daily_sched = due.iter().find(|s| s.job_kind == "daily_health_check").unwrap();
+        let daily_sched = due
+            .iter()
+            .find(|s| s.job_kind == "daily_health_check")
+            .unwrap();
         assert!(daily_sched.is_enabled);
 
         // Mark executed

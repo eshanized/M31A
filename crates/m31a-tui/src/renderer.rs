@@ -756,7 +756,10 @@ fn render_approval_dialog(
         };
         action_lines.push(Line::from(vec![
             Span::styled(format!(" [{}] ", approval_action_shortcut(*kind)), style),
-            Span::styled(format!("{:<38} ", label), t.style_primary().add_modifier(Modifier::BOLD)),
+            Span::styled(
+                format!("{:<38} ", label),
+                t.style_primary().add_modifier(Modifier::BOLD),
+            ),
             Span::styled(format!("─ {}", scope_desc), t.style_muted()),
         ]));
     }
@@ -2951,11 +2954,17 @@ fn render_setup_wizard(
                 )),
                 Line::from(vec![
                     Span::styled("    [1] ", t.style_accent(true)),
-                    Span::styled("Explain this repository and architecture", t.style_primary()),
+                    Span::styled(
+                        "Explain this repository and architecture",
+                        t.style_primary(),
+                    ),
                 ]),
                 Line::from(vec![
                     Span::styled("    [2] ", t.style_accent(true)),
-                    Span::styled("Find a bug or potential issue in this project", t.style_primary()),
+                    Span::styled(
+                        "Find a bug or potential issue in this project",
+                        t.style_primary(),
+                    ),
                 ]),
                 Line::from(vec![
                     Span::styled("    [3] ", t.style_accent(true)),
@@ -2967,7 +2976,10 @@ fn render_setup_wizard(
                 ]),
                 Line::from(vec![
                     Span::styled("    [5] ", t.style_accent(true)),
-                    Span::styled("Diagnose failed build and run verification check", t.style_primary()),
+                    Span::styled(
+                        "Diagnose failed build and run verification check",
+                        t.style_primary(),
+                    ),
                 ]),
                 Line::from(""),
                 Line::from(Span::styled(
@@ -3003,7 +3015,9 @@ fn render_setup_wizard(
             }
         }
         crate::modals::SetupStep::Review => "Enter: Confirm & Save  │  Esc: Back",
-        crate::modals::SetupStep::Complete => "1-5: Populate Example Task  │  Enter/Esc: Return to Chat",
+        crate::modals::SetupStep::Complete => {
+            "1-5: Populate Example Task  │  Enter/Esc: Return to Chat"
+        }
     };
     f.render_widget(
         Paragraph::new(Span::styled(format!("  {}", footer_text), t.style_muted())),

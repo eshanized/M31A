@@ -2302,19 +2302,24 @@ pub fn handle_modal_key_event(app: &mut App, modal: ModalState, key: crossterm::
                         // Wizard finished and popped
                     }
                     KeyCode::Char('1') => {
-                        app.composer.set_text("Explain this repository and its architecture");
+                        app.composer
+                            .set_text("Explain this repository and its architecture");
                     }
                     KeyCode::Char('2') => {
-                        app.composer.set_text("Find and diagnose bugs in this project");
+                        app.composer
+                            .set_text("Find and diagnose bugs in this project");
                     }
                     KeyCode::Char('3') => {
-                        app.composer.set_text("Write comprehensive tests for core modules");
+                        app.composer
+                            .set_text("Write comprehensive tests for core modules");
                     }
                     KeyCode::Char('4') => {
-                        app.composer.set_text("Review recent changes and propose improvements");
+                        app.composer
+                            .set_text("Review recent changes and propose improvements");
                     }
                     KeyCode::Char('5') => {
-                        app.composer.set_text("Diagnose failed build and verification issues");
+                        app.composer
+                            .set_text("Diagnose failed build and verification issues");
                     }
                     _ => {
                         app.push_modal(ModalState::SetupWizard { state });
@@ -3501,7 +3506,10 @@ pub fn handle_screen_key_event(app: &mut App, key: crossterm::event::KeyEvent) {
                     }
                     7 => {
                         app.push_modal(crate::modals::ModalState::setup_wizard(
-                            crate::modals::SetupWizardState::new(&app.config, &app.available_models),
+                            crate::modals::SetupWizardState::new(
+                                &app.config,
+                                &app.available_models,
+                            ),
                         ));
                     }
                     _ => {}
@@ -3778,13 +3786,17 @@ pub fn handle_screen_key_event(app: &mut App, key: crossterm::event::KeyEvent) {
                 });
             }
         }
-        KeyCode::Char('s') | KeyCode::Char('S') if app.current_screen == crate::screens::Screen::Settings => {
+        KeyCode::Char('s') | KeyCode::Char('S')
+            if app.current_screen == crate::screens::Screen::Settings =>
+        {
             match app.config.save() {
                 Ok(()) => {
-                    app.provider_status_message = Some("Configuration successfully saved to disk.".to_string());
+                    app.provider_status_message =
+                        Some("Configuration successfully saved to disk.".to_string());
                 }
                 Err(e) => {
-                    app.provider_status_message = Some(format!("Failed to save configuration: {e}"));
+                    app.provider_status_message =
+                        Some(format!("Failed to save configuration: {e}"));
                 }
             }
         }

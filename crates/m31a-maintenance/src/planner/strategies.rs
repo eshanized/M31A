@@ -7,12 +7,12 @@
 //! 4. Unreproducible bugs are marked `NeedsInformation`; no hallucinated fixes.
 //! 5. Documentation updates are grounded in real AST symbols.
 
-use std::path::{Path, PathBuf};
 use anyhow::Result;
+use std::path::{Path, PathBuf};
 
 use crate::domain::{
-    AutonomyTier, MaintenanceCase, MaintenanceCategory, MaintenancePlan,
-    MaintenanceRiskLevel, PlanVerificationRequirement, RootCauseHypothesis, SignalSeverity,
+    AutonomyTier, MaintenanceCase, MaintenanceCategory, MaintenancePlan, MaintenanceRiskLevel,
+    PlanVerificationRequirement, RootCauseHypothesis, SignalSeverity,
 };
 
 /// Classification of CI or build failure.
@@ -63,7 +63,11 @@ pub struct StrategyPlanContext<'a> {
 pub trait MaintenanceStrategy: Send + Sync {
     fn category(&self) -> MaintenanceCategory;
     fn can_handle(&self, case: &MaintenanceCase) -> bool;
-    fn create_plan(&self, case: &MaintenanceCase, ctx: &StrategyPlanContext) -> Result<MaintenancePlan>;
+    fn create_plan(
+        &self,
+        case: &MaintenanceCase,
+        ctx: &StrategyPlanContext,
+    ) -> Result<MaintenancePlan>;
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -123,7 +127,11 @@ impl MaintenanceStrategy for BrokenCiStrategy {
         case.category == MaintenanceCategory::BrokenCi
     }
 
-    fn create_plan(&self, case: &MaintenanceCase, ctx: &StrategyPlanContext) -> Result<MaintenancePlan> {
+    fn create_plan(
+        &self,
+        case: &MaintenanceCase,
+        ctx: &StrategyPlanContext,
+    ) -> Result<MaintenancePlan> {
         let classification = Self::classify_failure(&case.problem_statement);
 
         // Invariant: Do not modify application code on infrastructure failure!
@@ -167,28 +175,36 @@ impl MaintenanceStrategy for BrokenCiStrategy {
 
         plan.hypotheses.push(RootCauseHypothesis {
             id: "hyp_ci_1".to_string(),
-            description: format!("Deterministic failure classified as {}", classification.as_str()),
+            description: format!(
+                "Deterministic failure classified as {}",
+                classification.as_str()
+            ),
             confidence: 0.85,
             evidence_refs: case.evidence_refs.clone(),
             verified: false,
         });
 
         // Verification requirements
-        plan.verification_requirements.push(PlanVerificationRequirement {
-            id: "req_check".to_string(),
-            category: "build_check".to_string(),
-            description: "Compiler and workspace build check must succeed with 0 diagnostics".to_string(),
-            target_paths: case.affected_files.clone(),
-            mandatory: true,
-        });
+        plan.verification_requirements
+            .push(PlanVerificationRequirement {
+                id: "req_check".to_string(),
+                category: "build_check".to_string(),
+                description: "Compiler and workspace build check must succeed with 0 diagnostics"
+                    .to_string(),
+                target_paths: case.affected_files.clone(),
+                mandatory: true,
+            });
 
-        plan.verification_requirements.push(PlanVerificationRequirement {
-            id: "req_tests".to_string(),
-            category: "unit_test".to_string(),
-            description: "Failing test suite must pass with 0 failures and non-zero executed tests".to_string(),
-            target_paths: case.affected_files.clone(),
-            mandatory: true,
-        });
+        plan.verification_requirements
+            .push(PlanVerificationRequirement {
+                id: "req_tests".to_string(),
+                category: "unit_test".to_string(),
+                description:
+                    "Failing test suite must pass with 0 failures and non-zero executed tests"
+                        .to_string(),
+                target_paths: case.affected_files.clone(),
+                mandatory: true,
+            });
 
         plan.expected_files = case.affected_files.clone();
         plan.plan_hash = plan.compute_plan_hash();
@@ -212,7 +228,11 @@ impl MaintenanceStrategy for DependencyUpdateStrategy {
         case.category == MaintenanceCategory::DependencyUpdate
     }
 
-    fn create_plan(&self, case: &MaintenanceCase, ctx: &StrategyPlanContext) -> Result<MaintenancePlan> {
+    fn create_plan(
+        &self,
+        case: &MaintenanceCase,
+        ctx: &StrategyPlanContext,
+    ) -> Result<MaintenancePlan> {
         let is_major = case.problem_statement.contains("major") || case.title.contains("major");
         let (risk, autonomy_tier, requires_approval, strategy_name) = if is_major {
             (
@@ -235,7 +255,11 @@ impl MaintenanceStrategy for DependencyUpdateStrategy {
             ctx.repo_id,
             ctx.baseline_sha,
             MaintenanceCategory::DependencyUpdate,
-            if is_major { "major_upgrade" } else { "patch_minor_upgrade" },
+            if is_major {
+                "major_upgrade"
+            } else {
+                "patch_minor_upgrade"
+            },
             strategy_name,
             risk,
             autonomy_tier,
@@ -251,21 +275,26 @@ impl MaintenanceStrategy for DependencyUpdateStrategy {
         });
 
         // Verification requirements
-        plan.verification_requirements.push(PlanVerificationRequirement {
-            id: "req_lockfile".to_string(),
-            category: "build_check".to_string(),
-            description: "Manifest and lockfile must resolve consistently without conflicts".to_string(),
-            target_paths: vec![PathBuf::from("Cargo.lock"), PathBuf::from("Cargo.toml")],
-            mandatory: true,
-        });
+        plan.verification_requirements
+            .push(PlanVerificationRequirement {
+                id: "req_lockfile".to_string(),
+                category: "build_check".to_string(),
+                description: "Manifest and lockfile must resolve consistently without conflicts"
+                    .to_string(),
+                target_paths: vec![PathBuf::from("Cargo.lock"), PathBuf::from("Cargo.toml")],
+                mandatory: true,
+            });
 
-        plan.verification_requirements.push(PlanVerificationRequirement {
-            id: "req_test_suite".to_string(),
-            category: "unit_test".to_string(),
-            description: "Targeted and dependent package tests must pass against updated dependency".to_string(),
-            target_paths: Vec::new(),
-            mandatory: true,
-        });
+        plan.verification_requirements
+            .push(PlanVerificationRequirement {
+                id: "req_test_suite".to_string(),
+                category: "unit_test".to_string(),
+                description:
+                    "Targeted and dependent package tests must pass against updated dependency"
+                        .to_string(),
+                target_paths: Vec::new(),
+                mandatory: true,
+            });
 
         plan.plan_hash = plan.compute_plan_hash();
         Ok(plan)
@@ -288,7 +317,11 @@ impl MaintenanceStrategy for IssueBugFixStrategy {
         case.category == MaintenanceCategory::IssueBug
     }
 
-    fn create_plan(&self, case: &MaintenanceCase, ctx: &StrategyPlanContext) -> Result<MaintenancePlan> {
+    fn create_plan(
+        &self,
+        case: &MaintenanceCase,
+        ctx: &StrategyPlanContext,
+    ) -> Result<MaintenancePlan> {
         let has_repro_hints = case.problem_statement.contains("reproduce")
             || case.problem_statement.contains("steps")
             || case.problem_statement.contains("error:")
@@ -339,21 +372,25 @@ impl MaintenanceStrategy for IssueBugFixStrategy {
             verified: false,
         });
 
-        plan.verification_requirements.push(PlanVerificationRequirement {
-            id: "req_regression_test".to_string(),
-            category: "unit_test".to_string(),
-            description: "Newly synthesized regression test must fail on baseline and pass after fix".to_string(),
-            target_paths: Vec::new(),
-            mandatory: true,
-        });
+        plan.verification_requirements
+            .push(PlanVerificationRequirement {
+                id: "req_regression_test".to_string(),
+                category: "unit_test".to_string(),
+                description:
+                    "Newly synthesized regression test must fail on baseline and pass after fix"
+                        .to_string(),
+                target_paths: Vec::new(),
+                mandatory: true,
+            });
 
-        plan.verification_requirements.push(PlanVerificationRequirement {
-            id: "req_suite".to_string(),
-            category: "unit_test".to_string(),
-            description: "Existing test suite must pass without regressions".to_string(),
-            target_paths: Vec::new(),
-            mandatory: true,
-        });
+        plan.verification_requirements
+            .push(PlanVerificationRequirement {
+                id: "req_suite".to_string(),
+                category: "unit_test".to_string(),
+                description: "Existing test suite must pass without regressions".to_string(),
+                target_paths: Vec::new(),
+                mandatory: true,
+            });
 
         plan.plan_hash = plan.compute_plan_hash();
         Ok(plan)
@@ -376,7 +413,11 @@ impl MaintenanceStrategy for DocDriftStrategy {
         case.category == MaintenanceCategory::DocDrift
     }
 
-    fn create_plan(&self, case: &MaintenanceCase, ctx: &StrategyPlanContext) -> Result<MaintenancePlan> {
+    fn create_plan(
+        &self,
+        case: &MaintenanceCase,
+        ctx: &StrategyPlanContext,
+    ) -> Result<MaintenancePlan> {
         let mut plan = MaintenancePlan::new(
             &case.id,
             ctx.repo_id,
@@ -391,7 +432,8 @@ impl MaintenanceStrategy for DocDriftStrategy {
 
         plan.hypotheses.push(RootCauseHypothesis {
             id: "hyp_doc_1".to_string(),
-            description: "Documentation references stale symbols or missing public signatures".to_string(),
+            description: "Documentation references stale symbols or missing public signatures"
+                .to_string(),
             confidence: 0.9,
             evidence_refs: case.evidence_refs.clone(),
             verified: true,
@@ -426,7 +468,11 @@ impl MaintenanceStrategy for SecurityAdvisoryStrategy {
         case.category == MaintenanceCategory::SecurityAdvisory
     }
 
-    fn create_plan(&self, case: &MaintenanceCase, ctx: &StrategyPlanContext) -> Result<MaintenancePlan> {
+    fn create_plan(
+        &self,
+        case: &MaintenanceCase,
+        ctx: &StrategyPlanContext,
+    ) -> Result<MaintenancePlan> {
         let is_critical = case.severity == SignalSeverity::Critical;
         let mut plan = MaintenancePlan::new(
             &case.id,
@@ -452,13 +498,16 @@ impl MaintenanceStrategy for SecurityAdvisoryStrategy {
             verified: true,
         });
 
-        plan.verification_requirements.push(PlanVerificationRequirement {
-            id: "req_security_audit".to_string(),
-            category: "safety_audit".to_string(),
-            description: "Safety gate audit must pass and verify affected vulnerability is mitigated".to_string(),
-            target_paths: Vec::new(),
-            mandatory: true,
-        });
+        plan.verification_requirements
+            .push(PlanVerificationRequirement {
+                id: "req_security_audit".to_string(),
+                category: "safety_audit".to_string(),
+                description:
+                    "Safety gate audit must pass and verify affected vulnerability is mitigated"
+                        .to_string(),
+                target_paths: Vec::new(),
+                mandatory: true,
+            });
 
         plan.plan_hash = plan.compute_plan_hash();
         Ok(plan)
@@ -536,6 +585,9 @@ mod tests {
 
         let plan = strategy.create_plan(&case, &ctx).unwrap();
         assert!(plan.requires_approval);
-        assert_eq!(plan.required_autonomy_tier, AutonomyTier::Tier3RestrictedHighImpact);
+        assert_eq!(
+            plan.required_autonomy_tier,
+            AutonomyTier::Tier3RestrictedHighImpact
+        );
     }
 }

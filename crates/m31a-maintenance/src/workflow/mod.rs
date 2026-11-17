@@ -7,23 +7,22 @@
 //! 4. Synchronizes workflow execution lifecycle with `MaintenanceExecution` and `MaintenanceCase`.
 //! 5. Enforces attempt fencing and replanning budgets.
 
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use anyhow::{Result, anyhow, bail};
 use chrono::Utc;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tracing::info;
 use uuid::Uuid;
 
 use m31a_agent_engine::workflow::WorkflowOrchestrator;
 use m31a_core::workflow::{
-    WorkflowPlan, WorkflowTask, WorkflowTaskKind,
-    WorkflowTaskStatus, WorkspaceIsolationStrategy,
+    WorkflowPlan, WorkflowTask, WorkflowTaskKind, WorkflowTaskStatus, WorkspaceIsolationStrategy,
 };
 use m31a_storage::WorkflowStore;
 
 use crate::domain::{
-    AuditTrailEvent, CaseStatus, ExecutionLifecycleState, MaintenanceExecution,
-    MaintenancePlan, MaintenancePolicy, RemediationAttempt,
+    AuditTrailEvent, CaseStatus, ExecutionLifecycleState, MaintenanceExecution, MaintenancePlan,
+    MaintenancePolicy, RemediationAttempt,
 };
 use crate::storage::MaintenanceStore;
 
@@ -134,7 +133,8 @@ impl MaintenanceWorkflowAdapter {
             .map(|r| r.description.clone())
             .collect();
         if verif_criteria.is_empty() {
-            verif_criteria.push("Pass compiler check and test suite without regressions".to_string());
+            verif_criteria
+                .push("Pass compiler check and test suite without regressions".to_string());
         }
 
         let verif_task = WorkflowTask {
@@ -143,7 +143,9 @@ impl MaintenanceWorkflowAdapter {
             plan_revision: 1,
             task_kind: WorkflowTaskKind::Verification,
             name: "Independent Verification".to_string(),
-            description: "Execute independent verification plan against frozen candidate change-set".to_string(),
+            description:
+                "Execute independent verification plan against frozen candidate change-set"
+                    .to_string(),
             assigned_role: "verifier".to_string(),
             assigned_agent_id: None,
             priority: 3,
@@ -182,7 +184,8 @@ impl MaintenanceWorkflowAdapter {
             plan_revision: 1,
             task_kind: WorkflowTaskKind::Delivery,
             name: "Deliver Maintenance Package".to_string(),
-            description: "Prepare reviewable draft pull request or final verification report".to_string(),
+            description: "Prepare reviewable draft pull request or final verification report"
+                .to_string(),
             assigned_role: "deliverer".to_string(),
             assigned_agent_id: None,
             priority: 4,
@@ -267,7 +270,9 @@ impl MaintenanceWorkflowRunner {
             .ok_or_else(|| anyhow!("Plan '{}' not found", plan_id))?;
 
         // 1. Enforce approval gating
-        if plan.requires_approval && plan.approval_state != crate::domain::PlanApprovalState::Approved {
+        if plan.requires_approval
+            && plan.approval_state != crate::domain::PlanApprovalState::Approved
+        {
             bail!(
                 "Maintenance plan '{}' requires explicit human approval before execution",
                 plan.id
@@ -401,10 +406,10 @@ impl MaintenanceWorkflowRunner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::{AutonomyTier, MaintenanceCategory, MaintenancePlan, MaintenanceRiskLevel};
+    use m31a_storage::{BUILTIN_MIGRATIONS, MigrationEngine};
     use rusqlite::Connection;
     use std::sync::Mutex;
-    use m31a_storage::{BUILTIN_MIGRATIONS, MigrationEngine};
-    use crate::domain::{MaintenanceCategory, MaintenancePlan, MaintenanceRiskLevel, AutonomyTier};
 
     fn setup_test_adapter_env() -> (MaintenanceStore, WorkflowStore) {
         let mut conn = Connection::open_in_memory().unwrap();

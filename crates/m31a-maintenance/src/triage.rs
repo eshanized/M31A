@@ -58,11 +58,13 @@ impl TriageEngine {
                 0.9
             }
             MaintenanceCategory::SecurityAdvisory => {
-                contributing_factors.push("Security advisory introduces potential exposure".to_string());
+                contributing_factors
+                    .push("Security advisory introduces potential exposure".to_string());
                 0.95
             }
             MaintenanceCategory::IssueBug => {
-                contributing_factors.push("Reported functional bug impairs runtime correctness".to_string());
+                contributing_factors
+                    .push("Reported functional bug impairs runtime correctness".to_string());
                 0.7
             }
             MaintenanceCategory::DependencyUpdate => {
@@ -139,8 +141,9 @@ impl TriageEngine {
             || blast_radius > 0.8;
 
         if human_intervention_required {
-            contributing_factors
-                .push("Policy requires human supervision for high-impact or critical changes".to_string());
+            contributing_factors.push(
+                "Policy requires human supervision for high-impact or critical changes".to_string(),
+            );
         }
 
         // 8. Determine recommended autonomy tier
@@ -167,7 +170,14 @@ impl TriageEngine {
 
         let rationale = format!(
             "Triage evaluated composite score {:.2} (severity: {:.2}, impact: {:.2}, blast: {:.2}, conf: {:.2}, verif: {:.2}). Priority assigned: {:?}. Recommended autonomy: {:?}.",
-            composite, severity_score, operational_impact, blast_radius, confidence, verification_feasibility, priority, effective_autonomy_tier
+            composite,
+            severity_score,
+            operational_impact,
+            blast_radius,
+            confidence,
+            verification_feasibility,
+            priority,
+            effective_autonomy_tier
         );
 
         Ok(TriageEvaluation {
@@ -213,9 +223,9 @@ impl TriageEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use m31a_storage::{BUILTIN_MIGRATIONS, MigrationEngine};
     use rusqlite::Connection;
     use std::sync::{Arc, Mutex};
-    use m31a_storage::{BUILTIN_MIGRATIONS, MigrationEngine};
 
     fn setup_test_triage() -> TriageEngine {
         let mut conn = Connection::open_in_memory().unwrap();

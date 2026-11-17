@@ -7,9 +7,7 @@ use anyhow::Result;
 use chrono::Utc;
 use tracing::info;
 
-use crate::domain::{
-    MaintenanceCase, MaintenanceCategory, MaintenanceSignal,
-};
+use crate::domain::{MaintenanceCase, MaintenanceCategory, MaintenanceSignal};
 use crate::storage::MaintenanceStore;
 
 /// Result outcome of ingesting an individual signal.
@@ -123,9 +121,14 @@ impl SignalIntakeManager {
         } else {
             // 4. Create new case
             let title = match signal.category {
-                MaintenanceCategory::BrokenCi => format!("Remediate CI Failure in {}", signal.repo_id),
+                MaintenanceCategory::BrokenCi => {
+                    format!("Remediate CI Failure in {}", signal.repo_id)
+                }
                 MaintenanceCategory::DependencyUpdate => {
-                    format!("Review and Apply Dependency Maintenance in {}", signal.repo_id)
+                    format!(
+                        "Review and Apply Dependency Maintenance in {}",
+                        signal.repo_id
+                    )
                 }
                 MaintenanceCategory::IssueBug => {
                     format!("Investigate Reported Issue in {}", signal.repo_id)
@@ -181,10 +184,10 @@ pub type CaseManager = SignalIntakeManager;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::{SignalProvider, SignalSeverity, SignalTrustStatus};
+    use m31a_storage::{BUILTIN_MIGRATIONS, MigrationEngine};
     use rusqlite::Connection;
     use std::sync::{Arc, Mutex};
-    use m31a_storage::{BUILTIN_MIGRATIONS, MigrationEngine};
-    use crate::domain::{SignalProvider, SignalSeverity, SignalTrustStatus};
 
     fn setup_test_manager() -> SignalIntakeManager {
         let mut conn = Connection::open_in_memory().unwrap();

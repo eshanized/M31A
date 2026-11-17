@@ -7,10 +7,10 @@
 //! 4. Typed multi-factor triage scoring (`TriageEvaluation`).
 //! 5. Explicit autonomy tiers (0 to 3) and approval bindings.
 
-use std::path::PathBuf;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::path::PathBuf;
 use uuid::Uuid;
 
 /// Source provider originating a maintenance signal.
@@ -290,27 +290,53 @@ impl CaseStatus {
         match self {
             Self::Open => matches!(
                 next,
-                Self::Triaged | Self::Investigating | Self::Blocked | Self::NeedsInformation | Self::Cancelled
+                Self::Triaged
+                    | Self::Investigating
+                    | Self::Blocked
+                    | Self::NeedsInformation
+                    | Self::Cancelled
             ),
             Self::Triaged => matches!(
                 next,
-                Self::Investigating | Self::Planning | Self::Blocked | Self::NeedsInformation | Self::Cancelled
+                Self::Investigating
+                    | Self::Planning
+                    | Self::Blocked
+                    | Self::NeedsInformation
+                    | Self::Cancelled
             ),
             Self::Investigating => matches!(
                 next,
-                Self::Planning | Self::PlanReady | Self::Blocked | Self::NeedsInformation | Self::Failed | Self::Cancelled
+                Self::Planning
+                    | Self::PlanReady
+                    | Self::Blocked
+                    | Self::NeedsInformation
+                    | Self::Failed
+                    | Self::Cancelled
             ),
             Self::Planning => matches!(
                 next,
-                Self::PlanReady | Self::AwaitingApproval | Self::Blocked | Self::NeedsInformation | Self::Failed | Self::Cancelled
+                Self::PlanReady
+                    | Self::AwaitingApproval
+                    | Self::Blocked
+                    | Self::NeedsInformation
+                    | Self::Failed
+                    | Self::Cancelled
             ),
             Self::PlanReady => matches!(
                 next,
-                Self::AwaitingApproval | Self::Executing | Self::Planning | Self::Blocked | Self::Cancelled
+                Self::AwaitingApproval
+                    | Self::Executing
+                    | Self::Planning
+                    | Self::Blocked
+                    | Self::Cancelled
             ),
             Self::AwaitingApproval => matches!(
                 next,
-                Self::Executing | Self::PlanReady | Self::Blocked | Self::Cancelled | Self::Planning
+                Self::Executing
+                    | Self::PlanReady
+                    | Self::Blocked
+                    | Self::Cancelled
+                    | Self::Planning
             ),
             Self::Executing => matches!(
                 next,
@@ -318,15 +344,31 @@ impl CaseStatus {
             ),
             Self::Verifying => matches!(
                 next,
-                Self::ReviewPending | Self::Resolved | Self::Executing | Self::Planning | Self::Failed | Self::Blocked | Self::Cancelled
+                Self::ReviewPending
+                    | Self::Resolved
+                    | Self::Executing
+                    | Self::Planning
+                    | Self::Failed
+                    | Self::Blocked
+                    | Self::Cancelled
             ),
             Self::ReviewPending => matches!(
                 next,
-                Self::Resolved | Self::Executing | Self::Planning | Self::Blocked | Self::Failed | Self::Cancelled
+                Self::Resolved
+                    | Self::Executing
+                    | Self::Planning
+                    | Self::Blocked
+                    | Self::Failed
+                    | Self::Cancelled
             ),
             Self::Blocked => matches!(
                 next,
-                Self::Open | Self::Triaged | Self::Investigating | Self::Planning | Self::Executing | Self::Cancelled
+                Self::Open
+                    | Self::Triaged
+                    | Self::Investigating
+                    | Self::Planning
+                    | Self::Executing
+                    | Self::Cancelled
             ),
             Self::NeedsInformation => matches!(
                 next,
@@ -869,7 +911,10 @@ impl Default for MaintenancePolicy {
                 MaintenanceCategory::ArchitectureDrift,
             ],
             allowed_branches: vec!["master".to_string(), "main".to_string()],
-            excluded_paths: vec![".git/**".to_string(), ".github/workflows/security.yml".to_string()],
+            excluded_paths: vec![
+                ".git/**".to_string(),
+                ".github/workflows/security.yml".to_string(),
+            ],
             risk_threshold_for_approval: MaintenanceRiskLevel::Medium,
             max_concurrency_per_repo: 2,
             max_retries_per_case: 3,

@@ -7,18 +7,18 @@
 //! 4. Plaintext credential rejection in policies and signals.
 //! 5. Secret redaction in audit trails and generated deliverables.
 
+use chrono::Utc;
+use rusqlite::Connection;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use rusqlite::Connection;
-use chrono::Utc;
 
-use m31a_maintenance::domain::*;
-use m31a_maintenance::intake::github::GitHubSignalAdapter;
-use m31a_maintenance::intake::SignalSource;
 use m31a_maintenance::config::MaintenanceConfigFile;
+use m31a_maintenance::domain::*;
+use m31a_maintenance::intake::SignalSource;
+use m31a_maintenance::intake::github::GitHubSignalAdapter;
 use m31a_maintenance::storage::MaintenanceStore;
-use m31a_storage::{MigrationEngine, BUILTIN_MIGRATIONS};
+use m31a_storage::{BUILTIN_MIGRATIONS, MigrationEngine};
 
 fn setup_test_store() -> MaintenanceStore {
     let mut conn = Connection::open_in_memory().unwrap();
@@ -40,7 +40,10 @@ fn test_security_prompt_injection_sanitization() {
         let sanitized = GitHubSignalAdapter::sanitize_untrusted_text(malicious);
         // Ensure control characters and dangerous raw constructs are stripped or neutralized
         assert!(!sanitized.contains('\0'), "Null bytes must be stripped");
-        assert!(!sanitized.contains("\x1b"), "ANSI escape sequences must be stripped");
+        assert!(
+            !sanitized.contains("\x1b"),
+            "ANSI escape sequences must be stripped"
+        );
     }
 }
 
@@ -69,7 +72,11 @@ fn test_security_path_traversal_prevention() {
             Err(_) => !p.contains("..") && !candidate.is_absolute(),
         };
 
-        assert!(!is_contained, "Path '{}' must be rejected as outside workspace root", p);
+        assert!(
+            !is_contained,
+            "Path '{}' must be rejected as outside workspace root",
+            p
+        );
     }
 }
 
@@ -77,7 +84,8 @@ fn test_security_path_traversal_prevention() {
 fn test_security_hmac_tamper_detection() {
     let adapter = GitHubSignalAdapter::default();
     let secret = "top_secret_token_12345";
-    let body = b"{\"action\":\"completed\",\"workflow_run\":{\"id\":12345,\"conclusion\":\"failure\"}}";
+    let body =
+        b"{\"action\":\"completed\",\"workflow_run\":{\"id\":12345,\"conclusion\":\"failure\"}}";
 
     // Compute valid signature using the crate's internal helper or formula
     // We can simulate GitHub's signature
@@ -87,7 +95,10 @@ fn test_security_hmac_tamper_detection() {
     assert!(!adapter.validate_webhook(&headers, body, secret).unwrap());
 
     // 2. Tampered header fails
-    headers.insert("X-Hub-Signature-256".to_string(), "sha256=invalidhexformat12345".to_string());
+    headers.insert(
+        "X-Hub-Signature-256".to_string(),
+        "sha256=invalidhexformat12345".to_string(),
+    );
     assert!(!adapter.validate_webhook(&headers, body, secret).unwrap());
 
     // 3. Invalid secret fails
@@ -95,7 +106,11 @@ fn test_security_hmac_tamper_detection() {
         "X-Hub-Signature-256".to_string(),
         "sha256=0000000000000000000000000000000000000000000000000000000000000000".to_string(),
     );
-    assert!(!adapter.validate_webhook(&headers, body, "wrong_secret").unwrap());
+    assert!(
+        !adapter
+            .validate_webhook(&headers, body, "wrong_secret")
+            .unwrap()
+    );
 }
 
 #[test]
@@ -108,7 +123,10 @@ github_token = "ghp_1234567890abcdefghijklmnopqrstuvwxyz"
 "#;
 
     let res = MaintenanceConfigFile::parse_and_validate(policy_with_token);
-    assert!(res.is_err(), "Configuration with plaintext token must be rejected");
+    assert!(
+        res.is_err(),
+        "Configuration with plaintext token must be rejected"
+    );
     let err_str = res.unwrap_err().to_string();
     assert!(
         err_str.contains("security violation") || err_str.contains("github_token"),

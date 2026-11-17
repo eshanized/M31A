@@ -468,7 +468,9 @@ impl ChatWidgetState {
                 };
             }
             crate::turn::TurnState::Thinking {
-                started_at, preview, ..
+                started_at,
+                preview,
+                ..
             } => {
                 let current_tokens = match &self.turn_state {
                     TurnExecutionState::Thinking { tokens, .. } => *tokens + 1,

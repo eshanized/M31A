@@ -8,9 +8,9 @@ pub use github::GitHubSignalAdapter;
 pub use local::LocalRepositorySignalSource;
 pub use manager::{CaseManager, IngestionOutcome, SignalIntakeManager};
 
-use std::collections::HashMap;
 use anyhow::Result;
 use async_trait::async_trait;
+use std::collections::HashMap;
 
 use crate::domain::{MaintenanceSignal, SignalProvider};
 

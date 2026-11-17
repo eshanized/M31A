@@ -6,12 +6,14 @@
 //! 2. Strict validation of autonomy tiers, categories, branch names, and path patterns.
 //! 3. Conservative safe defaults.
 
-use std::fs;
-use std::path::Path;
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::Path;
 
-use crate::domain::{AutonomyTier, MaintenanceCategory, MaintenancePolicy, MaintenanceRiskLevel, PullRequestPolicy};
+use crate::domain::{
+    AutonomyTier, MaintenanceCategory, MaintenancePolicy, MaintenanceRiskLevel, PullRequestPolicy,
+};
 
 /// Root schema for `.m31a/maintenance.toml`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -104,7 +106,10 @@ fn default_branches() -> Vec<String> {
 }
 
 fn default_excluded() -> Vec<String> {
-    vec![".git/**".to_string(), ".github/workflows/security.yml".to_string()]
+    vec![
+        ".git/**".to_string(),
+        ".github/workflows/security.yml".to_string(),
+    ]
 }
 
 fn default_risk_threshold() -> String {
@@ -201,7 +206,9 @@ impl MaintenanceConfigFile {
             || lower.contains("nvapi-")
             || lower.contains("secret = \"") && !lower.contains("_env")
         {
-            bail!("Security violation: Plaintext credentials detected in maintenance configuration. Use environment variable references (e.g. `github_token_env = 'GITHUB_TOKEN'`).");
+            bail!(
+                "Security violation: Plaintext credentials detected in maintenance configuration. Use environment variable references (e.g. `github_token_env = 'GITHUB_TOKEN'`)."
+            );
         }
 
         let cfg: Self = toml::from_str(toml_content)
@@ -209,7 +216,9 @@ impl MaintenanceConfigFile {
 
         // 2. Validate Autonomy Tier
         match cfg.autonomy_tier.as_str() {
-            "tier0_observe" | "tier1_prepare" | "tier2_guarded_remediation"
+            "tier0_observe"
+            | "tier1_prepare"
+            | "tier2_guarded_remediation"
             | "tier3_restricted_high_impact" => {}
             other => {
                 bail!(
@@ -328,7 +337,10 @@ labels = ["maint", "automated"]
 
         let policy = cfg.to_policy();
         assert_eq!(policy.autonomy_tier, AutonomyTier::Tier2GuardedRemediation);
-        assert_eq!(policy.risk_threshold_for_approval, MaintenanceRiskLevel::High);
+        assert_eq!(
+            policy.risk_threshold_for_approval,
+            MaintenanceRiskLevel::High
+        );
         assert_eq!(policy.max_concurrency_per_repo, 4);
     }
 

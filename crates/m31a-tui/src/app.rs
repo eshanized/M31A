@@ -1477,7 +1477,8 @@ impl App {
         }
 
         // Continuously synchronize presentation state machine with canonical TurnStateMachine
-        self.chat_widget.sync_with_canonical(&self.turn_state.state());
+        self.chat_widget
+            .sync_with_canonical(&self.turn_state.state());
 
         // Sync real-time stream metrics (velocity, TTFT)
         self.bottom_pane.stream_metrics =
@@ -4613,16 +4614,26 @@ impl App {
                 self.open_rollout_journal();
             }
             "/maintenance" | "/maint" => {
-                let m_store = m31a_maintenance::storage::MaintenanceStore::new(self.storage.connection());
-                let sub = parts.get(1).map(|s| s.to_lowercase()).unwrap_or_else(|| "status".to_string());
+                let m_store =
+                    m31a_maintenance::storage::MaintenanceStore::new(self.storage.connection());
+                let sub = parts
+                    .get(1)
+                    .map(|s| s.to_lowercase())
+                    .unwrap_or_else(|| "status".to_string());
                 match sub.as_str() {
                     "scan" => {
-                        let repo_id = self.cwd.file_name().and_then(|n| n.to_str()).unwrap_or("local_repo").to_string();
+                        let repo_id = self
+                            .cwd
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("local_repo")
+                            .to_string();
                         let cwd = self.cwd.clone();
                         let m_store_clone = m_store.clone();
                         let tx = self.event_tx.clone();
                         self.transcript.push(TranscriptItem::notice(
-                            "Starting autonomous repository maintenance scan in background...".to_string(),
+                            "Starting autonomous repository maintenance scan in background..."
+                                .to_string(),
                             NoticeLevel::Info,
                         ));
                         if let Ok(handle) = tokio::runtime::Handle::try_current() {
@@ -4666,7 +4677,11 @@ impl App {
                         }
                     }
                     "cases" => {
-                        let repo_id = self.cwd.file_name().and_then(|n| n.to_str()).unwrap_or("local_repo");
+                        let repo_id = self
+                            .cwd
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("local_repo");
                         match m_store.list_cases(Some(repo_id), None, 10) {
                             Ok(cases) => {
                                 if cases.is_empty() {
@@ -4675,7 +4690,9 @@ impl App {
                                         NoticeLevel::Info,
                                     ));
                                 } else {
-                                    let mut out = String::from("── Active Maintenance Cases ────────────────────────────────\n");
+                                    let mut out = String::from(
+                                        "── Active Maintenance Cases ────────────────────────────────\n",
+                                    );
                                     for c in cases {
                                         out.push_str(&format!(
                                             "• [{}] {:?} | {:?} | {}\n  Status: {:?} | Target: {} files\n",
@@ -4683,7 +4700,8 @@ impl App {
                                         ));
                                     }
                                     out.push_str("──────────────────────────────────────────────────────────");
-                                    self.transcript.push(TranscriptItem::notice(out, NoticeLevel::Info));
+                                    self.transcript
+                                        .push(TranscriptItem::notice(out, NoticeLevel::Info));
                                 }
                             }
                             Err(e) => {
@@ -4695,18 +4713,27 @@ impl App {
                         }
                     }
                     "schedules" => {
-                        let repo_id = self.cwd.file_name().and_then(|n| n.to_str()).unwrap_or("local_repo");
+                        let repo_id = self
+                            .cwd
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("local_repo");
                         match m_store.list_schedules(Some(repo_id)) {
                             Ok(scheds) => {
-                                let mut out = String::from("── Maintenance Recurring Schedules ────────────────────────\n");
+                                let mut out = String::from(
+                                    "── Maintenance Recurring Schedules ────────────────────────\n",
+                                );
                                 for s in scheds {
                                     out.push_str(&format!(
                                         "• {} ({}) | Active: {} | Failures: {}\n",
                                         s.id, s.job_kind, s.is_enabled, s.consecutive_failures
                                     ));
                                 }
-                                out.push_str("──────────────────────────────────────────────────────────");
-                                self.transcript.push(TranscriptItem::notice(out, NoticeLevel::Info));
+                                out.push_str(
+                                    "──────────────────────────────────────────────────────────",
+                                );
+                                self.transcript
+                                    .push(TranscriptItem::notice(out, NoticeLevel::Info));
                             }
                             Err(e) => {
                                 self.transcript.push(TranscriptItem::notice(
@@ -4767,12 +4794,47 @@ impl App {
                         }
                     }
                     _ => {
-                        let repo_id = self.cwd.file_name().and_then(|n| n.to_str()).unwrap_or("local_repo");
-                        let open_cases = m_store.list_cases(Some(repo_id), Some(m31a_maintenance::domain::CaseStatus::Open), 100).map(|c| c.len()).unwrap_or(0);
-                        let plan_cases = m_store.list_cases(Some(repo_id), Some(m31a_maintenance::domain::CaseStatus::Planning), 100).map(|c| c.len()).unwrap_or(0);
-                        let exec_cases = m_store.list_cases(Some(repo_id), Some(m31a_maintenance::domain::CaseStatus::Executing), 100).map(|c| c.len()).unwrap_or(0);
-                        let approval_cases = m_store.list_cases(Some(repo_id), Some(m31a_maintenance::domain::CaseStatus::AwaitingApproval), 100).map(|c| c.len()).unwrap_or(0);
-                        let sched_count = m_store.list_schedules(Some(repo_id)).map(|s| s.len()).unwrap_or(0);
+                        let repo_id = self
+                            .cwd
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("local_repo");
+                        let open_cases = m_store
+                            .list_cases(
+                                Some(repo_id),
+                                Some(m31a_maintenance::domain::CaseStatus::Open),
+                                100,
+                            )
+                            .map(|c| c.len())
+                            .unwrap_or(0);
+                        let plan_cases = m_store
+                            .list_cases(
+                                Some(repo_id),
+                                Some(m31a_maintenance::domain::CaseStatus::Planning),
+                                100,
+                            )
+                            .map(|c| c.len())
+                            .unwrap_or(0);
+                        let exec_cases = m_store
+                            .list_cases(
+                                Some(repo_id),
+                                Some(m31a_maintenance::domain::CaseStatus::Executing),
+                                100,
+                            )
+                            .map(|c| c.len())
+                            .unwrap_or(0);
+                        let approval_cases = m_store
+                            .list_cases(
+                                Some(repo_id),
+                                Some(m31a_maintenance::domain::CaseStatus::AwaitingApproval),
+                                100,
+                            )
+                            .map(|c| c.len())
+                            .unwrap_or(0);
+                        let sched_count = m_store
+                            .list_schedules(Some(repo_id))
+                            .map(|s| s.len())
+                            .unwrap_or(0);
 
                         let text = format!(
                             "── Autonomous Repository Maintenance Engine ─────────────────\n\
@@ -4790,9 +4852,15 @@ impl App {
                                /maintenance pause <id>  Pause recurring schedule\n\
                                /maintenance resume <id> Resume recurring schedule\n\
                              ─────────────────────────────────────────────────────────────",
-                            repo_id, open_cases, plan_cases, exec_cases, approval_cases, sched_count
+                            repo_id,
+                            open_cases,
+                            plan_cases,
+                            exec_cases,
+                            approval_cases,
+                            sched_count
                         );
-                        self.transcript.push(TranscriptItem::notice(text, NoticeLevel::Info));
+                        self.transcript
+                            .push(TranscriptItem::notice(text, NoticeLevel::Info));
                     }
                 }
             }
@@ -6569,7 +6637,10 @@ mod tests {
         // Toggle to Review mode
         app.toggle_collaboration_mode();
         assert_eq!(app.collaboration_mode, CollaborationMode::Review);
-        assert_eq!(app.bottom_pane.collaboration_mode, CollaborationMode::Review);
+        assert_eq!(
+            app.bottom_pane.collaboration_mode,
+            CollaborationMode::Review
+        );
 
         // Toggle back to Build (Default) mode
         app.toggle_collaboration_mode();

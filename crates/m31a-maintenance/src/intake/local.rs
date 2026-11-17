@@ -3,10 +3,10 @@
 //! Analyzes local workspace state using repository intelligence, AST semantics,
 //! dependency drift detection, and autonomous verification checks.
 
-use std::fs;
-use std::path::PathBuf;
 use anyhow::Result;
 use chrono::Utc;
+use std::fs;
+use std::path::PathBuf;
 
 use m31a_ast::architecture::ArchitecturalComplexityAnalyzer;
 use m31a_ast::semver::ManifestDependencyAuditor;
@@ -34,8 +34,11 @@ impl LocalRepositorySignalSource {
         let mut signals = Vec::new();
 
         // 1. Check compiler / build health
-        if let Ok(report) =
-            AutonomousVerifier::verify_check(&self.workspace_root, std::time::Duration::from_secs(45)).await
+        if let Ok(report) = AutonomousVerifier::verify_check(
+            &self.workspace_root,
+            std::time::Duration::from_secs(45),
+        )
+        .await
         {
             if !report.success && !report.diagnostics.is_empty() {
                 let diag_count = report.diagnostics.len();
@@ -68,7 +71,9 @@ impl LocalRepositorySignalSource {
                 if let Ok(dep_audit) = ManifestDependencyAuditor::audit_cargo_toml(&content) {
                     for issue in dep_audit.issues {
                         let severity = match issue.severity {
-                            m31a_ast::semver::DependencySeverity::Critical => SignalSeverity::Critical,
+                            m31a_ast::semver::DependencySeverity::Critical => {
+                                SignalSeverity::Critical
+                            }
                             m31a_ast::semver::DependencySeverity::Warning => SignalSeverity::Medium,
                             m31a_ast::semver::DependencySeverity::Info => SignalSeverity::Low,
                         };
@@ -134,8 +139,9 @@ impl LocalRepositorySignalSource {
                     let path = entry.path();
                     if path.is_file() && path.extension().and_then(|e| e.to_str()) == Some("rs") {
                         if let Ok(content) = fs::read_to_string(&path) {
-                            let smells =
-                                ArchitecturalComplexityAnalyzer::audit_source_complexity(&path, &content);
+                            let smells = ArchitecturalComplexityAnalyzer::audit_source_complexity(
+                                &path, &content,
+                            );
                             if !smells.is_empty() {
                                 let smell = &smells[0];
                                 let sig = MaintenanceSignal::new(

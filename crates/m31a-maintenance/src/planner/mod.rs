@@ -5,9 +5,9 @@
 
 pub mod strategies;
 
-use std::path::Path;
 use anyhow::{Result, anyhow};
 use chrono::Utc;
+use std::path::Path;
 use tracing::info;
 
 pub use strategies::{
@@ -16,8 +16,8 @@ pub use strategies::{
 };
 
 use crate::domain::{
-    AuditTrailEvent, CaseStatus, MaintenanceCase, MaintenancePlan,
-    MaintenancePolicy, PlanApprovalState,
+    AuditTrailEvent, CaseStatus, MaintenanceCase, MaintenancePlan, MaintenancePolicy,
+    PlanApprovalState,
 };
 use crate::storage::MaintenanceStore;
 
@@ -78,9 +78,12 @@ impl MaintenancePlanner {
         }
 
         // 2. Select strategy
-        let strategy = self
-            .find_strategy(&case)
-            .ok_or_else(|| anyhow!("No maintenance strategy available for category {:?}", case.category))?;
+        let strategy = self.find_strategy(&case).ok_or_else(|| {
+            anyhow!(
+                "No maintenance strategy available for category {:?}",
+                case.category
+            )
+        })?;
 
         // 3. Formulate plan
         let ctx = StrategyPlanContext {
@@ -141,10 +144,10 @@ impl MaintenancePlanner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::{MaintenanceCategory, SignalSeverity};
+    use m31a_storage::{BUILTIN_MIGRATIONS, MigrationEngine};
     use rusqlite::Connection;
     use std::sync::{Arc, Mutex};
-    use m31a_storage::{BUILTIN_MIGRATIONS, MigrationEngine};
-    use crate::domain::{MaintenanceCategory, SignalSeverity};
 
     fn setup_test_planner() -> MaintenancePlanner {
         let mut conn = Connection::open_in_memory().unwrap();
@@ -177,7 +180,10 @@ mod tests {
         assert!(!plan.verification_requirements.is_empty());
 
         let fetched_case = planner.store.get_case(&case.id).unwrap().unwrap();
-        assert_eq!(fetched_case.active_plan_id.as_deref(), Some(plan.id.as_str()));
+        assert_eq!(
+            fetched_case.active_plan_id.as_deref(),
+            Some(plan.id.as_str())
+        );
         assert_eq!(fetched_case.status, CaseStatus::PlanReady);
     }
 }

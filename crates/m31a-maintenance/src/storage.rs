@@ -3,17 +3,17 @@
 //! Provides transactional persistence, deterministic deduplication, atomic state transitions,
 //! schedule tracking, and immutable audit events across system restarts.
 
-use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
 use anyhow::Result;
 use chrono::Utc;
 use rusqlite::{Connection, params};
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 use crate::domain::{
     AuditTrailEvent, AutonomyTier, CaseApprovalState, CaseStatus, ExecutionLifecycleState,
-    MaintenanceCase, MaintenanceCategory, MaintenanceExecution, MaintenancePlan, MaintenancePriority,
-    MaintenanceRiskLevel, MaintenanceSchedule, MaintenanceSignal, PlanApprovalState,
-    SignalProvider, SignalSeverity, SignalTrustStatus,
+    MaintenanceCase, MaintenanceCategory, MaintenanceExecution, MaintenancePlan,
+    MaintenancePriority, MaintenanceRiskLevel, MaintenanceSchedule, MaintenanceSignal,
+    PlanApprovalState, SignalProvider, SignalSeverity, SignalTrustStatus,
 };
 
 /// Persistent SQLite maintenance storage manager.
@@ -122,7 +122,11 @@ impl MaintenanceStore {
     }
 
     /// Lists recent signals for a repository.
-    pub fn list_signals_for_repo(&self, repo_id: &str, limit: usize) -> Result<Vec<MaintenanceSignal>> {
+    pub fn list_signals_for_repo(
+        &self,
+        repo_id: &str,
+        limit: usize,
+    ) -> Result<Vec<MaintenanceSignal>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare_cached(
             r#"
@@ -135,7 +139,9 @@ impl MaintenanceStore {
             "#,
         )?;
 
-        let rows = stmt.query_map(params![repo_id, limit as i64], |row| Self::row_to_signal(row))?;
+        let rows = stmt.query_map(params![repo_id, limit as i64], |row| {
+            Self::row_to_signal(row)
+        })?;
         let mut list = Vec::new();
         for r in rows {
             list.push(r?);
@@ -172,7 +178,11 @@ impl MaintenanceStore {
     // ---------------------------------------------------------------------------------------------
 
     /// Creates and persists a new maintenance case, optionally linking an initial signal.
-    pub fn create_case(&self, case: &MaintenanceCase, initial_signal_id: Option<&str>) -> Result<()> {
+    pub fn create_case(
+        &self,
+        case: &MaintenanceCase,
+        initial_signal_id: Option<&str>,
+    ) -> Result<()> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction()?;
 
@@ -267,7 +277,11 @@ impl MaintenanceStore {
     }
 
     /// Finds open or active case by repo ID and deduplication key.
-    pub fn find_case_by_dedup_key(&self, repo_id: &str, dedup_key: &str) -> Result<Option<MaintenanceCase>> {
+    pub fn find_case_by_dedup_key(
+        &self,
+        repo_id: &str,
+        dedup_key: &str,
+    ) -> Result<Option<MaintenanceCase>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare_cached(
             r#"
@@ -387,7 +401,10 @@ impl MaintenanceStore {
             query.push_str(&format!(" AND status = ?{}", params.len()));
         }
         params.push(Box::new(limit as i64));
-        query.push_str(&format!(" ORDER BY updated_at_epoch_ms DESC LIMIT ?{}", params.len()));
+        query.push_str(&format!(
+            " ORDER BY updated_at_epoch_ms DESC LIMIT ?{}",
+            params.len()
+        ));
 
         let mut stmt = conn.prepare(&query)?;
         let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|b| b.as_ref()).collect();
@@ -516,7 +533,11 @@ impl MaintenanceStore {
     }
 
     /// Updates approval status on a plan.
-    pub fn update_plan_approval(&self, plan_id: &str, approval_state: PlanApprovalState) -> Result<()> {
+    pub fn update_plan_approval(
+        &self,
+        plan_id: &str,
+        approval_state: PlanApprovalState,
+    ) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         let now = Utc::now().timestamp_millis();
         conn.execute(
@@ -805,7 +826,8 @@ impl MaintenanceStore {
         };
 
         let cat_str: String = row.get(3)?;
-        let category = MaintenanceCategory::from_str(&cat_str).unwrap_or(MaintenanceCategory::BrokenCi);
+        let category =
+            MaintenanceCategory::from_str(&cat_str).unwrap_or(MaintenanceCategory::BrokenCi);
 
         let sev_str: String = row.get(8)?;
         let severity = SignalSeverity::from_str(&sev_str).unwrap_or(SignalSeverity::Medium);
@@ -843,13 +865,15 @@ impl MaintenanceStore {
 
     fn row_to_case(row: &rusqlite::Row) -> rusqlite::Result<MaintenanceCase> {
         let cat_str: String = row.get(2)?;
-        let category = MaintenanceCategory::from_str(&cat_str).unwrap_or(MaintenanceCategory::BrokenCi);
+        let category =
+            MaintenanceCategory::from_str(&cat_str).unwrap_or(MaintenanceCategory::BrokenCi);
 
         let status_str: String = row.get(6)?;
         let status = CaseStatus::from_str(&status_str).unwrap_or(CaseStatus::Open);
 
         let prio_str: String = row.get(7)?;
-        let priority = MaintenancePriority::from_str(&prio_str).unwrap_or(MaintenancePriority::Medium);
+        let priority =
+            MaintenancePriority::from_str(&prio_str).unwrap_or(MaintenancePriority::Medium);
 
         let sev_str: String = row.get(8)?;
         let severity = SignalSeverity::from_str(&sev_str).unwrap_or(SignalSeverity::Medium);
@@ -877,7 +901,8 @@ impl MaintenanceStore {
         let remediation_history = serde_json::from_str(&history_str).unwrap_or_default();
 
         let app_str: String = row.get(19)?;
-        let human_approval_state = CaseApprovalState::from_str(&app_str).unwrap_or(CaseApprovalState::None);
+        let human_approval_state =
+            CaseApprovalState::from_str(&app_str).unwrap_or(CaseApprovalState::None);
 
         Ok(MaintenanceCase {
             id: row.get(0)?,
@@ -909,7 +934,8 @@ impl MaintenanceStore {
 
     fn row_to_plan(row: &rusqlite::Row) -> rusqlite::Result<MaintenancePlan> {
         let cat_str: String = row.get(4)?;
-        let category = MaintenanceCategory::from_str(&cat_str).unwrap_or(MaintenanceCategory::BrokenCi);
+        let category =
+            MaintenanceCategory::from_str(&cat_str).unwrap_or(MaintenanceCategory::BrokenCi);
 
         let hyp_str: String = row.get(7)?;
         let hypotheses = serde_json::from_str(&hyp_str).unwrap_or_default();
@@ -928,7 +954,8 @@ impl MaintenanceStore {
         let verification_requirements = serde_json::from_str(&reqs_str).unwrap_or_default();
 
         let risk_str: String = row.get(12)?;
-        let estimated_risk = MaintenanceRiskLevel::from_str(&risk_str).unwrap_or(MaintenanceRiskLevel::Low);
+        let estimated_risk =
+            MaintenanceRiskLevel::from_str(&risk_str).unwrap_or(MaintenanceRiskLevel::Low);
 
         let tier_raw: i64 = row.get(13)?;
         let required_autonomy_tier = AutonomyTier::from_u8(tier_raw as u8);
@@ -937,7 +964,8 @@ impl MaintenanceStore {
         let requires_approval = req_app_raw != 0;
 
         let app_str: String = row.get(15)?;
-        let approval_state = PlanApprovalState::from_str(&app_str).unwrap_or(PlanApprovalState::Pending);
+        let approval_state =
+            PlanApprovalState::from_str(&app_str).unwrap_or(PlanApprovalState::Pending);
 
         Ok(MaintenancePlan {
             id: row.get(0)?,
@@ -965,8 +993,8 @@ impl MaintenanceStore {
 
     fn row_to_execution(row: &rusqlite::Row) -> rusqlite::Result<MaintenanceExecution> {
         let state_str: String = row.get(7)?;
-        let execution_state =
-            ExecutionLifecycleState::from_str(&state_str).unwrap_or(ExecutionLifecycleState::Created);
+        let execution_state = ExecutionLifecycleState::from_str(&state_str)
+            .unwrap_or(ExecutionLifecycleState::Created);
 
         let dur_raw: i64 = row.get(13)?;
         let tok_raw: i64 = row.get(14)?;

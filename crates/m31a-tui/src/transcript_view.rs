@@ -1002,7 +1002,9 @@ impl TranscriptVirtualizer {
                         Span::styled("    intent: ", Style::default().fg(Color::Cyan)),
                         Span::styled(
                             human_intent,
-                            Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+                            Style::default()
+                                .fg(Color::White)
+                                .add_modifier(Modifier::BOLD),
                         ),
                     ]));
 

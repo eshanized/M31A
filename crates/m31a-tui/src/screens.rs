@@ -126,10 +126,7 @@ pub fn render_navbar(f: &mut Frame, app: &App, area: Rect, t: &Theme) {
             if s == active {
                 continue;
             }
-            spans.push(Span::styled(
-                format!("{} ", s.shortcut()),
-                t.style_muted(),
-            ));
+            spans.push(Span::styled(format!("{} ", s.shortcut()), t.style_muted()));
         }
         let p = Paragraph::new(Line::from(spans))
             .style(t.style_surface0())
@@ -1307,7 +1304,15 @@ fn render_tools_integrations_screen(f: &mut Frame, app: &App, area: Rect, t: &Th
 // -------------------------------------------------------------------------------------------------
 fn render_settings_screen(f: &mut Frame, app: &App, area: Rect, t: &Theme) {
     let settings = [
-        ("Theme", app.config.tui.theme.as_deref().unwrap_or("everblush").to_string()),
+        (
+            "Theme",
+            app.config
+                .tui
+                .theme
+                .as_deref()
+                .unwrap_or("everblush")
+                .to_string(),
+        ),
         (
             "Vim Mode",
             if app.config.tui.vim_mode_default {

@@ -14,10 +14,10 @@
 //! - Scenario K: Vibe Loop integration (verified execution guard & escalation)
 //! - Scenario L: Security advisory intake (provenance preserved, sensitive details protected)
 
-use std::path::Path;
-use std::sync::{Arc, Mutex};
 use chrono::Utc;
 use rusqlite::Connection;
+use std::path::Path;
+use std::sync::{Arc, Mutex};
 use tempfile::tempdir;
 
 use m31a_agent_engine::vibe_loop::VibeEvent;
@@ -32,7 +32,7 @@ use m31a_maintenance::planner::strategies::{
 use m31a_maintenance::storage::MaintenanceStore;
 use m31a_maintenance::triage::TriageEngine;
 use m31a_maintenance::workflow::MaintenanceWorkflowAdapter;
-use m31a_storage::{MigrationEngine, BUILTIN_MIGRATIONS};
+use m31a_storage::{BUILTIN_MIGRATIONS, MigrationEngine};
 
 fn setup_test_store() -> (MaintenanceStore, Arc<Mutex<Connection>>) {
     let mut conn = Connection::open_in_memory().unwrap();
@@ -127,7 +127,10 @@ async fn test_scenario_a_broken_ci_remediation() {
     let triage = triage_engine.evaluate_case(&case).unwrap();
     assert_eq!(triage.severity, SignalSeverity::High);
     assert_eq!(triage.priority, MaintenancePriority::High);
-    assert_eq!(triage.recommended_autonomy_tier, AutonomyTier::Tier2GuardedRemediation);
+    assert_eq!(
+        triage.recommended_autonomy_tier,
+        AutonomyTier::Tier2GuardedRemediation
+    );
 
     // 3. Plan Generation with BrokenCiStrategy
     case.transition_to(CaseStatus::Investigating).unwrap();
@@ -222,7 +225,10 @@ async fn test_scenario_b_safe_patch_dependency_update() {
     let plan = strat.create_plan(&case, &ctx).unwrap();
 
     assert_eq!(plan.estimated_risk, MaintenanceRiskLevel::Low);
-    assert_eq!(plan.required_autonomy_tier, AutonomyTier::Tier2GuardedRemediation);
+    assert_eq!(
+        plan.required_autonomy_tier,
+        AutonomyTier::Tier2GuardedRemediation
+    );
     assert!(!plan.requires_approval);
 }
 
@@ -270,7 +276,10 @@ async fn test_scenario_c_major_dependency_migration_requires_approval() {
     let plan = strat.create_plan(&case, &ctx).unwrap();
 
     assert_eq!(plan.estimated_risk, MaintenanceRiskLevel::High);
-    assert_eq!(plan.required_autonomy_tier, AutonomyTier::Tier3RestrictedHighImpact);
+    assert_eq!(
+        plan.required_autonomy_tier,
+        AutonomyTier::Tier3RestrictedHighImpact
+    );
     assert!(plan.requires_approval);
 }
 
@@ -464,7 +473,10 @@ async fn test_scenario_g_cancellation_handling() {
     let reloaded_case = store.get_case(&case.id).unwrap().unwrap();
     assert_eq!(reloaded_case.status, CaseStatus::Cancelled);
     let reloaded_exec = store.get_execution(&exec.id).unwrap().unwrap();
-    assert_eq!(reloaded_exec.execution_state, ExecutionLifecycleState::Cancelled);
+    assert_eq!(
+        reloaded_exec.execution_state,
+        ExecutionLifecycleState::Cancelled
+    );
 }
 
 #[tokio::test]
@@ -511,7 +523,10 @@ async fn test_scenario_h_ci_infrastructure_outage_does_not_modify_code() {
     // Must be classified as infra outage, zero proposed file modifications
     assert_eq!(plan.selected_strategy, "infra_cooldown_retry");
     assert_eq!(plan.required_autonomy_tier, AutonomyTier::Tier0Observe);
-    assert!(plan.expected_files.is_empty(), "Infra outages must never modify code!");
+    assert!(
+        plan.expected_files.is_empty(),
+        "Infra outages must never modify code!"
+    );
 }
 
 #[tokio::test]
@@ -602,7 +617,11 @@ async fn test_scenario_k_vibe_loop_integration_escalation() {
     };
 
     match unresolved_event {
-        VibeEvent::MaintenanceSignalAvailable { category, description, diagnostics } => {
+        VibeEvent::MaintenanceSignalAvailable {
+            category,
+            description,
+            diagnostics,
+        } => {
             assert_eq!(category, "broken_ci");
             let sig = MaintenanceSignal::new(
                 "repo_vibe",
@@ -670,7 +689,10 @@ async fn test_scenario_l_security_advisory_provenance_and_protection() {
     let plan = strat.create_plan(&case, &ctx).unwrap();
 
     // Autonomy tier must be restricted, sensitive details kept private
-    assert_eq!(plan.required_autonomy_tier, AutonomyTier::Tier3RestrictedHighImpact);
+    assert_eq!(
+        plan.required_autonomy_tier,
+        AutonomyTier::Tier3RestrictedHighImpact
+    );
     assert!(plan.requires_approval);
 
     let pr_md = DeliveryAdapter::format_pull_request_markdown(
