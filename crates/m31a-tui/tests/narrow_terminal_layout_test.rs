@@ -117,7 +117,7 @@ fn test_navbar_rendering_across_narrow_and_wide_viewports() {
             app.switch_screen(screen);
             let res = terminal.draw(|f| {
                 let area = ratatui::layout::Rect::new(0, 0, w, 1);
-                m31a_tui::screens::render_navbar(f, &app, area, &m31a_tui::theme::theme());
+                m31a_tui::screens::render_navbar(f, &app, area, m31a_tui::theme::theme());
             });
             assert!(
                 res.is_ok(),

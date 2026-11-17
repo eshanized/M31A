@@ -2580,12 +2580,11 @@ impl AppServer {
 
                 let maint_store = MaintenanceStore::new(self.storage.connection());
                 let mut plan_opt = maint_store.get_plan(id)?;
-                if plan_opt.is_none() {
-                    if let Some(case) = maint_store.get_case(id)? {
-                        if let Some(ref pid) = case.active_plan_id {
-                            plan_opt = maint_store.get_plan(pid)?;
-                        }
-                    }
+                if plan_opt.is_none()
+                    && let Some(case) = maint_store.get_case(id)?
+                    && let Some(ref pid) = case.active_plan_id
+                {
+                    plan_opt = maint_store.get_plan(pid)?;
                 }
 
                 let mut plan =

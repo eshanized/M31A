@@ -172,6 +172,7 @@ impl MaintenanceSignal {
         format!("{:x}", hasher.finalize())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         repo_id: impl Into<String>,
         source_provider: SignalProvider,
@@ -721,6 +722,7 @@ impl MaintenancePlan {
         format!("{:x}", hasher.finalize())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         case_id: impl Into<String>,
         repo_id: impl Into<String>,

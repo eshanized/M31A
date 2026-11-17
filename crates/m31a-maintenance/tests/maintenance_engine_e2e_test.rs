@@ -121,8 +121,10 @@ async fn test_scenario_a_broken_ci_remediation() {
     );
     store.create_case(&case, Some(&sig.id)).unwrap();
 
-    let mut policy = MaintenancePolicy::default();
-    policy.autonomy_tier = AutonomyTier::Tier2GuardedRemediation;
+    let policy = MaintenancePolicy {
+        autonomy_tier: AutonomyTier::Tier2GuardedRemediation,
+        ..Default::default()
+    };
     let triage_engine = TriageEngine::new(store.clone(), policy.clone());
     let triage = triage_engine.evaluate_case(&case).unwrap();
     assert_eq!(triage.severity, SignalSeverity::High);

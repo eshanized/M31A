@@ -165,7 +165,7 @@ impl MaintenanceStore {
             "#,
         )?;
 
-        let rows = stmt.query_map(params![case_id], |row| Self::row_to_signal(row))?;
+        let rows = stmt.query_map(params![case_id], Self::row_to_signal)?;
         let mut list = Vec::new();
         for r in rows {
             list.push(r?);
@@ -408,7 +408,7 @@ impl MaintenanceStore {
 
         let mut stmt = conn.prepare(&query)?;
         let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|b| b.as_ref()).collect();
-        let rows = stmt.query_map(param_refs.as_slice(), |row| Self::row_to_case(row))?;
+        let rows = stmt.query_map(param_refs.as_slice(), Self::row_to_case)?;
 
         let mut list = Vec::new();
         for r in rows {
@@ -625,7 +625,7 @@ impl MaintenanceStore {
             "#,
         )?;
 
-        let rows = stmt.query_map(params![case_id], |row| Self::row_to_execution(row))?;
+        let rows = stmt.query_map(params![case_id], Self::row_to_execution)?;
         let mut list = Vec::new();
         for r in rows {
             list.push(r?);
@@ -707,7 +707,7 @@ impl MaintenanceStore {
 
         let mut stmt = conn.prepare(&query)?;
         let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|b| b.as_ref()).collect();
-        let rows = stmt.query_map(param_refs.as_slice(), |row| Self::row_to_schedule(row))?;
+        let rows = stmt.query_map(param_refs.as_slice(), Self::row_to_schedule)?;
 
         let mut list = Vec::new();
         for r in rows {

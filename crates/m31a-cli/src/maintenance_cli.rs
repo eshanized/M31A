@@ -153,7 +153,7 @@ pub async fn run_maintenance_command(
             } else {
                 println!(
                     "{}",
-                    format!("🛡️  M31A Autonomous Repository Maintenance — Status")
+                    "🛡️  M31A Autonomous Repository Maintenance — Status"
                         .cyan()
                         .bold()
                 );
@@ -299,8 +299,8 @@ pub async fn run_maintenance_command(
                     .bold()
                 );
                 println!(
-                    "{:<14} {:<10} {:<16} {:<24} {}",
-                    "ID", "PRIORITY", "STATUS", "CATEGORY", "TITLE"
+                    "{:<14} {:<10} {:<16} {:<24} TITLE",
+                    "ID", "PRIORITY", "STATUS", "CATEGORY"
                 );
                 println!("{}", "-".repeat(80).dimmed());
                 for c in cases {
@@ -435,7 +435,7 @@ pub async fn run_maintenance_command(
             } else {
                 println!(
                     "{}",
-                    format!("Maintenance Execution Started!").green().bold()
+                    "Maintenance Execution Started!".green().bold()
                 );
                 println!("  Execution ID: {}", exec.id);
                 println!("  Workflow ID:  {}", exec.workflow_id.cyan().bold());

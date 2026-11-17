@@ -1478,7 +1478,7 @@ impl App {
 
         // Continuously synchronize presentation state machine with canonical TurnStateMachine
         self.chat_widget
-            .sync_with_canonical(&self.turn_state.state());
+            .sync_with_canonical(self.turn_state.state());
 
         // Sync real-time stream metrics (velocity, TTFT)
         self.bottom_pane.stream_metrics =
@@ -4645,14 +4645,12 @@ impl App {
                                         let manager = m31a_maintenance::intake::SignalIntakeManager::new(m_store_clone);
                                         let mut created = 0;
                                         for sig in &signals {
-                                            if let Ok(outcome) = manager.ingest_signal(sig) {
-                                                match outcome {
-                                                    m31a_maintenance::intake::IngestionOutcome::CaseCreated { .. }
-                                                    | m31a_maintenance::intake::IngestionOutcome::CaseUpdated { .. } => {
-                                                        created += 1;
-                                                    }
-                                                    _ => {}
-                                                }
+                                            if let Ok(
+                                                m31a_maintenance::intake::IngestionOutcome::CaseCreated { .. }
+                                                | m31a_maintenance::intake::IngestionOutcome::CaseUpdated { .. },
+                                            ) = manager.ingest_signal(sig)
+                                            {
+                                                created += 1;
                                             }
                                         }
                                         let _ = tx.send(TuiEvent::Notice(
