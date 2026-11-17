@@ -258,6 +258,28 @@ pub fn get_method_metadata(method: &str) -> Option<MethodMetadata> {
             })
         }
 
+        // Maintenance operations
+        "maintenance/status"
+        | "maintenance/cases/list"
+        | "maintenance/cases/get"
+        | "maintenance/schedules/list" => Some(MethodMetadata {
+            requires_target_resource: false,
+            mutates_workspace: false,
+            external_side_effects: false,
+            is_public: false,
+        }),
+        "maintenance/scan"
+        | "maintenance/triage"
+        | "maintenance/plan"
+        | "maintenance/run"
+        | "maintenance/approve"
+        | "maintenance/cancel" => Some(MethodMetadata {
+            requires_target_resource: false,
+            mutates_workspace: true,
+            external_side_effects: true,
+            is_public: false,
+        }),
+
         _ => None,
     }
 }
