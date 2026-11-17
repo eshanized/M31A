@@ -757,6 +757,141 @@ pub const BUILTIN_MIGRATIONS: &[Migration] = &[
         CREATE INDEX IF NOT EXISTS idx_verif_records_manifest ON verification_records(manifest_hash);
         "#,
     ),
+    Migration::new(
+        21,
+        "autonomous_repository_maintenance",
+        r#"
+        CREATE TABLE IF NOT EXISTS maintenance_signals (
+            id TEXT PRIMARY KEY,
+            repo_id TEXT NOT NULL,
+            source_provider TEXT NOT NULL,
+            category TEXT NOT NULL,
+            provider_event_id TEXT,
+            external_url TEXT,
+            event_timestamp_ms INTEGER NOT NULL,
+            observed_revision TEXT,
+            severity TEXT NOT NULL,
+            dedup_fingerprint TEXT NOT NULL,
+            trust_status TEXT NOT NULL,
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            evidence_refs_json TEXT NOT NULL DEFAULT '[]',
+            ingested_at_epoch_ms INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS maintenance_cases (
+            id TEXT PRIMARY KEY,
+            repo_id TEXT NOT NULL,
+            category TEXT NOT NULL,
+            title TEXT NOT NULL,
+            problem_statement TEXT NOT NULL,
+            dedup_key TEXT NOT NULL,
+            status TEXT NOT NULL,
+            priority TEXT NOT NULL,
+            severity TEXT NOT NULL,
+            confidence_score REAL NOT NULL,
+            affected_packages_json TEXT NOT NULL DEFAULT '[]',
+            affected_files_json TEXT NOT NULL DEFAULT '[]',
+            affected_symbols_json TEXT NOT NULL DEFAULT '[]',
+            evidence_refs_json TEXT NOT NULL DEFAULT '[]',
+            related_issues_json TEXT NOT NULL DEFAULT '[]',
+            related_prs_json TEXT NOT NULL DEFAULT '[]',
+            workflow_id TEXT REFERENCES workflows(id) ON DELETE SET NULL,
+            active_plan_id TEXT,
+            remediation_history_json TEXT NOT NULL DEFAULT '[]',
+            human_approval_state TEXT NOT NULL DEFAULT 'none',
+            created_at_epoch_ms INTEGER NOT NULL,
+            updated_at_epoch_ms INTEGER NOT NULL,
+            last_observed_at_epoch_ms INTEGER NOT NULL,
+            resolved_at_epoch_ms INTEGER
+        );
+
+        CREATE TABLE IF NOT EXISTS maintenance_case_signals (
+            case_id TEXT NOT NULL REFERENCES maintenance_cases(id) ON DELETE CASCADE,
+            signal_id TEXT NOT NULL REFERENCES maintenance_signals(id) ON DELETE CASCADE,
+            associated_at_epoch_ms INTEGER NOT NULL,
+            PRIMARY KEY (case_id, signal_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS maintenance_plans (
+            id TEXT PRIMARY KEY,
+            case_id TEXT NOT NULL REFERENCES maintenance_cases(id) ON DELETE CASCADE,
+            repo_id TEXT NOT NULL,
+            baseline_sha TEXT NOT NULL,
+            category TEXT NOT NULL,
+            problem_classification TEXT NOT NULL,
+            selected_strategy TEXT NOT NULL,
+            hypotheses_json TEXT NOT NULL DEFAULT '[]',
+            expected_files_json TEXT NOT NULL DEFAULT '[]',
+            expected_packages_json TEXT NOT NULL DEFAULT '[]',
+            relevant_tests_json TEXT NOT NULL DEFAULT '[]',
+            verification_requirements_json TEXT NOT NULL DEFAULT '[]',
+            estimated_risk TEXT NOT NULL,
+            required_autonomy_tier INTEGER NOT NULL,
+            requires_approval INTEGER NOT NULL DEFAULT 0,
+            approval_state TEXT NOT NULL DEFAULT 'pending',
+            workflow_id TEXT REFERENCES workflows(id) ON DELETE SET NULL,
+            plan_hash TEXT NOT NULL,
+            created_at_epoch_ms INTEGER NOT NULL,
+            updated_at_epoch_ms INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS maintenance_executions (
+            id TEXT PRIMARY KEY,
+            case_id TEXT NOT NULL REFERENCES maintenance_cases(id) ON DELETE CASCADE,
+            workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+            plan_id TEXT NOT NULL REFERENCES maintenance_plans(id) ON DELETE CASCADE,
+            manifest_hash TEXT,
+            attempt_id INTEGER NOT NULL DEFAULT 1,
+            worker_id TEXT NOT NULL,
+            execution_state TEXT NOT NULL,
+            verification_report_hash TEXT,
+            promotion_state TEXT NOT NULL DEFAULT 'none',
+            pr_number INTEGER,
+            pr_url TEXT,
+            failure_classification TEXT,
+            duration_ms INTEGER NOT NULL DEFAULT 0,
+            tokens_used INTEGER NOT NULL DEFAULT 0,
+            created_at_epoch_ms INTEGER NOT NULL,
+            completed_at_epoch_ms INTEGER
+        );
+
+        CREATE TABLE IF NOT EXISTS maintenance_schedules (
+            id TEXT PRIMARY KEY,
+            repo_id TEXT NOT NULL,
+            job_kind TEXT NOT NULL,
+            cron_or_interval_secs INTEGER NOT NULL,
+            is_enabled INTEGER NOT NULL DEFAULT 1,
+            last_run_epoch_ms INTEGER,
+            next_run_epoch_ms INTEGER NOT NULL,
+            consecutive_failures INTEGER NOT NULL DEFAULT 0,
+            policy_override_json TEXT,
+            created_at_epoch_ms INTEGER NOT NULL,
+            updated_at_epoch_ms INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS maintenance_audit_trail (
+            id TEXT PRIMARY KEY,
+            case_id TEXT REFERENCES maintenance_cases(id) ON DELETE SET NULL,
+            repo_id TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            actor TEXT NOT NULL,
+            policy_version TEXT NOT NULL,
+            details_json TEXT NOT NULL DEFAULT '{}',
+            timestamp_epoch_ms INTEGER NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_maint_signals_fingerprint ON maintenance_signals(dedup_fingerprint);
+        CREATE INDEX IF NOT EXISTS idx_maint_signals_repo ON maintenance_signals(repo_id, event_timestamp_ms DESC);
+        CREATE INDEX IF NOT EXISTS idx_maint_cases_repo ON maintenance_cases(repo_id, status);
+        CREATE INDEX IF NOT EXISTS idx_maint_cases_dedup ON maintenance_cases(repo_id, dedup_key);
+        CREATE INDEX IF NOT EXISTS idx_maint_cases_workflow ON maintenance_cases(workflow_id);
+        CREATE INDEX IF NOT EXISTS idx_maint_plans_case ON maintenance_plans(case_id);
+        CREATE INDEX IF NOT EXISTS idx_maint_exec_case ON maintenance_executions(case_id);
+        CREATE INDEX IF NOT EXISTS idx_maint_exec_wf ON maintenance_executions(workflow_id);
+        CREATE INDEX IF NOT EXISTS idx_maint_sched_repo ON maintenance_schedules(repo_id, is_enabled);
+        CREATE INDEX IF NOT EXISTS idx_maint_audit_case ON maintenance_audit_trail(case_id, timestamp_epoch_ms ASC);
+        "#,
+    ),
 ];
 
 /// Migration engine responsible for running and validating SQLite migrations.
@@ -930,5 +1065,12 @@ mod tests {
         assert!(tables.contains(&"pre_integration_snapshots".to_string()));
         assert!(tables.contains(&"external_effect_intents".to_string()));
         assert!(tables.contains(&"verification_records".to_string()));
+        assert!(tables.contains(&"maintenance_signals".to_string()));
+        assert!(tables.contains(&"maintenance_cases".to_string()));
+        assert!(tables.contains(&"maintenance_case_signals".to_string()));
+        assert!(tables.contains(&"maintenance_plans".to_string()));
+        assert!(tables.contains(&"maintenance_executions".to_string()));
+        assert!(tables.contains(&"maintenance_schedules".to_string()));
+        assert!(tables.contains(&"maintenance_audit_trail".to_string()));
     }
 }
