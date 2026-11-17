@@ -82,11 +82,7 @@ pub fn human_readable_tool_intent(name: &str, arguments: &str) -> String {
                 } else if trimmed.starts_with("git status") {
                     "Checking git status".to_string()
                 } else {
-                    let short_cmd = if trimmed.len() > 32 {
-                        format!("{}...", &trimmed[..32])
-                    } else {
-                        trimmed.to_string()
-                    };
+                    let short_cmd = crate::ansi_escape::truncate_with_ellipsis(trimmed, 35);
                     format!("Running: {short_cmd}")
                 }
             } else {
@@ -1008,11 +1004,7 @@ impl TranscriptVirtualizer {
                         ),
                     ]));
 
-                    let args_preview = if arguments.len() > max_w {
-                        format!("{}...", &arguments[..max_w])
-                    } else {
-                        arguments.clone()
-                    };
+                    let args_preview = crate::ansi_escape::truncate_with_ellipsis(arguments, max_w);
                     lines.push(Line::from(vec![
                         Span::styled("    args:   ", Style::default().fg(Color::DarkGray)),
                         Span::styled(args_preview, Style::default().fg(Color::White)),

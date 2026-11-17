@@ -51,9 +51,53 @@ pub fn visual_len(s: &str) -> usize {
     strip_ansi(s).chars().count()
 }
 
+/// Safely slices a string slice up to at most `max_chars` unicode scalar values,
+/// guaranteed never to panic on multibyte UTF-8 byte boundaries.
+pub fn safe_truncate_str(s: &str, max_chars: usize) -> &str {
+    match s.char_indices().nth(max_chars) {
+        Some((byte_offset, _)) => &s[..byte_offset],
+        None => s,
+    }
+}
+
+/// Truncates a string to at most `max_chars` unicode scalar values, appending `...`
+/// when truncated, without panicking on multibyte UTF-8 byte boundaries.
+pub fn truncate_with_ellipsis(s: &str, max_chars: usize) -> String {
+    let char_count = s.chars().count();
+    if char_count > max_chars {
+        let prefix = safe_truncate_str(s, max_chars.saturating_sub(3));
+        format!("{prefix}...")
+    } else {
+        s.to_string()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_safe_truncate_and_ellipsis_unicode() {
+        // ASCII
+        assert_eq!(safe_truncate_str("hello world", 5), "hello");
+        assert_eq!(truncate_with_ellipsis("hello world", 8), "hello...");
+        assert_eq!(truncate_with_ellipsis("short", 10), "short");
+
+        // Cyrillic (2 bytes per character)
+        let cyrillic = "Привет мир";
+        assert_eq!(safe_truncate_str(cyrillic, 6), "Привет");
+        assert_eq!(truncate_with_ellipsis(cyrillic, 6), "При...");
+
+        // CJK (3 bytes per character)
+        let cjk = "你好世界，欢迎使用";
+        assert_eq!(safe_truncate_str(cjk, 4), "你好世界");
+        assert_eq!(truncate_with_ellipsis(cjk, 5), "你好...");
+
+        // Emoji (4 bytes per scalar)
+        let emoji = "🦀🚀✨🎉🔥";
+        assert_eq!(safe_truncate_str(emoji, 2), "🦀🚀");
+        assert_eq!(truncate_with_ellipsis(emoji, 4), "🦀...");
+    }
 
     #[test]
     fn test_expand_tabs() {

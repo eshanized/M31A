@@ -689,7 +689,10 @@ fn handle_left_click_down(app: &mut App, col: u16, row: u16, screen_area: Rect) 
                             new_reg.set_enabled(*key, *enabled);
                             app.features_registry = Arc::new(new_reg);
                         }
-                        let _ = app.config.save();
+                        if let Err(e) = app.config.save() {
+                            app.provider_status_message =
+                                Some(format!("Failed to save config: {e}"));
+                        }
                     }
                 }
                 app.push_modal(ModalState::ExperimentalFeatures {

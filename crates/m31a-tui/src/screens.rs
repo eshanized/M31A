@@ -110,23 +110,20 @@ pub fn render_navbar(f: &mut Frame, app: &App, area: Rect, t: &Theme) {
     }
 
     if area.width < 75 {
-        // Ultra-compact / narrow viewport (< 75 cols): show active screen pill + screen shortcuts
+        // Ultra-compact / narrow viewport (< 75 cols): show active screen pill + navigation hint
         let active = app.current_screen;
         let mut spans = Vec::new();
         spans.push(Span::styled(" ", t.style_muted()));
         spans.push(Span::styled(
-            format!(" [{}: {}] ", active.shortcut(), active.compact_title()),
+            format!(" [Alt+{}: {}] ", active.shortcut(), active.compact_title()),
             Style::default()
                 .fg(t.color(ColorRole::Surface0))
                 .bg(t.color(ColorRole::Accent))
                 .add_modifier(Modifier::BOLD),
         ));
         spans.push(Span::styled(" ", t.style_muted()));
-        for s in Screen::ALL {
-            if s == active {
-                continue;
-            }
-            spans.push(Span::styled(format!("{} ", s.shortcut()), t.style_muted()));
+        if area.width >= 55 {
+            spans.push(Span::styled("(Alt+1..0 / Tab)", t.style_muted()));
         }
         let p = Paragraph::new(Line::from(spans))
             .style(t.style_surface0())
@@ -177,7 +174,13 @@ pub fn render_navbar(f: &mut Frame, app: &App, area: Rect, t: &Theme) {
                 .add_modifier(Modifier::BOLD)
         };
 
-        spans.push(Span::styled(format!(" {} ", num), num_style));
+        let shortcut_prefix = if !is_compact && i == 0 {
+            format!(" Alt+{} ", num)
+        } else {
+            format!(" {} ", num)
+        };
+
+        spans.push(Span::styled(shortcut_prefix, num_style));
         spans.push(Span::styled(format!("{} ", title), tab_style));
 
         if i + 1 < Screen::ALL.len() {
@@ -1305,7 +1308,8 @@ fn render_tools_integrations_screen(f: &mut Frame, app: &App, area: Rect, t: &Th
 fn render_settings_screen(f: &mut Frame, app: &App, area: Rect, t: &Theme) {
     let settings = [
         (
-            "Theme",
+            "Appearance",
+            "Theme Palette",
             app.config
                 .tui
                 .theme
@@ -1314,7 +1318,8 @@ fn render_settings_screen(f: &mut Frame, app: &App, area: Rect, t: &Theme) {
                 .to_string(),
         ),
         (
-            "Vim Mode",
+            "Editor & Input",
+            "Vim Keybindings",
             if app.config.tui.vim_mode_default {
                 "Enabled".to_string()
             } else {
@@ -1322,6 +1327,7 @@ fn render_settings_screen(f: &mut Frame, app: &App, area: Rect, t: &Theme) {
             },
         ),
         (
+            "Editor & Input",
             "Mouse Navigation",
             if app.config.tui.mouse_enabled {
                 "Enabled".to_string()
@@ -1330,6 +1336,7 @@ fn render_settings_screen(f: &mut Frame, app: &App, area: Rect, t: &Theme) {
             },
         ),
         (
+            "Appearance",
             "UI Animations & Spinners",
             if app.config.tui.animations {
                 "Enabled".to_string()
@@ -1338,6 +1345,7 @@ fn render_settings_screen(f: &mut Frame, app: &App, area: Rect, t: &Theme) {
             },
         ),
         (
+            "Viewport",
             "Auto-Scroll Transcript",
             if app.auto_scroll {
                 "Enabled".to_string()
@@ -1345,8 +1353,13 @@ fn render_settings_screen(f: &mut Frame, app: &App, area: Rect, t: &Theme) {
                 "Disabled".to_string()
             },
         ),
-        ("Approval Policy", format!("{:?}", app.config.approval)),
         (
+            "Security & Policy",
+            "Execution Approval Policy",
+            format!("{:?}", app.config.approval),
+        ),
+        (
+            "AI Reasoning",
             "Reasoning Effort",
             app.config
                 .reasoning_effort
@@ -1354,12 +1367,14 @@ fn render_settings_screen(f: &mut Frame, app: &App, area: Rect, t: &Theme) {
                 .unwrap_or_else(|| "Default".to_string()),
         ),
         (
+            "System & Setup",
             "Onboarding Setup Wizard",
             "Guided Setup [Enter to launch]".to_string(),
         ),
     ];
 
     let header_row = Row::new(vec![
+        Cell::from("Category").style(t.style_secondary().add_modifier(Modifier::BOLD)),
         Cell::from("Configuration Setting").style(t.style_secondary().add_modifier(Modifier::BOLD)),
         Cell::from("Current Value").style(t.style_secondary().add_modifier(Modifier::BOLD)),
         Cell::from("Action").style(t.style_secondary().add_modifier(Modifier::BOLD)),
@@ -1370,7 +1385,7 @@ fn render_settings_screen(f: &mut Frame, app: &App, area: Rect, t: &Theme) {
     let rows: Vec<_> = settings
         .iter()
         .enumerate()
-        .map(|(i, (name, val))| {
+        .map(|(i, (category, name, val))| {
             let is_selected = i == app.screen_selected_index;
             let row_style = if is_selected {
                 Style::default()
@@ -1381,6 +1396,7 @@ fn render_settings_screen(f: &mut Frame, app: &App, area: Rect, t: &Theme) {
                 Style::default().fg(t.color(ColorRole::TextPrimary))
             };
 
+            let marker = if is_selected { "▶ " } else { "  " };
             let action_label = if i == 7 {
                 "[Enter] Launch Wizard"
             } else {
@@ -1388,6 +1404,7 @@ fn render_settings_screen(f: &mut Frame, app: &App, area: Rect, t: &Theme) {
             };
 
             Row::new(vec![
+                Cell::from(format!("{marker}{category}")),
                 Cell::from(*name),
                 Cell::from(val.clone()),
                 Cell::from(action_label),
@@ -1399,9 +1416,10 @@ fn render_settings_screen(f: &mut Frame, app: &App, area: Rect, t: &Theme) {
     let table = Table::new(
         rows,
         [
-            Constraint::Percentage(40),
-            Constraint::Percentage(30),
-            Constraint::Percentage(30),
+            Constraint::Percentage(20),
+            Constraint::Percentage(32),
+            Constraint::Percentage(24),
+            Constraint::Percentage(24),
         ],
     )
     .header(header_row)
@@ -1409,7 +1427,7 @@ fn render_settings_screen(f: &mut Frame, app: &App, area: Rect, t: &Theme) {
         Block::default()
             .borders(Borders::ALL)
             .border_style(t.border_subtle())
-            .title(" Environment Settings & Preferences — [Enter] Modify [s] Save Configuration "),
+            .title(" Environment Settings & Preferences — [Enter / Space] Modify  [j/k / ↑/↓] Navigate "),
     );
 
     f.render_widget(table, area);

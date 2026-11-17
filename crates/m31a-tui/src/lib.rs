@@ -32,7 +32,9 @@ pub mod transcript;
 pub mod transcript_view;
 pub mod turn;
 
-pub use ansi_escape::{expand_tabs, strip_ansi, visual_len};
+pub use ansi_escape::{
+    expand_tabs, safe_truncate_str, strip_ansi, truncate_with_ellipsis, visual_len,
+};
 pub use app::{App, FocusState};
 pub use bottom_pane::{
     BottomPaneMode, BottomPaneState, BottomPaneSubmit, GitStatusBadge, MentionCandidate,

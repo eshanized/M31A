@@ -413,6 +413,14 @@ pub struct ScrubTurnItem {
     pub checkpoint_id: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OperationRiskAssessment {
+    pub risk_level: String,
+    pub execution_scope: String,
+    pub blast_radius: String,
+    pub sandbox_context: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct PendingApproval {
     pub tool_call: ToolCall,
@@ -478,6 +486,65 @@ impl PendingApproval {
         }
     }
 
+    /// Evaluates structured operation risk and execution boundaries truthfully.
+    pub fn assess_risk(&self) -> OperationRiskAssessment {
+        let name = self.tool_call.function.name.as_str();
+        if let Some(ref cmd) = self.command {
+            let lower = cmd.to_lowercase();
+            let is_critical = lower.contains("rm -rf")
+                || lower.contains("sudo ")
+                || lower.contains("mkfs")
+                || lower.contains("dd if=")
+                || lower.contains(":(){ :|:& };:")
+                || lower.contains("chmod -r 777");
+            let risk_level = if is_critical {
+                "Critical (Destructive Command)".to_string()
+            } else {
+                "High (Host Command Execution)".to_string()
+            };
+            OperationRiskAssessment {
+                risk_level,
+                execution_scope: "Host Subprocess (Unsandboxed Shell)".to_string(),
+                blast_radius: "Process & Filesystem Tree".to_string(),
+                sandbox_context: "Host OS".to_string(),
+            }
+        } else if name == "apply_patch"
+            || name == "write_file"
+            || name == "edit_file"
+            || name == "delete_file"
+        {
+            let blast = if let Some(target) = self.target_file() {
+                format!("File: {target}")
+            } else {
+                "Workspace Filesystem".to_string()
+            };
+            OperationRiskAssessment {
+                risk_level: "Medium (Workspace Mutation)".to_string(),
+                execution_scope: "Workspace Filesystem".to_string(),
+                blast_radius: blast,
+                sandbox_context: "Workspace".to_string(),
+            }
+        } else if name == "read_file"
+            || name == "list_dir"
+            || name == "file_search"
+            || name == "grep_search"
+        {
+            OperationRiskAssessment {
+                risk_level: "Low (Read-Only Access)".to_string(),
+                execution_scope: "Workspace Filesystem (Read-Only)".to_string(),
+                blast_radius: "Non-Mutating Inspection".to_string(),
+                sandbox_context: "Read-Only Sandbox".to_string(),
+            }
+        } else {
+            OperationRiskAssessment {
+                risk_level: "Risk assessment unavailable".to_string(),
+                execution_scope: "External / Uncategorized Tool API".to_string(),
+                blast_radius: "Unbounded Invocation Scope".to_string(),
+                sandbox_context: "Unknown Context".to_string(),
+            }
+        }
+    }
+
     /// The exact action sequence presented by the approval surface.
     ///
     /// This is the single authority for renderer rows, keyboard shortcuts, mouse
@@ -490,7 +557,12 @@ impl PendingApproval {
         if self.allow_file.is_some() {
             list.push(ApprovalActionKind::AllowFile);
         }
-        if self.diff.is_some() {
+        let has_non_empty_diff = self
+            .diff
+            .as_deref()
+            .map(|d| !d.trim().is_empty())
+            .unwrap_or(false);
+        if has_non_empty_diff {
             list.push(ApprovalActionKind::ViewDiff);
         }
         list.push(ApprovalActionKind::DeclineWithFeedback);
@@ -2264,6 +2336,84 @@ mod tests {
         assert!(!journal.view_json);
         journal.view_json = true;
         assert!(journal.view_json);
+    }
+
+    #[test]
+    fn test_pending_approval_risk_assessment_and_diff_gating() {
+        // 1. Critical shell command
+        let rm_call = ToolCall {
+            id: "call-rm".to_string(),
+            call_type: "function".to_string(),
+            function: FunctionCall {
+                name: "execute_command".to_string(),
+                arguments: r#"{"command":"rm -rf /tmp/test"}"#.to_string(),
+            },
+        };
+        let rm_approval = PendingApproval::new(rm_call, "Remove test files", None);
+        let rm_risk = rm_approval.assess_risk();
+        assert!(rm_risk.risk_level.contains("Critical"));
+        assert_eq!(rm_risk.sandbox_context, "Host OS");
+
+        // 2. Normal command
+        let git_call = ToolCall {
+            id: "call-git".to_string(),
+            call_type: "function".to_string(),
+            function: FunctionCall {
+                name: "execute_command".to_string(),
+                arguments: r#"{"command":"git status"}"#.to_string(),
+            },
+        };
+        let git_approval = PendingApproval::new(git_call, "Check status", None);
+        let git_risk = git_approval.assess_risk();
+        assert!(git_risk.risk_level.contains("High"));
+
+        // 3. File mutation
+        let patch_call = ToolCall {
+            id: "call-patch".to_string(),
+            call_type: "function".to_string(),
+            function: FunctionCall {
+                name: "apply_patch".to_string(),
+                arguments: r#"{"path":"src/main.rs","patch":""}"#.to_string(),
+            },
+        };
+        let patch_approval = PendingApproval::new(patch_call, "Apply patch", None);
+        let patch_risk = patch_approval.assess_risk();
+        assert!(patch_risk.risk_level.contains("Medium"));
+        // Empty patch must NOT offer ViewDiff action!
+        assert!(
+            !patch_approval
+                .action_kinds()
+                .contains(&ApprovalActionKind::ViewDiff)
+        );
+
+        // 4. Non-empty patch DOES offer ViewDiff action
+        let patch_nonempty = ToolCall {
+            id: "call-patch2".to_string(),
+            call_type: "function".to_string(),
+            function: FunctionCall {
+                name: "apply_patch".to_string(),
+                arguments: r#"{"path":"src/main.rs","patch":"+println!(\"hello\");"}"#.to_string(),
+            },
+        };
+        let nonempty_approval = PendingApproval::new(patch_nonempty, "Apply patch", None);
+        assert!(
+            nonempty_approval
+                .action_kinds()
+                .contains(&ApprovalActionKind::ViewDiff)
+        );
+
+        // 5. Unrecognized tool fallback
+        let unknown_call = ToolCall {
+            id: "call-unk".to_string(),
+            call_type: "function".to_string(),
+            function: FunctionCall {
+                name: "custom_mcp_operation".to_string(),
+                arguments: "{}".to_string(),
+            },
+        };
+        let unknown_approval = PendingApproval::new(unknown_call, "Custom operation", None);
+        let unk_risk = unknown_approval.assess_risk();
+        assert_eq!(unk_risk.risk_level, "Risk assessment unavailable");
     }
 
     #[test]

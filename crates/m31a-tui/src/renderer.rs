@@ -625,13 +625,7 @@ fn render_approval_dialog(
         .border_style(t.style_error(false))
         .style(t.style_surface1());
 
-    let (risk_label, scope_label) = if approval.command.is_some() {
-        ("High (Command Execution)", "Host Subprocess")
-    } else if approval.diff.is_some() || approval.target_file().is_some() {
-        ("Medium (File Mutation)", "Workspace Filesystem")
-    } else {
-        ("Standard (Tool Invocation)", "Sandboxed API")
-    };
+    let assessment = approval.assess_risk();
 
     let mut body = vec![
         Line::from(vec![
@@ -641,13 +635,15 @@ fn render_approval_dialog(
                 t.style_primary().add_modifier(Modifier::BOLD),
             ),
             Span::styled("  │  Risk: ", t.style_muted()),
-            Span::styled(risk_label, t.style_warning(true)),
-            Span::styled("  │  Scope: ", t.style_muted()),
-            Span::styled(scope_label, t.style_info(false)),
+            Span::styled(&assessment.risk_level, t.style_warning(true)),
+            Span::styled("  │  Context: ", t.style_muted()),
+            Span::styled(&assessment.sandbox_context, t.style_info(false)),
         ]),
         Line::from(vec![
             Span::styled("Reason: ", t.style_warning(true)),
             Span::styled(&approval.reason, t.style_primary()),
+            Span::styled("  │  Blast Radius: ", t.style_muted()),
+            Span::styled(&assessment.blast_radius, t.style_secondary()),
         ]),
     ];
 
@@ -725,21 +721,21 @@ fn render_approval_dialog(
         let (label, scope_desc) = match kind {
             ApprovalActionKind::AllowOnce => (
                 "Allow once".to_string(),
-                "One-time execution of this exact operation",
+                "Valid for this single execution only",
             ),
             ApprovalActionKind::AllowRule => (
                 format!(
                     "Always allow rule (prefix: '{}')",
                     approval.suggested_rule.as_deref().unwrap_or("")
                 ),
-                "Persists prefix rule for this session",
+                "Session-scoped prefix permission rule",
             ),
             ApprovalActionKind::AllowFile => (
                 format!(
                     "Allow access to file ('{}')",
                     approval.allow_file.as_deref().unwrap_or("")
                 ),
-                "Permits all edits to this file this session",
+                "Session-scoped file edit permission",
             ),
             ApprovalActionKind::ViewDiff => (
                 "Inspect changes fullscreen".to_string(),
@@ -4426,16 +4422,15 @@ fn render_turn_scrubber_modal(
             };
 
             let chk_str = if let Some(ref chk) = turn.checkpoint_id {
-                format!(" [checkpoint: {}]", &chk[..8.min(chk.len())])
+                format!(
+                    " [checkpoint: {}]",
+                    crate::ansi_escape::safe_truncate_str(chk, 8)
+                )
             } else {
                 String::new()
             };
 
-            let preview = if turn.user_prompt.len() > 68 {
-                format!("{}...", &turn.user_prompt[..65])
-            } else {
-                turn.user_prompt.clone()
-            };
+            let preview = crate::ansi_escape::truncate_with_ellipsis(&turn.user_prompt, 68);
 
             let mut lines = vec![
                 Line::from(vec![
@@ -4455,11 +4450,7 @@ fn render_turn_scrubber_modal(
             ];
 
             if let Some(ref resp) = turn.assistant_preview {
-                let resp_short = if resp.len() > 64 {
-                    format!("{}...", &resp[..61])
-                } else {
-                    resp.clone()
-                };
+                let resp_short = crate::ansi_escape::truncate_with_ellipsis(resp, 64);
                 lines.push(Line::from(vec![
                     Span::raw("    Resp: "),
                     Span::styled(resp_short, t.style_muted()),

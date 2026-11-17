@@ -595,6 +595,7 @@ impl App {
         }
 
         let config_features = config.features.clone();
+        let auto_scroll = config.tui.auto_scroll;
 
         let mut app = Self {
             config,
@@ -614,7 +615,7 @@ impl App {
             transcript: Vec::new(),
             composer: ChatComposer::new(),
             scroll_offset: 0,
-            auto_scroll: true,
+            auto_scroll,
             modal_stack: crate::modals::ModalStack::new(),
             queued_prompts: std::collections::VecDeque::new(),
             is_focused: true,
@@ -2549,14 +2550,24 @@ impl App {
                             let action = parts[2].to_lowercase();
                             if action == "on" || action == "enable" || action == "true" {
                                 self.config.routing_enabled = true;
-                                let _ = self.config.save();
+                                if let Err(e) = self.config.save() {
+                                    self.transcript.push(TranscriptItem::notice(
+                                        format!("Failed to save config: {e}"),
+                                        NoticeLevel::Warning,
+                                    ));
+                                }
                                 self.transcript.push(TranscriptItem::notice(
                                     "Dynamic hybrid model routing enabled (tasks dynamically mapped to Fast / Balanced / DeepReasoning tiers).",
                                     NoticeLevel::Success,
                                 ));
                             } else if action == "off" || action == "disable" || action == "false" {
                                 self.config.routing_enabled = false;
-                                let _ = self.config.save();
+                                if let Err(e) = self.config.save() {
+                                    self.transcript.push(TranscriptItem::notice(
+                                        format!("Failed to save config: {e}"),
+                                        NoticeLevel::Warning,
+                                    ));
+                                }
                                 self.transcript.push(TranscriptItem::notice(
                                     "Dynamic hybrid model routing disabled.",
                                     NoticeLevel::Success,
@@ -3246,20 +3257,22 @@ impl App {
                             Ok(report) => {
                                 let duration_sec = start.elapsed().as_secs_f32();
                                 let trust_str = match trust_decision {
-                                    Some(m31a_trust::TrustDecision::Trusted) => "VERIFIED (Trusted)",
-                                    Some(m31a_trust::TrustDecision::SessionOnly) => "SESSION ONLY",
-                                    Some(m31a_trust::TrustDecision::RequiresConfirmation { .. }) => "UNTRUSTED (Confirmation required)",
-                                    Some(m31a_trust::TrustDecision::Denied { .. }) => "DENIED",
-                                    None => "UNKNOWN",
+                                    Some(m31a_trust::TrustDecision::Trusted) => "Trusted",
+                                    Some(m31a_trust::TrustDecision::SessionOnly) => "Session Only",
+                                    Some(m31a_trust::TrustDecision::RequiresConfirmation { .. }) => "Untrusted (Confirmation required)",
+                                    Some(m31a_trust::TrustDecision::Denied { .. }) => "Denied",
+                                    None => "Unconfigured",
                                 };
                                 if report.success {
                                     let summary = format!(
                                         "Verification PASSED for command `{}`.\n\
-                                         • Compiler / Linter: [PASSED] (0 errors, 0 warnings, {:.2}s)\n\
+                                         • Compiler / Linter: [PASSED] ({} errors, {} warnings, {:.2}s)\n\
                                          • Workspace Trust:   [{}]\n\
                                          • Test Suite:        [NOT RUN] (run `/test` for complete test coverage)\n\
-                                         Workspace is clean and ready.",
+                                         • Working Tree:      [NOT CHECKED] (run `/diff` or `git status` to inspect)",
                                         report.command,
+                                        report.error_count,
+                                        report.warning_count,
                                         duration_sec,
                                         trust_str
                                     );
@@ -3308,18 +3321,18 @@ impl App {
                             Ok(report) => {
                                 let duration_sec = start.elapsed().as_secs_f32();
                                 let trust_str = match trust_decision {
-                                    Some(m31a_trust::TrustDecision::Trusted) => "VERIFIED (Trusted)",
-                                    Some(m31a_trust::TrustDecision::SessionOnly) => "SESSION ONLY",
-                                    Some(m31a_trust::TrustDecision::RequiresConfirmation { .. }) => "UNTRUSTED (Confirmation required)",
-                                    Some(m31a_trust::TrustDecision::Denied { .. }) => "DENIED",
-                                    None => "UNKNOWN",
+                                    Some(m31a_trust::TrustDecision::Trusted) => "Trusted",
+                                    Some(m31a_trust::TrustDecision::SessionOnly) => "Session Only",
+                                    Some(m31a_trust::TrustDecision::RequiresConfirmation { .. }) => "Untrusted (Confirmation required)",
+                                    Some(m31a_trust::TrustDecision::Denied { .. }) => "Denied",
+                                    None => "Unconfigured",
                                 };
                                 if report.success {
                                     let summary = format!(
                                         "Test suite PASSED for command `{}`.\n\
                                          • Test Suite:      [PASSED] (all tests green, {:.2}s)\n\
                                          • Workspace Trust: [{}]\n\
-                                         Workspace verification complete.",
+                                         Test execution completed successfully.",
                                         report.command,
                                         duration_sec,
                                         trust_str
@@ -4574,7 +4587,12 @@ impl App {
                     if let Some(v) = variant {
                         init_theme(v);
                         self.config.tui.theme = Some(parts[1].to_lowercase());
-                        let _ = self.config.save();
+                        if let Err(e) = self.config.save() {
+                            self.transcript.push(TranscriptItem::notice(
+                                format!("Warning: Failed to persist config: {e}"),
+                                NoticeLevel::Warning,
+                            ));
+                        }
                         self.transcript.push(TranscriptItem::notice(
                             format!("Theme switched to: {}", parts[1].to_lowercase()),
                             NoticeLevel::Success,
@@ -4594,13 +4612,19 @@ impl App {
                         .unwrap_or("everblush")
                         .to_lowercase();
                     let (next, name) = match current.as_str() {
-                        "everblush" | "dark" => (ThemeVariant::Light, "light"),
+                        "everblush" => (ThemeVariant::Dark, "dark"),
+                        "dark" => (ThemeVariant::Light, "light"),
                         "light" => (ThemeVariant::HighContrast, "contrast"),
                         _ => (ThemeVariant::Everblush, "everblush"),
                     };
                     init_theme(next);
                     self.config.tui.theme = Some(name.to_string());
-                    let _ = self.config.save();
+                    if let Err(e) = self.config.save() {
+                        self.transcript.push(TranscriptItem::notice(
+                            format!("Warning: Failed to persist config: {e}"),
+                            NoticeLevel::Warning,
+                        ));
+                    }
                     self.transcript.push(TranscriptItem::notice(
                         format!("Theme switched to: {}", name),
                         NoticeLevel::Success,
@@ -7195,7 +7219,7 @@ mod tests {
         // 2. When chat widget is in active streaming state, Notice events are buffered
         app.chat_widget.turn_state = crate::chatwidget::TurnExecutionState::StreamingContent {
             started_at: std::time::Instant::now(),
-            tokens: 42,
+            tokens: Some(42),
         };
 
         app.handle_tui_event(TuiEvent::Notice(

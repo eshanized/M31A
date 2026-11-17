@@ -211,9 +211,68 @@ impl Theme {
         }
     }
 
-    /// Default dark theme — uses Everblush palette
+    /// Modern Dark theme — clean zinc and slate palette with cobalt blue accent
     pub fn dark() -> Self {
-        Self::everblush()
+        Self {
+            variant: ThemeVariant::Dark,
+            colors: ThemeColors {
+                // Surfaces — zinc / charcoal
+                surface_0: Color::Rgb(0x18, 0x18, 0x1b), // #18181b - zinc-900 base background
+                surface_1: Color::Rgb(0x27, 0x27, 0x2a), // #27272a - zinc-800 panels
+                surface_2: Color::Rgb(0x3f, 0x3f, 0x46), // #3f3f46 - zinc-700 hover / active
+                surface_3: Color::Rgb(0x52, 0x52, 0x5b), // #52525b - zinc-600 elevated surfaces
+
+                // Text
+                text_primary: Color::Rgb(0xf4, 0xf4, 0xf5), // #f4f4f5 - zinc-100
+                text_secondary: Color::Rgb(0xa1, 0xa1, 0xaa), // #a1a1aa - zinc-400
+                text_muted: Color::Rgb(0x71, 0x71, 0x7a),   // #71717a - zinc-500
+                text_inverse: Color::Rgb(0x18, 0x18, 0x1b),
+
+                // Accent — modern cobalt blue
+                accent: Color::Rgb(0x3b, 0x82, 0xf6), // #3b82f6 - blue-500
+                accent_muted: Color::Rgb(0x1e, 0x3a, 0x5f), // #1e3a5f - muted blue
+
+                // Status
+                success: Color::Rgb(0x22, 0xc5, 0x5e), // #22c55e - green-500
+                warning: Color::Rgb(0xf5, 0x9e, 0x0b), // #f59e0b - amber-500
+                error: Color::Rgb(0xef, 0x44, 0x44),   // #ef4444 - red-500
+                info: Color::Rgb(0x06, 0xb6, 0xd4),    // #06b6d4 - cyan-500
+
+                // Borders
+                border: Color::Rgb(0x3f, 0x3f, 0x46),
+                border_focus: Color::Rgb(0x3b, 0x82, 0xf6),
+                border_subtle: Color::Rgb(0x27, 0x27, 0x2a),
+
+                // Selection & Disabled
+                selection: Color::Rgb(0x1d, 0x4e, 0xd8), // #1d4ed8 - blue-700
+                selection_fg: Color::Rgb(0xff, 0xff, 0xff),
+                disabled: Color::Rgb(0x52, 0x52, 0x5b),
+
+                // Code syntax
+                code_keyword: Color::Rgb(0xc0, 0x84, 0xfc), // #c084fc - purple-400
+                code_string: Color::Rgb(0x4a, 0xde, 0x80),  // #4ade80 - green-400
+                code_number: Color::Rgb(0xfb, 0x92, 0x3c),  // #fb923c - orange-400
+                code_comment: Color::Rgb(0x71, 0x71, 0x7a), // #71717a - zinc-500
+                code_function: Color::Rgb(0x60, 0xa5, 0xfa), // #60a5fa - blue-400
+                code_type: Color::Rgb(0x2d, 0xd4, 0xbf),    // #2dd4bf - teal-400
+            },
+            spacing: ThemeSpacing {
+                padding_x: 2,
+                padding_y: 1,
+                gap: 1,
+                border_radius: BorderRadius::Medium,
+            },
+            border: ThemeBorder {
+                default: ratatui::widgets::BorderType::Rounded,
+                focused: ratatui::widgets::BorderType::Rounded,
+                modal: ratatui::widgets::BorderType::Double,
+            },
+            typography: ThemeTypography {
+                header_bold: true,
+                use_icons: true,
+            },
+            icon_mode: crate::icons::IconMode::Unicode,
+        }
     }
 
     /// Light theme — clean, paper-like
@@ -486,8 +545,9 @@ impl Theme {
     /// Muted addition background for diffs (Everblush dark moss for dark, pastel for light)
     pub fn diff_add_bg(&self) -> Color {
         match self.variant {
-            ThemeVariant::Everblush | ThemeVariant::Dark => Color::Rgb(0x1a, 0x30, 0x24), // #1a3024 Everblush dark moss
-            ThemeVariant::Light => Color::Rgb(218, 251, 225), // #DAFBE1 GitHub pastel green
+            ThemeVariant::Everblush => Color::Rgb(0x1a, 0x30, 0x24), // #1a3024 Everblush dark moss
+            ThemeVariant::Dark => Color::Rgb(0x14, 0x33, 0x1f),      // Charcoal dark green
+            ThemeVariant::Light => Color::Rgb(218, 251, 225),        // #DAFBE1 GitHub pastel green
             ThemeVariant::HighContrast => Color::Rgb(0, 50, 0),
         }
     }
@@ -495,8 +555,9 @@ impl Theme {
     /// Muted deletion background for diffs (Everblush dark wine for dark, pastel for light)
     pub fn diff_del_bg(&self) -> Color {
         match self.variant {
-            ThemeVariant::Everblush | ThemeVariant::Dark => Color::Rgb(0x3b, 0x1f, 0x22), // #3b1f22 Everblush dark wine
-            ThemeVariant::Light => Color::Rgb(255, 235, 233), // #FFEBE9 GitHub pastel red
+            ThemeVariant::Everblush => Color::Rgb(0x3b, 0x1f, 0x22), // #3b1f22 Everblush dark wine
+            ThemeVariant::Dark => Color::Rgb(0x3f, 0x18, 0x1c),      // Charcoal dark red
+            ThemeVariant::Light => Color::Rgb(255, 235, 233),        // #FFEBE9 GitHub pastel red
             ThemeVariant::HighContrast => Color::Rgb(60, 0, 0),
         }
     }
@@ -506,6 +567,7 @@ use std::sync::LazyLock;
 use std::sync::atomic::{AtomicU8, Ordering};
 
 static EVERBLUSH_THEME: LazyLock<Theme> = LazyLock::new(Theme::everblush);
+static DARK_THEME: LazyLock<Theme> = LazyLock::new(Theme::dark);
 static LIGHT_THEME: LazyLock<Theme> = LazyLock::new(Theme::light);
 static HC_THEME: LazyLock<Theme> = LazyLock::new(Theme::high_contrast);
 static THEME_VARIANT: AtomicU8 = AtomicU8::new(0);
@@ -544,9 +606,10 @@ pub fn effective_safe_icon_mode(theme: &Theme) -> crate::icons::IconMode {
 /// Initialize or switch global theme from config or command
 pub fn init_theme(variant: ThemeVariant) {
     let val = match variant {
-        ThemeVariant::Everblush | ThemeVariant::Dark => 0,
-        ThemeVariant::Light => 1,
-        ThemeVariant::HighContrast => 2,
+        ThemeVariant::Everblush => 0,
+        ThemeVariant::Dark => 1,
+        ThemeVariant::Light => 2,
+        ThemeVariant::HighContrast => 3,
     };
     THEME_VARIANT.store(val, Ordering::SeqCst);
 }
@@ -554,8 +617,9 @@ pub fn init_theme(variant: ThemeVariant) {
 /// Get current theme
 pub fn theme() -> &'static Theme {
     match THEME_VARIANT.load(Ordering::Relaxed) {
-        1 => &LIGHT_THEME,
-        2 => &HC_THEME,
+        1 => &DARK_THEME,
+        2 => &LIGHT_THEME,
+        3 => &HC_THEME,
         _ => &EVERBLUSH_THEME,
     }
 }
@@ -660,7 +724,12 @@ mod tests {
 
     #[test]
     fn test_design_system_tokens_and_roles() {
-        for theme in [Theme::everblush(), Theme::light(), Theme::high_contrast()] {
+        for theme in [
+            Theme::everblush(),
+            Theme::dark(),
+            Theme::light(),
+            Theme::high_contrast(),
+        ] {
             assert_eq!(theme.color(ColorRole::Selection), theme.colors.selection);
             assert_eq!(
                 theme.color(ColorRole::SelectionFg),
@@ -675,5 +744,39 @@ mod tests {
             let dis_style = theme.style_disabled();
             assert_eq!(dis_style.fg, Some(theme.colors.disabled));
         }
+    }
+
+    #[test]
+    fn test_all_four_themes_selectable_and_distinct() {
+        let eb = Theme::everblush();
+        let dark = Theme::dark();
+        let light = Theme::light();
+        let hc = Theme::high_contrast();
+
+        assert_eq!(eb.variant, ThemeVariant::Everblush);
+        assert_eq!(dark.variant, ThemeVariant::Dark);
+        assert_eq!(light.variant, ThemeVariant::Light);
+        assert_eq!(hc.variant, ThemeVariant::HighContrast);
+
+        // Dark theme is distinct from Everblush (zinc base vs blue-gray base)
+        assert_ne!(eb.colors.surface_0, dark.colors.surface_0);
+        assert_ne!(eb.colors.accent, dark.colors.accent);
+
+        // Switch to Dark
+        init_theme(ThemeVariant::Dark);
+        assert_eq!(theme().variant, ThemeVariant::Dark);
+        assert_eq!(theme().colors.accent, Color::Rgb(0x3b, 0x82, 0xf6));
+
+        // Switch to Light
+        init_theme(ThemeVariant::Light);
+        assert_eq!(theme().variant, ThemeVariant::Light);
+
+        // Switch to High Contrast
+        init_theme(ThemeVariant::HighContrast);
+        assert_eq!(theme().variant, ThemeVariant::HighContrast);
+
+        // Switch to Everblush
+        init_theme(ThemeVariant::Everblush);
+        assert_eq!(theme().variant, ThemeVariant::Everblush);
     }
 }

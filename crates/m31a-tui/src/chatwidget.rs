@@ -16,27 +16,47 @@ const SPINNER_FRAMES: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦
 pub enum TurnExecutionState {
     /// Agent is idle and waiting for user input.
     Idle,
+    /// Prompt received and submitted.
+    Submitted { started_at: Instant },
+    /// Awaiting admission through trust, guardian, or rate-limit gates.
+    AwaitingAdmission { started_at: Instant },
     /// Model is streaming reasoning/thinking tokens before formulating its response.
     Thinking {
         started_at: Instant,
-        tokens: usize,
+        tokens: Option<usize>,
         preview: String,
     },
     /// Model is streaming visible response content chunks.
-    StreamingContent { started_at: Instant, tokens: usize },
+    StreamingContent {
+        started_at: Instant,
+        tokens: Option<usize>,
+    },
     /// Agent is executing an external tool or command in the sandbox.
     ToolExecuting {
         tool_id: String,
         tool_name: String,
         started_at: Instant,
     },
-    /// Turn is paused awaiting human-in-the-loop permission or input.
+    /// Turn is paused awaiting security approval decision.
     AwaitingApproval {
         request_id: String,
         action_summary: String,
+        started_at: Instant,
+    },
+    /// Turn is paused awaiting response to an elicitation question.
+    AwaitingQuestion {
+        question_id: String,
+        prompt: String,
+        started_at: Instant,
     },
     /// Agent is running context compaction and history summarization.
     CompactingHistory { started_at: Instant },
+    /// User requested cancellation (e.g. Ctrl+C).
+    CancellationRequested { started_at: Instant },
+    /// Actively terminating child processes and cancelling tasks.
+    Cancelling { started_at: Instant },
+    /// Recovering from failure (e.g. self-healing or rollback).
+    Recovering { started_at: Instant },
     /// Turn finished execution successfully.
     TurnCompleted {
         duration_ms: u64,
@@ -51,22 +71,38 @@ impl TurnExecutionState {
     pub fn is_active(&self) -> bool {
         matches!(
             self,
-            TurnExecutionState::Thinking { .. }
+            TurnExecutionState::Submitted { .. }
+                | TurnExecutionState::AwaitingAdmission { .. }
+                | TurnExecutionState::Thinking { .. }
                 | TurnExecutionState::StreamingContent { .. }
                 | TurnExecutionState::ToolExecuting { .. }
                 | TurnExecutionState::CompactingHistory { .. }
+                | TurnExecutionState::CancellationRequested { .. }
+                | TurnExecutionState::Cancelling { .. }
+                | TurnExecutionState::Recovering { .. }
         )
+    }
+
+    /// Returns true if the active turn can receive a cancellation request.
+    pub fn is_cancellable(&self) -> bool {
+        self.is_active() && !matches!(self, TurnExecutionState::Cancelling { .. })
     }
 
     /// Returns human-readable label for status lines.
     pub fn label(&self) -> &'static str {
         match self {
             TurnExecutionState::Idle => "Ready",
+            TurnExecutionState::Submitted { .. } => "Submitted",
+            TurnExecutionState::AwaitingAdmission { .. } => "Awaiting Admission",
             TurnExecutionState::Thinking { .. } => "Thinking",
             TurnExecutionState::StreamingContent { .. } => "Generating",
             TurnExecutionState::ToolExecuting { .. } => "Executing Tool",
             TurnExecutionState::AwaitingApproval { .. } => "Awaiting Approval",
+            TurnExecutionState::AwaitingQuestion { .. } => "Awaiting Question",
             TurnExecutionState::CompactingHistory { .. } => "Compacting Context",
+            TurnExecutionState::CancellationRequested { .. } => "Cancelling...",
+            TurnExecutionState::Cancelling { .. } => "Cancelling...",
+            TurnExecutionState::Recovering { .. } => "Recovering",
             TurnExecutionState::TurnCompleted { .. } => "Completed",
             TurnExecutionState::Failed { .. } => "Failed",
         }
@@ -395,7 +431,7 @@ impl ChatWidgetState {
     pub fn start_thinking(&mut self) {
         self.turn_state = TurnExecutionState::Thinking {
             started_at: Instant::now(),
-            tokens: 0,
+            tokens: None,
             preview: String::new(),
         };
         self.streaming_buffer.mark_turn_start();
@@ -405,7 +441,7 @@ impl ChatWidgetState {
     pub fn start_streaming(&mut self) {
         self.turn_state = TurnExecutionState::StreamingContent {
             started_at: Instant::now(),
-            tokens: 0,
+            tokens: None,
         };
         self.streaming_buffer.mark_turn_start();
     }
@@ -428,6 +464,16 @@ impl ChatWidgetState {
         self.turn_state = TurnExecutionState::AwaitingApproval {
             request_id: request_id.into(),
             action_summary: action_summary.into(),
+            started_at: Instant::now(),
+        };
+    }
+
+    /// Transitions to awaiting question state.
+    pub fn await_question(&mut self, question_id: impl Into<String>, prompt: impl Into<String>) {
+        self.turn_state = TurnExecutionState::AwaitingQuestion {
+            question_id: question_id.into(),
+            prompt: prompt.into(),
+            started_at: Instant::now(),
         };
     }
 
@@ -454,17 +500,13 @@ impl ChatWidgetState {
                 self.turn_state = TurnExecutionState::Idle;
             }
             crate::turn::TurnState::Submitted { started_at, .. } => {
-                self.turn_state = TurnExecutionState::Thinking {
+                self.turn_state = TurnExecutionState::Submitted {
                     started_at: *started_at,
-                    tokens: 0,
-                    preview: String::new(),
                 };
             }
-            crate::turn::TurnState::AwaitingAdmission { .. } => {
-                self.turn_state = TurnExecutionState::Thinking {
-                    started_at: Instant::now(),
-                    tokens: 0,
-                    preview: "Awaiting admission...".to_string(),
+            crate::turn::TurnState::AwaitingAdmission { started_at, .. } => {
+                self.turn_state = TurnExecutionState::AwaitingAdmission {
+                    started_at: *started_at,
                 };
             }
             crate::turn::TurnState::Thinking {
@@ -472,24 +514,34 @@ impl ChatWidgetState {
                 preview,
                 ..
             } => {
-                let current_tokens = match &self.turn_state {
-                    TurnExecutionState::Thinking { tokens, .. } => *tokens + 1,
-                    _ => 1,
+                // Truthful telemetry: preserve existing tokens or query streaming_buffer if > 0.
+                // Do NOT increment arbitrary counters on tick.
+                let tokens = match &self.turn_state {
+                    TurnExecutionState::Thinking { tokens, .. } => *tokens,
+                    _ => {
+                        let cnt = self.streaming_buffer.token_count();
+                        if cnt > 0 { Some(cnt) } else { None }
+                    }
                 };
                 self.turn_state = TurnExecutionState::Thinking {
                     started_at: *started_at,
-                    tokens: current_tokens,
+                    tokens,
                     preview: preview.clone(),
                 };
             }
             crate::turn::TurnState::Streaming { started_at, .. } => {
-                let current_tokens = match &self.turn_state {
-                    TurnExecutionState::StreamingContent { tokens, .. } => *tokens + 1,
-                    _ => 1,
+                let cnt = self.streaming_buffer.token_count();
+                let tokens = if cnt > 0 {
+                    Some(cnt)
+                } else {
+                    match &self.turn_state {
+                        TurnExecutionState::StreamingContent { tokens, .. } => *tokens,
+                        _ => None,
+                    }
                 };
                 self.turn_state = TurnExecutionState::StreamingContent {
                     started_at: *started_at,
-                    tokens: current_tokens,
+                    tokens,
                 };
             }
             crate::turn::TurnState::ExecutingTool {
@@ -507,17 +559,25 @@ impl ChatWidgetState {
             crate::turn::TurnState::AwaitingApproval {
                 request_id,
                 summary,
+                started_at,
                 ..
             } => {
                 self.turn_state = TurnExecutionState::AwaitingApproval {
                     request_id: request_id.clone(),
                     action_summary: summary.clone(),
+                    started_at: *started_at,
                 };
             }
-            crate::turn::TurnState::AwaitingQuestion { prompt, .. } => {
-                self.turn_state = TurnExecutionState::AwaitingApproval {
-                    request_id: String::new(),
-                    action_summary: prompt.clone(),
+            crate::turn::TurnState::AwaitingQuestion {
+                question_id,
+                prompt,
+                started_at,
+                ..
+            } => {
+                self.turn_state = TurnExecutionState::AwaitingQuestion {
+                    question_id: question_id.clone(),
+                    prompt: prompt.clone(),
+                    started_at: *started_at,
                 };
             }
             crate::turn::TurnState::Compacting { started_at, .. } => {
@@ -525,12 +585,14 @@ impl ChatWidgetState {
                     started_at: *started_at,
                 };
             }
-            crate::turn::TurnState::CancellationRequested { .. }
-            | crate::turn::TurnState::Cancelling { .. } => {
-                self.turn_state = TurnExecutionState::Thinking {
-                    started_at: Instant::now(),
-                    tokens: 0,
-                    preview: "Cancelling...".to_string(),
+            crate::turn::TurnState::CancellationRequested { started_at, .. } => {
+                self.turn_state = TurnExecutionState::CancellationRequested {
+                    started_at: *started_at,
+                };
+            }
+            crate::turn::TurnState::Cancelling { started_at, .. } => {
+                self.turn_state = TurnExecutionState::Cancelling {
+                    started_at: *started_at,
                 };
             }
             crate::turn::TurnState::Completed {
@@ -538,7 +600,7 @@ impl ChatWidgetState {
                 duration_ms,
                 ..
             } => {
-                self.streaming_buffer.mark_turn_completed();
+                // Projection sync must remain purely idempotent and side-effect free.
                 self.turn_state = TurnExecutionState::TurnCompleted {
                     duration_ms: *duration_ms,
                     tokens_used: *tokens_used,
@@ -549,9 +611,9 @@ impl ChatWidgetState {
                     error: error.clone(),
                 };
             }
-            crate::turn::TurnState::Recovering { .. } => {
-                self.turn_state = TurnExecutionState::Failed {
-                    error: "Recovering...".to_string(),
+            crate::turn::TurnState::Recovering { started_at, .. } => {
+                self.turn_state = TurnExecutionState::Recovering {
+                    started_at: *started_at,
                 };
             }
         }
@@ -562,22 +624,42 @@ impl ChatWidgetState {
         let spinner = self.spinner_char();
         match &self.turn_state {
             TurnExecutionState::Idle => ("Ready".to_string(), Color::DarkGray),
-            TurnExecutionState::Thinking {
-                started_at, tokens, ..
-            } => {
+            TurnExecutionState::Submitted { started_at } => {
+                let elapsed = started_at.elapsed().as_secs_f32();
+                (format!("{spinner} Submitted ({elapsed:.1}s)"), Color::Cyan)
+            }
+            TurnExecutionState::AwaitingAdmission { started_at } => {
                 let elapsed = started_at.elapsed().as_secs_f32();
                 (
-                    format!("{spinner} Thinking ({elapsed:.1}s, {tokens} tokens)"),
-                    Color::Cyan,
+                    format!("{spinner} Awaiting admission ({elapsed:.1}s)"),
+                    Color::Yellow,
                 )
+            }
+            TurnExecutionState::Thinking {
+                started_at,
+                tokens,
+                preview,
+            } => {
+                let elapsed = started_at.elapsed().as_secs_f32();
+                let detail = if let Some(tok) = tokens {
+                    format!("{elapsed:.1}s, {tok} tokens")
+                } else if !preview.is_empty() {
+                    format!("{elapsed:.1}s, {preview}")
+                } else {
+                    format!("{elapsed:.1}s")
+                };
+                (format!("{spinner} Thinking ({detail})"), Color::Cyan)
             }
             TurnExecutionState::StreamingContent { started_at, tokens } => {
                 let elapsed = started_at.elapsed().as_secs_f32();
                 let v = self.streaming_buffer.tokens_per_second();
-                (
-                    format!("{spinner} Generating ({elapsed:.1}s, {tokens} tok, {v:.0} t/s)"),
-                    Color::Green,
-                )
+                let detail = match (tokens, v > 0.0) {
+                    (Some(tok), true) => format!("{elapsed:.1}s, {tok} tok, {v:.0} t/s"),
+                    (Some(tok), false) => format!("{elapsed:.1}s, {tok} tokens"),
+                    (None, true) => format!("{elapsed:.1}s, {v:.0} t/s"),
+                    (None, false) => format!("{elapsed:.1}s"),
+                };
+                (format!("{spinner} Generating ({detail})"), Color::Green)
             }
             TurnExecutionState::ToolExecuting {
                 tool_name,
@@ -593,9 +675,33 @@ impl ChatWidgetState {
             TurnExecutionState::AwaitingApproval { .. } => {
                 ("Approval required".to_string(), Color::Magenta)
             }
+            TurnExecutionState::AwaitingQuestion { .. } => {
+                ("Input required".to_string(), Color::Yellow)
+            }
             TurnExecutionState::CompactingHistory { started_at } => {
                 let elapsed = started_at.elapsed().as_secs_f32();
                 (format!("Compacting context ({elapsed:.1}s)"), Color::Blue)
+            }
+            TurnExecutionState::CancellationRequested { started_at } => {
+                let elapsed = started_at.elapsed().as_secs_f32();
+                (
+                    format!("{spinner} Cancelling... ({elapsed:.1}s)"),
+                    Color::Yellow,
+                )
+            }
+            TurnExecutionState::Cancelling { started_at } => {
+                let elapsed = started_at.elapsed().as_secs_f32();
+                (
+                    format!("{spinner} Terminating processes... ({elapsed:.1}s)"),
+                    Color::Red,
+                )
+            }
+            TurnExecutionState::Recovering { started_at } => {
+                let elapsed = started_at.elapsed().as_secs_f32();
+                (
+                    format!("{spinner} Recovering... ({elapsed:.1}s)"),
+                    Color::Yellow,
+                )
             }
             TurnExecutionState::TurnCompleted {
                 duration_ms,
@@ -773,5 +879,53 @@ mod tests {
         // Wraps around
         state.tick_spinner();
         assert_eq!(state.spinner_char(), SPINNER_FRAMES[0]);
+    }
+
+    #[test]
+    fn test_sync_with_canonical_idempotency_and_fidelity() {
+        let mut state = ChatWidgetState::new(20);
+        let now = Instant::now();
+        let canonical = crate::turn::TurnState::Thinking {
+            turn_id: "turn-test".to_string(),
+            started_at: now,
+            preview: "Analyzing".to_string(),
+        };
+
+        // First projection
+        state.sync_with_canonical(&canonical);
+        let first_turn_state = state.turn_state.clone();
+        assert_eq!(
+            first_turn_state,
+            TurnExecutionState::Thinking {
+                started_at: now,
+                tokens: None,
+                preview: "Analyzing".to_string(),
+            }
+        );
+
+        // Second projection with identical canonical state must produce IDENTICAL result
+        // (no synthetic token counter drift or timestamp resets)
+        state.sync_with_canonical(&canonical);
+        assert_eq!(state.turn_state, first_turn_state);
+
+        // Awaiting question is NOT conflated with Awaiting approval
+        let question = crate::turn::TurnState::AwaitingQuestion {
+            turn_id: "turn-test".to_string(),
+            question_id: "q-1".to_string(),
+            prompt: "Which file?".to_string(),
+            started_at: now,
+        };
+        state.sync_with_canonical(&question);
+        assert_eq!(
+            state.turn_state,
+            TurnExecutionState::AwaitingQuestion {
+                question_id: "q-1".to_string(),
+                prompt: "Which file?".to_string(),
+                started_at: now,
+            }
+        );
+        let (badge, color) = state.format_status_badge();
+        assert_eq!(badge, "Input required");
+        assert_eq!(color, Color::Yellow);
     }
 }

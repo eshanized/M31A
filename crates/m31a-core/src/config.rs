@@ -178,6 +178,8 @@ pub struct TuiConfig {
     pub mouse_scroll_speed: f64,
     #[serde(default = "default_true")]
     pub copy_on_select: bool,
+    #[serde(default = "default_true")]
+    pub auto_scroll: bool,
     #[serde(default = "default_status_line")]
     pub status_line: Vec<String>,
     #[serde(default = "default_terminal_title")]
@@ -195,6 +197,7 @@ impl Default for TuiConfig {
             scroll_acceleration: true,
             mouse_scroll_speed: 1.0,
             copy_on_select: true,
+            auto_scroll: true,
             status_line: default_status_line(),
             terminal_title: default_terminal_title(),
         }

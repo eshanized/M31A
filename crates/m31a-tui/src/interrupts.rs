@@ -86,7 +86,9 @@ impl DeferredInterruptQueue {
         let is_active = new_state.is_active();
         let is_settled = matches!(
             new_state,
-            TurnExecutionState::AwaitingApproval { .. }
+            TurnExecutionState::Idle
+                | TurnExecutionState::AwaitingApproval { .. }
+                | TurnExecutionState::AwaitingQuestion { .. }
                 | TurnExecutionState::TurnCompleted { .. }
                 | TurnExecutionState::Failed { .. }
         );
@@ -156,7 +158,7 @@ mod tests {
         let mut queue = DeferredInterruptQueue::new();
         queue.set_turn_state(TurnExecutionState::StreamingContent {
             started_at: Instant::now(),
-            tokens: 10,
+            tokens: Some(10),
         });
 
         queue.enqueue(DeferredInterrupt::Toast {
@@ -187,7 +189,7 @@ mod tests {
         let mut queue = DeferredInterruptQueue::new();
         queue.set_turn_state(TurnExecutionState::StreamingContent {
             started_at: Instant::now(),
-            tokens: 10,
+            tokens: Some(10),
         });
 
         queue.enqueue(DeferredInterrupt::Toast {
@@ -210,7 +212,7 @@ mod tests {
         let mut queue = DeferredInterruptQueue::new();
         queue.set_turn_state(TurnExecutionState::Thinking {
             started_at: Instant::now(),
-            tokens: 5,
+            tokens: Some(5),
             preview: "thinking...".to_string(),
         });
 
@@ -223,7 +225,7 @@ mod tests {
         // Switch to another active state - should NOT flush
         queue.set_turn_state(TurnExecutionState::StreamingContent {
             started_at: Instant::now(),
-            tokens: 10,
+            tokens: Some(10),
         });
 
         assert_eq!(queue.pending_count(), 1);

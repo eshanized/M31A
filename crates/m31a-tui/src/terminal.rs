@@ -3467,12 +3467,15 @@ pub fn handle_screen_key_event(app: &mut App, key: crossterm::event::KeyEvent) {
                 match app.screen_selected_index {
                     0 => {
                         let next = match app.config.tui.theme.as_deref() {
+                            Some("everblush") => "dark",
+                            Some("dark") => "light",
                             Some("light") => "contrast",
                             Some("contrast") | Some("high-contrast") => "everblush",
-                            _ => "light",
+                            _ => "dark",
                         };
                         app.config.tui.theme = Some(next.to_string());
                         let variant = match next {
+                            "dark" => crate::theme::ThemeVariant::Dark,
                             "light" => crate::theme::ThemeVariant::Light,
                             "contrast" => crate::theme::ThemeVariant::HighContrast,
                             _ => crate::theme::ThemeVariant::Everblush,
@@ -3482,7 +3485,10 @@ pub fn handle_screen_key_event(app: &mut App, key: crossterm::event::KeyEvent) {
                     1 => app.config.tui.vim_mode_default = !app.config.tui.vim_mode_default,
                     2 => app.config.tui.mouse_enabled = !app.config.tui.mouse_enabled,
                     3 => app.config.tui.animations = !app.config.tui.animations,
-                    4 => app.auto_scroll = !app.auto_scroll,
+                    4 => {
+                        app.auto_scroll = !app.auto_scroll;
+                        app.config.tui.auto_scroll = app.auto_scroll;
+                    }
                     5 => {
                         app.config.approval = match app.config.approval {
                             m31a_core::config::ApprovalPolicy::OnRequest => {
@@ -3514,7 +3520,11 @@ pub fn handle_screen_key_event(app: &mut App, key: crossterm::event::KeyEvent) {
                     }
                     _ => {}
                 }
-                let _ = app.config.save();
+                if let Err(e) = app.config.save() {
+                    app.provider_status_message = Some(format!("Failed to save config: {e}"));
+                } else {
+                    app.provider_status_message = Some("Settings saved successfully".to_string());
+                }
             }
             _ => {}
         },

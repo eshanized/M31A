@@ -55,7 +55,10 @@ pub enum TurnState {
         started_at: Instant,
     },
     /// Awaiting admission through trust, guardian, or rate-limit gates.
-    AwaitingAdmission { turn_id: String },
+    AwaitingAdmission {
+        turn_id: String,
+        started_at: Instant,
+    },
     /// Model is streaming reasoning/thinking tokens.
     Thinking {
         turn_id: String,
@@ -79,12 +82,14 @@ pub enum TurnState {
         turn_id: String,
         request_id: String,
         summary: String,
+        started_at: Instant,
     },
     /// Paused awaiting response to an elicitation question.
     AwaitingQuestion {
         turn_id: String,
         question_id: String,
         prompt: String,
+        started_at: Instant,
     },
     /// Compacting or summarizing conversation context.
     Compacting {
@@ -92,9 +97,15 @@ pub enum TurnState {
         started_at: Instant,
     },
     /// User requested cancellation (e.g. Ctrl+C), cancellation signal sent.
-    CancellationRequested { turn_id: String },
+    CancellationRequested {
+        turn_id: String,
+        started_at: Instant,
+    },
     /// Actively terminating child processes and cancelling tasks.
-    Cancelling { turn_id: String },
+    Cancelling {
+        turn_id: String,
+        started_at: Instant,
+    },
     /// Turn completed execution.
     Completed {
         turn_id: String,
@@ -104,7 +115,10 @@ pub enum TurnState {
     /// Turn halted with a failure.
     Failed { turn_id: String, error: String },
     /// Recovering from failure (e.g. self-healing or checkpoint rollback).
-    Recovering { turn_id: String },
+    Recovering {
+        turn_id: String,
+        started_at: Instant,
+    },
 }
 
 impl TurnState {
@@ -130,18 +144,37 @@ impl TurnState {
         match self {
             TurnState::Idle => None,
             TurnState::Submitted { turn_id, .. }
-            | TurnState::AwaitingAdmission { turn_id }
+            | TurnState::AwaitingAdmission { turn_id, .. }
             | TurnState::Thinking { turn_id, .. }
             | TurnState::Streaming { turn_id, .. }
             | TurnState::ExecutingTool { turn_id, .. }
             | TurnState::AwaitingApproval { turn_id, .. }
             | TurnState::AwaitingQuestion { turn_id, .. }
             | TurnState::Compacting { turn_id, .. }
-            | TurnState::CancellationRequested { turn_id }
-            | TurnState::Cancelling { turn_id }
+            | TurnState::CancellationRequested { turn_id, .. }
+            | TurnState::Cancelling { turn_id, .. }
             | TurnState::Completed { turn_id, .. }
             | TurnState::Failed { turn_id, .. }
-            | TurnState::Recovering { turn_id } => Some(turn_id),
+            | TurnState::Recovering { turn_id, .. } => Some(turn_id),
+        }
+    }
+
+    /// Returns the monotonic starting instant of the active turn phase, if applicable.
+    pub fn started_at(&self) -> Option<Instant> {
+        match self {
+            TurnState::Idle => None,
+            TurnState::Submitted { started_at, .. }
+            | TurnState::AwaitingAdmission { started_at, .. }
+            | TurnState::Thinking { started_at, .. }
+            | TurnState::Streaming { started_at, .. }
+            | TurnState::ExecutingTool { started_at, .. }
+            | TurnState::AwaitingApproval { started_at, .. }
+            | TurnState::AwaitingQuestion { started_at, .. }
+            | TurnState::Compacting { started_at, .. }
+            | TurnState::CancellationRequested { started_at, .. }
+            | TurnState::Cancelling { started_at, .. }
+            | TurnState::Recovering { started_at, .. } => Some(*started_at),
+            TurnState::Completed { .. } | TurnState::Failed { .. } => None,
         }
     }
 
@@ -336,6 +369,16 @@ impl TurnStateMachine {
         })
     }
 
+    pub fn transition_awaiting_admission(
+        &mut self,
+        turn_id: impl Into<String>,
+    ) -> Result<(), IllegalTransitionError> {
+        self.transition_to(TurnState::AwaitingAdmission {
+            turn_id: turn_id.into(),
+            started_at: Instant::now(),
+        })
+    }
+
     pub fn transition_thinking(
         &mut self,
         turn_id: impl Into<String>,
@@ -382,6 +425,7 @@ impl TurnStateMachine {
             turn_id: turn_id.into(),
             request_id: request_id.into(),
             summary: summary.into(),
+            started_at: Instant::now(),
         })
     }
 
@@ -395,6 +439,7 @@ impl TurnStateMachine {
             turn_id: turn_id.into(),
             question_id: question_id.into(),
             prompt: prompt.into(),
+            started_at: Instant::now(),
         })
     }
 
@@ -414,6 +459,7 @@ impl TurnStateMachine {
     ) -> Result<(), IllegalTransitionError> {
         self.transition_to(TurnState::CancellationRequested {
             turn_id: turn_id.into(),
+            started_at: Instant::now(),
         })
     }
 
@@ -423,6 +469,7 @@ impl TurnStateMachine {
     ) -> Result<(), IllegalTransitionError> {
         self.transition_to(TurnState::Cancelling {
             turn_id: turn_id.into(),
+            started_at: Instant::now(),
         })
     }
 
@@ -447,6 +494,16 @@ impl TurnStateMachine {
         self.transition_to(TurnState::Failed {
             turn_id: turn_id.into(),
             error: error.into(),
+        })
+    }
+
+    pub fn transition_recovering(
+        &mut self,
+        turn_id: impl Into<String>,
+    ) -> Result<(), IllegalTransitionError> {
+        self.transition_to(TurnState::Recovering {
+            turn_id: turn_id.into(),
+            started_at: Instant::now(),
         })
     }
 }
@@ -529,6 +586,7 @@ mod tests {
         // Cancellation requested
         sm.transition_to(TurnState::CancellationRequested {
             turn_id: "turn-cancel".to_string(),
+            started_at: Instant::now(),
         })
         .unwrap();
         assert_eq!(sm.label(), "Cancelling...");
@@ -536,6 +594,7 @@ mod tests {
         // Cancelling processes
         sm.transition_to(TurnState::Cancelling {
             turn_id: "turn-cancel".to_string(),
+            started_at: Instant::now(),
         })
         .unwrap();
         assert!(!sm.state().is_cancellable()); // already cancelling
