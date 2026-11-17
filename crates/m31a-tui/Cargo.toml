@@ -31,6 +31,7 @@ m31a-proc = { path = "../m31a-proc" }
 m31a-watcher = { path = "../m31a-watcher" }
 m31a-mcp = { path = "../m31a-mcp" }
 m31a-collaboration-templates = { path = "../m31a-collaboration-templates" }
+m31a-maintenance = { path = "../m31a-maintenance" }
 
 tokio.workspace = true
 tokio-util.workspace = true
