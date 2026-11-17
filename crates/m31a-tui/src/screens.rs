@@ -1348,6 +1348,7 @@ fn render_diagnostics_screen(f: &mut Frame, app: &App, area: Rect, t: &Theme) {
         .constraints([
             Constraint::Length(7),
             Constraint::Length(7),
+            Constraint::Length(7),
             Constraint::Min(6),
         ])
         .split(area);
@@ -1443,7 +1444,42 @@ fn render_diagnostics_screen(f: &mut Frame, app: &App, area: Rect, t: &Theme) {
         .title(" Process Supervision & Sandbox Health ");
     f.render_widget(Paragraph::new(tool_lines).block(tool_block), chunks[1]);
 
-    // 3. Storage and Integrity
+    // 3. Autonomous Repository Maintenance & Verification Engine
+    let maint_lines = vec![
+        Line::from(vec![
+            Span::styled(
+                "Autonomous Maintenance Engine: ",
+                t.style_secondary().add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "Active (Autonomy Tier 2 Guarded Remediation)",
+                Style::default().fg(t.color(ColorRole::Success)),
+            ),
+            Span::styled(" │ Policy: ", t.style_secondary()),
+            Span::styled("Initiative 3 Enforced", t.style_muted()),
+        ]),
+        Line::from(vec![
+            Span::styled("Verified Execution: ", t.style_secondary()),
+            Span::styled(
+                "Fenced Isolated Worktrees with Initiative 2 Verification Contract",
+                Style::default().fg(t.color(ColorRole::Accent)),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("Maintenance Commands: ", t.style_secondary()),
+            Span::styled(
+                "`/maintenance` overview │ `/maintenance scan` AST scan │ `/maintenance cases`",
+                t.style_muted(),
+            ),
+        ]),
+    ];
+    let maint_block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(t.border_subtle())
+        .title(" Autonomous Repository Maintenance & Verification Engine ");
+    f.render_widget(Paragraph::new(maint_lines).block(maint_block), chunks[2]);
+
+    // 4. Storage and Integrity
     let db_path = m31a_core::Config::config_dir().join("storage.db");
     let storage_lines = vec![
         Line::from(vec![
@@ -1467,7 +1503,7 @@ fn render_diagnostics_screen(f: &mut Frame, app: &App, area: Rect, t: &Theme) {
         .title(" Storage & Persistence Diagnostics ");
     f.render_widget(
         Paragraph::new(storage_lines).block(storage_block),
-        chunks[2],
+        chunks[3],
     );
 }
 
