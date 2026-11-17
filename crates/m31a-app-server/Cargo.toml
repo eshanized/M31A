@@ -20,6 +20,7 @@ m31a-guardian = { path = "../m31a-guardian" }
 m31a-hooks = { path = "../m31a-hooks" }
 m31a-code-mode = { path = "../m31a-code-mode" }
 m31a-trust = { path = "../m31a-trust" }
+m31a-maintenance = { path = "../m31a-maintenance" }
 m31a-elicitation = { workspace = true }
 serde.workspace = true
 serde_json.workspace = true
