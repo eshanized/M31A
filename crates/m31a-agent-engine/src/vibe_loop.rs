@@ -10,7 +10,6 @@
 
 use m31a_core::types::ChatMessage;
 use m31a_provider::ProviderClient;
-use m31a_tools::patch::{apply_patch_to_workspace, parse_patch};
 use m31a_verify::AutonomousVerifier;
 use m31a_watcher::{WatcherConfig, WorkspaceWatcher};
 use serde::{Deserialize, Serialize};
@@ -221,6 +220,11 @@ pub enum VibeEvent {
         source_file: PathBuf,
         suggested_companion: PathBuf,
         rationale: String,
+    },
+    MaintenanceSignalAvailable {
+        category: String,
+        description: String,
+        diagnostics: Vec<String>,
     },
     VibeStopped,
 }
@@ -474,55 +478,70 @@ impl VibeEngine {
             match resp {
                 Ok((resp_msg, _usage)) => {
                     if let Some(ref patch_text) = resp_msg.content
-                        && patch_text.contains("*** Begin Patch")
-                        && let Ok(parsed) = parse_patch(patch_text)
+                        && (patch_text.contains("*** Begin Patch") || patch_text.contains("diff --git"))
                     {
-                        match apply_patch_to_workspace(ws_root, &parsed) {
-                            Ok(apply_res) => {
-                                let mut files_healed = apply_res.files_modified;
-                                files_healed.extend(apply_res.files_created);
+                        let integ_svc = crate::integration::WorkflowIntegrationService::new();
+                        let req = crate::integration::IntegrationRequest {
+                            workspace_root: ws_root.to_path_buf(),
+                            patch_content: patch_text.to_string(),
+                            source_label: "vibe_auto_heal".to_string(),
+                            commit_message: Some(format!(
+                                "fix(vibe): auto-heal compiler diagnostics (attempt {})",
+                                attempt
+                            )),
+                            require_approval: false,
+                            is_approved: true,
+                            author_role: Some("maintainer".to_string()),
+                            skip_dirty_check: true,
+                            skip_verification: false,
+                            verification_timeout: Some(config.check_timeout),
+                            ..Default::default()
+                        };
 
-                                // Re-verify
-                                if let Ok(re_report) =
-                                    AutonomousVerifier::verify_check(ws_root, config.check_timeout)
-                                        .await
-                                {
-                                    if re_report.success {
-                                        let duration_ms = heal_start.elapsed().as_millis() as u64;
-                                        let _ = tx.send(VibeEvent::SelfHealingSuccess {
-                                            duration_ms,
-                                            files_healed: files_healed.clone(),
-                                        });
+                        match integ_svc.integrate(&req).await {
+                            Ok(outcome) if outcome.success && outcome.verification_passed => {
+                                let duration_ms = heal_start.elapsed().as_millis() as u64;
+                                let files_healed = outcome.modified_files.clone();
+                                let _ = tx.send(VibeEvent::SelfHealingSuccess {
+                                    duration_ms,
+                                    files_healed: files_healed.clone(),
+                                });
 
-                                        // Capture successful self-heal checkpoint
-                                        if config.enable_timeline {
-                                            let mut tl = timeline.lock().unwrap();
-                                            let ckpt = tl.record_checkpoint(
-                                                ws_root,
-                                                format!(
-                                                    "Autonomous auto-heal succeeded (attempt {})",
-                                                    attempt
-                                                ),
-                                                &files_healed,
-                                            );
-                                            let _ = tx.send(VibeEvent::CheckpointCreated {
-                                                checkpoint_id: ckpt.id,
-                                                commit_hash: ckpt.commit_hash,
-                                                description: ckpt.description,
-                                                timestamp: ckpt.timestamp,
-                                                files: ckpt.files,
-                                            });
-                                        }
-                                        return;
-                                    } else if let Some(ref next_prompt) =
-                                        re_report.self_healing_prompt
-                                    {
-                                        current_prompt = next_prompt.clone();
-                                    }
+                                // Capture successful self-heal checkpoint
+                                if config.enable_timeline {
+                                    let mut tl = timeline.lock().unwrap();
+                                    let ckpt = tl.record_checkpoint(
+                                        ws_root,
+                                        format!(
+                                            "Autonomous auto-heal succeeded (attempt {})",
+                                            attempt
+                                        ),
+                                        &files_healed,
+                                    );
+                                    let _ = tx.send(VibeEvent::CheckpointCreated {
+                                        checkpoint_id: ckpt.id,
+                                        commit_hash: ckpt.commit_hash,
+                                        description: ckpt.description,
+                                        timestamp: ckpt.timestamp,
+                                        files: ckpt.files,
+                                    });
+                                }
+                                return;
+                            }
+                            Ok(outcome) => {
+                                warn!(
+                                    attempt,
+                                    summary = %outcome.summary,
+                                    "Vibe self-heal verification failed and was cleanly rolled back"
+                                );
+                                if let Some(err) = outcome.error {
+                                    current_prompt = format!(
+                                        "Previous fix attempt failed verification: {err}. Please provide an alternative fix."
+                                    );
                                 }
                             }
                             Err(e) => {
-                                warn!("Patch apply failed during auto-heal: {e}");
+                                warn!("Vibe auto-heal integration error: {e}");
                             }
                         }
                     }
@@ -538,6 +557,16 @@ impl VibeEngine {
                 "Exhausted {} self-healing attempts",
                 config.max_heal_attempts
             ),
+        });
+
+        // Escalate to persistent maintenance engine signal
+        let _ = tx.send(VibeEvent::MaintenanceSignalAvailable {
+            category: "broken_ci".to_string(),
+            description: format!(
+                "Persistent compiler errors unresolved after {} Vibe auto-heal attempts",
+                config.max_heal_attempts
+            ),
+            diagnostics: vec![current_prompt.clone()],
         });
     }
 }
