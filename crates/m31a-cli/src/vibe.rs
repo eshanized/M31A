@@ -211,6 +211,19 @@ pub async fn run_vibe_mode(opts: VibeCliOptions) -> Result<()> {
                         rationale.dimmed()
                     );
                 }
+                VibeEvent::MaintenanceSignalAvailable {
+                    category,
+                    description,
+                    diagnostics,
+                } => {
+                    println!(
+                        "{} Signal [{}] {} ({} diagnostics)",
+                        "[🛡️ MAINTENANCE SIGNAL]".bright_yellow().bold(),
+                        category.bright_cyan(),
+                        description,
+                        diagnostics.len()
+                    );
+                }
                 VibeEvent::VibeStopped => {
                     println!("{}", "[🛑 VIBE STOPPED]".dimmed());
                     break;
