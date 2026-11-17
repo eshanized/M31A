@@ -41,6 +41,7 @@ m31a-ast = { path = "../m31a-ast" }
 m31a-trust = { path = "../m31a-trust" }
 m31a-proc = { path = "../m31a-proc" }
 m31a-watcher = { path = "../m31a-watcher" }
+m31a-maintenance = { path = "../m31a-maintenance" }
 m31a-compaction = { path = "../m31a-compaction" }
 m31a-collaboration-templates = { path = "../m31a-collaboration-templates" }
 m31a-telemetry = { path = "../m31a-telemetry" }
