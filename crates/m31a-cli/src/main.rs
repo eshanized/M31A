@@ -39,6 +39,7 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 mod doctor;
 mod gsd;
+mod maintenance_cli;
 mod repo_cli;
 mod setup;
 mod speculate;
@@ -384,6 +385,17 @@ enum Commands {
 
         #[command(subcommand)]
         cmd: repo_cli::RepoCommands,
+    },
+    #[command(
+        name = "maintenance",
+        about = "Autonomous repository maintenance engine, signal intake, triage, and verified execution"
+    )]
+    Maintenance {
+        #[arg(long = "json", global = true, help = "Output structured JSON")]
+        json: bool,
+
+        #[command(subcommand)]
+        cmd: maintenance_cli::MaintenanceCommands,
     },
     #[command(about = "Inspect and manage cross-session memories")]
     Memories {
@@ -1513,6 +1525,11 @@ async fn main() -> Result<()> {
 
         Some(Commands::Repo { json, cmd }) => {
             repo_cli::run_repo_command(cmd, json, &cwd).await?;
+            Ok(())
+        }
+
+        Some(Commands::Maintenance { json, cmd }) => {
+            maintenance_cli::run_maintenance_command(cmd, json, &cwd).await?;
             Ok(())
         }
 
