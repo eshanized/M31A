@@ -33,6 +33,10 @@ pub struct DiffStatsSummary {
     pub deletions: usize,
     pub hunks: usize,
     pub files: usize,
+    pub new_files: usize,
+    pub deleted_files: usize,
+    pub renamed_files: usize,
+    pub modified_files: usize,
 }
 
 pub struct DiffRenderer;
@@ -46,8 +50,16 @@ impl DiffRenderer {
                 DiffLineKind::Addition { .. } => stats.additions += 1,
                 DiffLineKind::Deletion { .. } => stats.deletions += 1,
                 DiffLineKind::HunkHeader { .. } => stats.hunks += 1,
-                DiffLineKind::FileHeader if item.content.starts_with("diff --git") => {
-                    stats.files += 1;
+                DiffLineKind::FileHeader => {
+                    if item.content.starts_with("diff --git") {
+                        stats.files += 1;
+                    } else if item.content.starts_with("new file mode") {
+                        stats.new_files += 1;
+                    } else if item.content.starts_with("deleted file mode") {
+                        stats.deleted_files += 1;
+                    } else if item.content.starts_with("rename from") || item.content.starts_with("rename to") {
+                        stats.renamed_files += 1;
+                    }
                 }
                 _ => {}
             }
@@ -55,6 +67,7 @@ impl DiffRenderer {
         if stats.files == 0 && (stats.additions > 0 || stats.deletions > 0 || stats.hunks > 0) {
             stats.files = 1;
         }
+        stats.modified_files = stats.files.saturating_sub(stats.new_files + stats.deleted_files);
         stats
     }
 
@@ -319,5 +332,8 @@ index 123456..789abc 100644
         assert_eq!(stats.deletions, 1);
         assert_eq!(stats.hunks, 1);
         assert_eq!(stats.files, 1);
+        assert_eq!(stats.modified_files, 1);
+        assert_eq!(stats.new_files, 0);
+        assert_eq!(stats.deleted_files, 0);
     }
 }

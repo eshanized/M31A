@@ -35,6 +35,11 @@ pub enum ColorRole {
     BorderFocus,  // Focused element border
     BorderSubtle, // Subtle dividers
 
+    // Selection & Disabled
+    Selection,
+    SelectionFg,
+    Disabled,
+
     // Code / Syntax (minimal set)
     CodeKeyword,
     CodeString,
@@ -96,6 +101,11 @@ pub struct ThemeColors {
     pub border: Color,
     pub border_focus: Color,
     pub border_subtle: Color,
+
+    // Selection & Disabled
+    pub selection: Color,
+    pub selection_fg: Color,
+    pub disabled: Color,
 
     // Code syntax (subtle)
     pub code_keyword: Color,
@@ -169,6 +179,11 @@ impl Theme {
                 border_focus: Color::Rgb(0x6c, 0xbf, 0xbf), // #6cbfbf - Everblush cyan focus
                 border_subtle: Color::Rgb(0x23, 0x2a, 0x2d), // #232a2d
 
+                // Selection & Disabled
+                selection: Color::Rgb(0x6c, 0xbf, 0xbf), // #6cbfbf - Everblush cyan
+                selection_fg: Color::Rgb(0x14, 0x1b, 0x1e), // #141b1e - dark text on cyan
+                disabled: Color::Rgb(0x67, 0x6e, 0x71), // #676e71 - muted gray
+
                 // Code syntax — Everblush token styling
                 code_keyword: Color::Rgb(0xc4, 0x7f, 0xd5), // #c47fd5 - Everblush magenta
                 code_string: Color::Rgb(0x8c, 0xcf, 0x7e),  // #8ccf7e - Everblush green
@@ -228,6 +243,11 @@ impl Theme {
                 border_focus: Color::Rgb(0x25, 0x63, 0xeb),
                 border_subtle: Color::Rgb(0xf0, 0xf0, 0xf0),
 
+                // Selection & Disabled
+                selection: Color::Rgb(0x25, 0x63, 0xeb), // blue-600
+                selection_fg: Color::Rgb(0xff, 0xff, 0xff), // white
+                disabled: Color::Rgb(0x9e, 0x9e, 0x9e), // gray-400
+
                 code_keyword: Color::Rgb(0x93, 0x33, 0xea),
                 code_string: Color::Rgb(0x16, 0xa3, 0x4a),
                 code_number: Color::Rgb(0xea, 0x58, 0x0c),
@@ -280,6 +300,11 @@ impl Theme {
                 border: Color::Rgb(0x66, 0x66, 0x66),
                 border_focus: Color::Rgb(0x00, 0x96, 0xff),
                 border_subtle: Color::Rgb(0x33, 0x33, 0x33),
+
+                // Selection & Disabled
+                selection: Color::Rgb(0x00, 0x96, 0xff), // bright blue
+                selection_fg: Color::Black,
+                disabled: Color::Rgb(0x66, 0x66, 0x66),
 
                 code_keyword: Color::Rgb(0xcc, 0x66, 0xff),
                 code_string: Color::Rgb(0x66, 0xff, 0x66),
@@ -340,6 +365,9 @@ impl Theme {
             ColorRole::Border => self.colors.border,
             ColorRole::BorderFocus => self.colors.border_focus,
             ColorRole::BorderSubtle => self.colors.border_subtle,
+            ColorRole::Selection => self.colors.selection,
+            ColorRole::SelectionFg => self.colors.selection_fg,
+            ColorRole::Disabled => self.colors.disabled,
             ColorRole::CodeKeyword => self.colors.code_keyword,
             ColorRole::CodeString => self.colors.code_string,
             ColorRole::CodeNumber => self.colors.code_number,
@@ -431,9 +459,21 @@ impl Theme {
     /// Selected/focused item style
     pub fn style_selected(&self) -> Style {
         Style::default()
-            .fg(self.color(ColorRole::TextInverse))
-            .bg(self.color(ColorRole::Accent))
+            .fg(self.color(ColorRole::SelectionFg))
+            .bg(self.color(ColorRole::Selection))
             .add_modifier(Modifier::BOLD)
+    }
+
+    /// Canonical selection style alias
+    pub fn style_selection(&self) -> Style {
+        self.style_selected()
+    }
+
+    /// Disabled control style
+    pub fn style_disabled(&self) -> Style {
+        Style::default()
+            .fg(self.color(ColorRole::Disabled))
+            .add_modifier(Modifier::DIM)
     }
 
     /// Subtle selected (for lists with focus but not active)
@@ -616,5 +656,21 @@ mod tests {
         let curr = theme();
         assert_eq!(curr.colors.surface_0, Color::Rgb(0x14, 0x1b, 0x1e));
         assert_eq!(curr.colors.accent, Color::Rgb(0x6c, 0xbf, 0xbf));
+    }
+
+    #[test]
+    fn test_design_system_tokens_and_roles() {
+        for theme in [Theme::everblush(), Theme::light(), Theme::high_contrast()] {
+            assert_eq!(theme.color(ColorRole::Selection), theme.colors.selection);
+            assert_eq!(theme.color(ColorRole::SelectionFg), theme.colors.selection_fg);
+            assert_eq!(theme.color(ColorRole::Disabled), theme.colors.disabled);
+
+            let sel_style = theme.style_selection();
+            assert_eq!(sel_style.bg, Some(theme.colors.selection));
+            assert_eq!(sel_style.fg, Some(theme.colors.selection_fg));
+
+            let dis_style = theme.style_disabled();
+            assert_eq!(dis_style.fg, Some(theme.colors.disabled));
+        }
     }
 }

@@ -98,3 +98,33 @@ fn test_responsive_layout_across_standard_and_narrow_viewports() {
         app.clear_modals();
     }
 }
+
+#[test]
+fn test_navbar_rendering_across_narrow_and_wide_viewports() {
+    init_theme(ThemeVariant::Dark);
+    let config = Config {
+        api_key: Some("test_api_key".to_string()),
+        ..Default::default()
+    };
+    let mut app = App::new(config).expect("failed to create app");
+
+    let widths = [160, 120, 100, 80, 60, 40];
+    for w in widths {
+        let backend = TestBackend::new(w, 5);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        for &screen in &m31a_tui::Screen::ALL {
+            app.switch_screen(screen);
+            let res = terminal.draw(|f| {
+                let area = ratatui::layout::Rect::new(0, 0, w, 1);
+                m31a_tui::screens::render_navbar(f, &app, area, &m31a_tui::theme::theme());
+            });
+            assert!(
+                res.is_ok(),
+                "Navbar failed to render for screen {:?} at width {}",
+                screen,
+                w
+            );
+        }
+    }
+}

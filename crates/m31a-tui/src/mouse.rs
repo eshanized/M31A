@@ -1065,7 +1065,7 @@ fn extract_selected_text(app: &App, sel: MouseSelection, screen_area: Rect) -> O
 
 pub fn settings_items_count(tab: usize) -> usize {
     match tab {
-        0 => 4, // General: Model, Reasoning Effort, Dynamic Routing, Web Search
+        0 => 5, // General: Model, Reasoning Effort, Dynamic Routing, Web Search, Onboarding Setup Wizard
         1 => 4, // Security: Sandbox, Approval, Login Shell, Hooks
         2 => 7, // TUI: Theme, Animations, Vim Mode, Mouse Support, Scroll Acceleration, Copy on Select, Scroll Speed
         3 => 6, // Features: Memories, Goals, Max Depth, Max Threads, Code Mode, Guardian
@@ -1113,6 +1113,11 @@ pub fn toggle_or_cycle_setting(app: &mut App, active_tab: usize, selected_index:
                         "duckduckgo" => "disabled".to_string(),
                         _ => "live".to_string(),
                     };
+                }
+                4 => {
+                    app.push_modal(crate::modals::ModalState::setup_wizard(
+                        crate::modals::SetupWizardState::new(&app.config, &app.available_models),
+                    ));
                 }
                 _ => {}
             }
@@ -1396,7 +1401,11 @@ mod tests {
         handle_mouse_event(&mut app, click_mode, Rect::new(0, 0, 100, 40));
         assert_eq!(app.collaboration_mode, CollaborationMode::Plan);
 
-        // Click again to toggle back
+        // Click again to toggle to Review
+        handle_mouse_event(&mut app, click_mode, Rect::new(0, 0, 100, 40));
+        assert_eq!(app.collaboration_mode, CollaborationMode::Review);
+
+        // Click again to toggle back to Default
         handle_mouse_event(&mut app, click_mode, Rect::new(0, 0, 100, 40));
         assert_eq!(app.collaboration_mode, CollaborationMode::Default);
     }

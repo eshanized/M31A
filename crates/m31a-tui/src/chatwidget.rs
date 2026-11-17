@@ -447,6 +447,114 @@ impl ChatWidgetState {
         };
     }
 
+    /// Synchronizes presentation TurnExecutionState from canonical TurnState.
+    pub fn sync_with_canonical(&mut self, state: &crate::turn::TurnState) {
+        match state {
+            crate::turn::TurnState::Idle => {
+                self.turn_state = TurnExecutionState::Idle;
+            }
+            crate::turn::TurnState::Submitted { started_at, .. } => {
+                self.turn_state = TurnExecutionState::Thinking {
+                    started_at: *started_at,
+                    tokens: 0,
+                    preview: String::new(),
+                };
+            }
+            crate::turn::TurnState::AwaitingAdmission { .. } => {
+                self.turn_state = TurnExecutionState::Thinking {
+                    started_at: Instant::now(),
+                    tokens: 0,
+                    preview: "Awaiting admission...".to_string(),
+                };
+            }
+            crate::turn::TurnState::Thinking {
+                started_at, preview, ..
+            } => {
+                let current_tokens = match &self.turn_state {
+                    TurnExecutionState::Thinking { tokens, .. } => *tokens + 1,
+                    _ => 1,
+                };
+                self.turn_state = TurnExecutionState::Thinking {
+                    started_at: *started_at,
+                    tokens: current_tokens,
+                    preview: preview.clone(),
+                };
+            }
+            crate::turn::TurnState::Streaming { started_at, .. } => {
+                let current_tokens = match &self.turn_state {
+                    TurnExecutionState::StreamingContent { tokens, .. } => *tokens + 1,
+                    _ => 1,
+                };
+                self.turn_state = TurnExecutionState::StreamingContent {
+                    started_at: *started_at,
+                    tokens: current_tokens,
+                };
+            }
+            crate::turn::TurnState::ExecutingTool {
+                tool_id,
+                tool_name,
+                started_at,
+                ..
+            } => {
+                self.turn_state = TurnExecutionState::ToolExecuting {
+                    tool_id: tool_id.clone(),
+                    tool_name: tool_name.clone(),
+                    started_at: *started_at,
+                };
+            }
+            crate::turn::TurnState::AwaitingApproval {
+                request_id,
+                summary,
+                ..
+            } => {
+                self.turn_state = TurnExecutionState::AwaitingApproval {
+                    request_id: request_id.clone(),
+                    action_summary: summary.clone(),
+                };
+            }
+            crate::turn::TurnState::AwaitingQuestion { prompt, .. } => {
+                self.turn_state = TurnExecutionState::AwaitingApproval {
+                    request_id: String::new(),
+                    action_summary: prompt.clone(),
+                };
+            }
+            crate::turn::TurnState::Compacting { started_at, .. } => {
+                self.turn_state = TurnExecutionState::CompactingHistory {
+                    started_at: *started_at,
+                };
+            }
+            crate::turn::TurnState::CancellationRequested { .. }
+            | crate::turn::TurnState::Cancelling { .. } => {
+                self.turn_state = TurnExecutionState::Thinking {
+                    started_at: Instant::now(),
+                    tokens: 0,
+                    preview: "Cancelling...".to_string(),
+                };
+            }
+            crate::turn::TurnState::Completed {
+                tokens_used,
+                duration_ms,
+                ..
+            } => {
+                self.streaming_buffer.mark_turn_completed();
+                self.turn_state = TurnExecutionState::TurnCompleted {
+                    duration_ms: *duration_ms,
+                    tokens_used: *tokens_used,
+                };
+            }
+            crate::turn::TurnState::Failed { error, .. } => {
+                self.turn_state = TurnExecutionState::Failed {
+                    error: error.clone(),
+                };
+            }
+            crate::turn::TurnState::Recovering { .. } => {
+                self.turn_state = TurnExecutionState::Failed {
+                    error: "Recovering...".to_string(),
+                };
+            }
+        }
+    }
+
     /// Formats the active status badge text and color.
     pub fn format_status_badge(&self) -> (String, Color) {
         let spinner = self.spinner_char();

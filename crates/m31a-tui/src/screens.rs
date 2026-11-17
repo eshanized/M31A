@@ -86,17 +86,76 @@ impl Screen {
             Screen::Diagnostics => "0",
         }
     }
+
+    pub fn compact_title(&self) -> &'static str {
+        match self {
+            Screen::Chat => "Chat",
+            Screen::Sessions => "Sess",
+            Screen::Models => "Models",
+            Screen::Providers => "Prov",
+            Screen::Agents => "Agents",
+            Screen::Workspace => "Work",
+            Screen::SourceControl => "Git",
+            Screen::ToolsIntegrations => "Tools",
+            Screen::Settings => "Set",
+            Screen::Diagnostics => "Diag",
+        }
+    }
 }
 
-/// Renders the primary 10-screen navigation bar.
+/// Renders the primary 10-screen navigation bar with responsive layout across terminal widths.
 pub fn render_navbar(f: &mut Frame, app: &App, area: Rect, t: &Theme) {
+    if area.height == 0 || area.width == 0 {
+        return;
+    }
+
+    if area.width < 75 {
+        // Ultra-compact / narrow viewport (< 75 cols): show active screen pill + screen shortcuts
+        let active = app.current_screen;
+        let mut spans = Vec::new();
+        spans.push(Span::styled(" ", t.style_muted()));
+        spans.push(Span::styled(
+            format!(" [{}: {}] ", active.shortcut(), active.compact_title()),
+            Style::default()
+                .fg(t.color(ColorRole::Surface0))
+                .bg(t.color(ColorRole::Accent))
+                .add_modifier(Modifier::BOLD),
+        ));
+        spans.push(Span::styled(" ", t.style_muted()));
+        for s in Screen::ALL {
+            if s == active {
+                continue;
+            }
+            spans.push(Span::styled(
+                format!("{} ", s.shortcut()),
+                t.style_muted(),
+            ));
+        }
+        let p = Paragraph::new(Line::from(spans))
+            .style(t.style_surface0())
+            .block(
+                Block::default()
+                    .borders(Borders::BOTTOM)
+                    .border_style(t.border_subtle()),
+            );
+        f.render_widget(p, area);
+        return;
+    }
+
+    let is_compact = area.width < 120;
+    let sep = if is_compact { " " } else { "  " };
+
     let mut spans = Vec::new();
     spans.push(Span::styled(" ", t.style_muted()));
 
     for (i, screen) in Screen::ALL.iter().enumerate() {
         let is_active = app.current_screen == *screen;
         let num = screen.shortcut();
-        let title = screen.title();
+        let title = if is_compact {
+            screen.compact_title()
+        } else {
+            screen.title()
+        };
 
         let tab_style = if is_active {
             Style::default()
@@ -125,24 +184,9 @@ pub fn render_navbar(f: &mut Frame, app: &App, area: Rect, t: &Theme) {
         spans.push(Span::styled(format!("{} ", title), tab_style));
 
         if i + 1 < Screen::ALL.len() {
-            spans.push(Span::styled("  ", t.style_muted()));
+            spans.push(Span::styled(sep, t.style_muted()));
         }
     }
-
-    // Right-aligned inspector indicator badge
-    let inspector_label = if app.inspector_open {
-        " [F12 Inspector: ON] "
-    } else {
-        " [F12 Inspector: OFF] "
-    };
-    let inspector_style = if app.inspector_open {
-        Style::default()
-            .fg(t.color(ColorRole::Surface0))
-            .bg(t.color(ColorRole::Success))
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().fg(t.color(ColorRole::TextMuted))
-    };
 
     let p = Paragraph::new(Line::from(spans))
         .style(t.style_surface0())
@@ -153,15 +197,32 @@ pub fn render_navbar(f: &mut Frame, app: &App, area: Rect, t: &Theme) {
         );
     f.render_widget(p, area);
 
-    let right_area = Rect {
-        x: area.x + area.width.saturating_sub(inspector_label.len() as u16 + 1),
-        y: area.y,
-        width: inspector_label.len() as u16 + 1,
-        height: 1,
-    };
-    if right_area.width > 0 && right_area.x < area.x + area.width {
-        let ip = Paragraph::new(inspector_label).style(inspector_style);
-        f.render_widget(ip, right_area);
+    // Show inspector badge on right only when width allows (>= 105 cols)
+    if area.width >= 105 {
+        let inspector_label = if app.inspector_open {
+            " [F12 Inspector: ON] "
+        } else {
+            " [F12 Inspector: OFF] "
+        };
+        let inspector_style = if app.inspector_open {
+            Style::default()
+                .fg(t.color(ColorRole::Surface0))
+                .bg(t.color(ColorRole::Success))
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(t.color(ColorRole::TextMuted))
+        };
+
+        let right_area = Rect {
+            x: area.x + area.width.saturating_sub(inspector_label.len() as u16 + 1),
+            y: area.y,
+            width: inspector_label.len() as u16 + 1,
+            height: 1,
+        };
+        if right_area.width > 0 && right_area.x < area.x + area.width {
+            let ip = Paragraph::new(inspector_label).style(inspector_style);
+            f.render_widget(ip, right_area);
+        }
     }
 }
 
@@ -1246,7 +1307,7 @@ fn render_tools_integrations_screen(f: &mut Frame, app: &App, area: Rect, t: &Th
 // -------------------------------------------------------------------------------------------------
 fn render_settings_screen(f: &mut Frame, app: &App, area: Rect, t: &Theme) {
     let settings = [
-        ("Theme", format!("{:?}", app.config.tui.theme)),
+        ("Theme", app.config.tui.theme.as_deref().unwrap_or("everblush").to_string()),
         (
             "Vim Mode",
             if app.config.tui.vim_mode_default {
@@ -1271,6 +1332,14 @@ fn render_settings_screen(f: &mut Frame, app: &App, area: Rect, t: &Theme) {
                 "Disabled".to_string()
             },
         ),
+        (
+            "Auto-Scroll Transcript",
+            if app.auto_scroll {
+                "Enabled".to_string()
+            } else {
+                "Disabled".to_string()
+            },
+        ),
         ("Approval Policy", format!("{:?}", app.config.approval)),
         (
             "Reasoning Effort",
@@ -1280,12 +1349,8 @@ fn render_settings_screen(f: &mut Frame, app: &App, area: Rect, t: &Theme) {
                 .unwrap_or_else(|| "Default".to_string()),
         ),
         (
-            "Max Context Tokens",
-            format!("{}", app.config.model_context_window),
-        ),
-        (
-            "Auto Compact Token Limit",
-            format!("{}", app.config.model_auto_compact_token_limit),
+            "Onboarding Setup Wizard",
+            "Guided Setup [Enter to launch]".to_string(),
         ),
     ];
 
@@ -1311,10 +1376,16 @@ fn render_settings_screen(f: &mut Frame, app: &App, area: Rect, t: &Theme) {
                 Style::default().fg(t.color(ColorRole::TextPrimary))
             };
 
+            let action_label = if i == 7 {
+                "[Enter] Launch Wizard"
+            } else {
+                "[Enter / Space] Toggle / Cycle"
+            };
+
             Row::new(vec![
                 Cell::from(*name),
                 Cell::from(val.clone()),
-                Cell::from("[Enter / Space] Toggle / Cycle"),
+                Cell::from(action_label),
             ])
             .style(row_style)
         })
@@ -1569,7 +1640,7 @@ pub fn render_contextual_footer(f: &mut Frame, app: &App, area: Rect, t: &Theme)
             ),
             Screen::Settings => (
                 format!(" [Screen 9/10: {}] ", app.current_screen.title()),
-                "↑/↓: Select  Enter: Toggle  s: Save  Esc: Back to Chat".to_string(),
+                "↑/↓: Select  Enter: Toggle / Launch  s: Save  Esc: Back to Chat".to_string(),
             ),
             Screen::Diagnostics => (
                 format!(" [Screen 10/10: {}] ", app.current_screen.title()),

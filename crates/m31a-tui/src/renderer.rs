@@ -625,6 +625,14 @@ fn render_approval_dialog(
         .border_style(t.style_error(false))
         .style(t.style_surface1());
 
+    let (risk_label, scope_label) = if approval.command.is_some() {
+        ("High (Command Execution)", "Host Subprocess")
+    } else if approval.diff.is_some() || approval.target_file().is_some() {
+        ("Medium (File Mutation)", "Workspace Filesystem")
+    } else {
+        ("Standard (Tool Invocation)", "Sandboxed API")
+    };
+
     let mut body = vec![
         Line::from(vec![
             Span::styled("Tool: ", t.style_secondary().add_modifier(Modifier::BOLD)),
@@ -632,6 +640,10 @@ fn render_approval_dialog(
                 &approval.tool_call.function.name,
                 t.style_primary().add_modifier(Modifier::BOLD),
             ),
+            Span::styled("  │  Risk: ", t.style_muted()),
+            Span::styled(risk_label, t.style_warning(true)),
+            Span::styled("  │  Scope: ", t.style_muted()),
+            Span::styled(scope_label, t.style_info(false)),
         ]),
         Line::from(vec![
             Span::styled("Reason: ", t.style_warning(true)),
@@ -710,25 +722,42 @@ fn render_approval_dialog(
                 .bg(t.color(bg))
                 .add_modifier(Modifier::BOLD)
         };
-        let label = match kind {
-            ApprovalActionKind::AllowOnce => "Allow Once".to_string(),
-            ApprovalActionKind::AllowRule => format!(
-                "Allow & Amend Rule (prefix: '{}')",
-                approval.suggested_rule.as_deref().unwrap_or("")
+        let (label, scope_desc) = match kind {
+            ApprovalActionKind::AllowOnce => (
+                "Allow once".to_string(),
+                "One-time execution of this exact operation",
             ),
-            ApprovalActionKind::AllowFile => format!(
-                "Allow File This Session ('{}')",
-                approval.allow_file.as_deref().unwrap_or("")
+            ApprovalActionKind::AllowRule => (
+                format!(
+                    "Always allow rule (prefix: '{}')",
+                    approval.suggested_rule.as_deref().unwrap_or("")
+                ),
+                "Persists prefix rule for this session",
             ),
-            ApprovalActionKind::ViewDiff => {
-                "View Diff Fullscreen (inspect hunks before approving)".to_string()
-            }
-            ApprovalActionKind::DeclineWithFeedback => "Decline with Feedback".to_string(),
-            ApprovalActionKind::Cancel => "Cancel / Deny without note".to_string(),
+            ApprovalActionKind::AllowFile => (
+                format!(
+                    "Allow access to file ('{}')",
+                    approval.allow_file.as_deref().unwrap_or("")
+                ),
+                "Permits all edits to this file this session",
+            ),
+            ApprovalActionKind::ViewDiff => (
+                "Inspect changes fullscreen".to_string(),
+                "Examine exact hunks and syntax before deciding",
+            ),
+            ApprovalActionKind::DeclineWithFeedback => (
+                "Decline with feedback".to_string(),
+                "Provide guidance to steer agent retry",
+            ),
+            ApprovalActionKind::Cancel => (
+                "Reject operation".to_string(),
+                "Aborts execution without sending notes",
+            ),
         };
         action_lines.push(Line::from(vec![
             Span::styled(format!(" [{}] ", approval_action_shortcut(*kind)), style),
-            Span::styled(label, t.style_primary().add_modifier(Modifier::BOLD)),
+            Span::styled(format!("{:<38} ", label), t.style_primary().add_modifier(Modifier::BOLD)),
+            Span::styled(format!("─ {}", scope_desc), t.style_muted()),
         ]));
     }
 
@@ -854,8 +883,14 @@ fn render_diff_viewer(f: &mut Frame, diff_text: &[String], scroll: usize, area: 
     let total_lines = lines.len();
 
     let title = format!(
-        " Git Diff  +{} −{}  {} hunks  {} files  ↑↓/Wheel=Scroll Esc=Close ",
-        stats.additions, stats.deletions, stats.hunks, stats.files
+        " Git Diff  +{} −{}  │  {} files ({} mod, {} new, {} del)  │  {} hunks  │  ↑↓/Wheel=Scroll Esc=Close ",
+        stats.additions,
+        stats.deletions,
+        stats.files,
+        stats.modified_files,
+        stats.new_files,
+        stats.deleted_files,
+        stats.hunks
     );
 
     let block = Block::default()
@@ -2906,14 +2941,37 @@ fn render_setup_wizard(
                         state.effective_model(),
                         t.style_primary().add_modifier(Modifier::BOLD),
                     ),
-                ]),
-                Line::from(vec![
-                    Span::styled("  Provider:     ", t.style_muted()),
+                    Span::styled("  │  Provider: ", t.style_muted()),
                     Span::styled(state.current_provider().display_name(), t.style_primary()),
                 ]),
                 Line::from(""),
                 Line::from(Span::styled(
-                    "  Press [Enter] or [Esc] to close the wizard and begin development.",
+                    "  Select a first engineering task (press 1-5 to populate composer):",
+                    t.style_secondary().add_modifier(Modifier::BOLD),
+                )),
+                Line::from(vec![
+                    Span::styled("    [1] ", t.style_accent(true)),
+                    Span::styled("Explain this repository and architecture", t.style_primary()),
+                ]),
+                Line::from(vec![
+                    Span::styled("    [2] ", t.style_accent(true)),
+                    Span::styled("Find a bug or potential issue in this project", t.style_primary()),
+                ]),
+                Line::from(vec![
+                    Span::styled("    [3] ", t.style_accent(true)),
+                    Span::styled("Write tests for the primary module", t.style_primary()),
+                ]),
+                Line::from(vec![
+                    Span::styled("    [4] ", t.style_accent(true)),
+                    Span::styled("Review recent uncommitted code changes", t.style_primary()),
+                ]),
+                Line::from(vec![
+                    Span::styled("    [5] ", t.style_accent(true)),
+                    Span::styled("Diagnose failed build and run verification check", t.style_primary()),
+                ]),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "  Press [1-5] to select example, or [Enter]/[Esc] to close and enter chat.",
                     t.style_accent(true),
                 )),
             ];
@@ -2945,7 +3003,7 @@ fn render_setup_wizard(
             }
         }
         crate::modals::SetupStep::Review => "Enter: Confirm & Save  │  Esc: Back",
-        crate::modals::SetupStep::Complete => "Enter/Esc: Return to Chat",
+        crate::modals::SetupStep::Complete => "1-5: Populate Example Task  │  Enter/Esc: Return to Chat",
     };
     f.render_widget(
         Paragraph::new(Span::styled(format!("  {}", footer_text), t.style_muted())),
@@ -3291,6 +3349,11 @@ fn render_settings_modal(
                 "Web Search Engine",
                 app.config.web_search.clone(),
                 "Multi-engine technical doc and web grounding provider (live, duckduckgo, disabled)",
+            ),
+            (
+                "Onboarding Setup Wizard",
+                "Launch".to_string(),
+                "Run interactive guided first-run provider, model, and security setup",
             ),
         ],
         1 => vec![

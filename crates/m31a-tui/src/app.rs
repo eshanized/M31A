@@ -1077,6 +1077,7 @@ impl App {
         candidate_config.model = candidate.model.clone();
         candidate_config.sandbox = candidate.sandbox;
         candidate_config.approval = candidate.approval;
+        candidate_config.onboarding_completed = true;
 
         candidate_config
             .save()
@@ -1474,6 +1475,9 @@ impl App {
         } else {
             self.bottom_pane.goal_summary = None;
         }
+
+        // Continuously synchronize presentation state machine with canonical TurnStateMachine
+        self.chat_widget.sync_with_canonical(&self.turn_state.state());
 
         // Sync real-time stream metrics (velocity, TTFT)
         self.bottom_pane.stream_metrics =
@@ -2411,6 +2415,39 @@ impl App {
         self.sync_virtualizer();
     }
 
+    /// Toggles collaboration mode in reverse (Review -> Plan -> Default -> Review).
+    pub fn toggle_collaboration_mode_prev(&mut self) {
+        self.collaboration_mode = match self.collaboration_mode {
+            CollaborationMode::Default => CollaborationMode::Review,
+            CollaborationMode::Plan => CollaborationMode::Default,
+            CollaborationMode::Review => CollaborationMode::Plan,
+        };
+        self.bottom_pane.collaboration_mode = self.collaboration_mode;
+        self.refresh_system_prompt();
+        let (name, desc, level) = match self.collaboration_mode {
+            CollaborationMode::Default => (
+                "BUILD",
+                "Autonomous implementation & execution enabled (edits files, runs commands).",
+                NoticeLevel::Success,
+            ),
+            CollaborationMode::Plan => (
+                "PLAN",
+                "Advisory & architecture exploration enabled (read-only checks, no mutations).",
+                NoticeLevel::Info,
+            ),
+            CollaborationMode::Review => (
+                "REVIEW",
+                "Adversarial code review & security auditing (read-only diff inspections, no mutations).",
+                NoticeLevel::Warning,
+            ),
+        };
+        self.transcript.push(TranscriptItem::notice(
+            format!("Agent Mode changed to [{}]: {}", name, desc),
+            level,
+        ));
+        self.sync_virtualizer();
+    }
+
     pub fn execute_slash_command(&mut self, cmd: &str) {
         let tokens = m31a_composer::slash::tokenize_slash_command(cmd);
         if tokens.is_empty() {
@@ -2426,7 +2463,7 @@ impl App {
             "/settings" | "/config" => {
                 self.push_modal(ModalState::settings());
             }
-            "/setup" => {
+            "/setup" | "/onboarding" => {
                 if parts.len() > 1 {
                     let sub = parts[1].to_lowercase();
                     match sub.as_str() {
@@ -2721,7 +2758,24 @@ impl App {
                 self.sync_virtualizer();
             }
             "/plan" => {
-                self.toggle_collaboration_mode();
+                if self.collaboration_mode == CollaborationMode::Plan {
+                    self.collaboration_mode = CollaborationMode::Default;
+                    self.bottom_pane.collaboration_mode = CollaborationMode::Default;
+                    self.refresh_system_prompt();
+                    self.transcript.push(TranscriptItem::notice(
+                        "Agent Mode set to [BUILD]: Autonomous implementation & execution enabled.",
+                        NoticeLevel::Success,
+                    ));
+                } else {
+                    self.collaboration_mode = CollaborationMode::Plan;
+                    self.bottom_pane.collaboration_mode = CollaborationMode::Plan;
+                    self.refresh_system_prompt();
+                    self.transcript.push(TranscriptItem::notice(
+                        "Agent Mode set to [PLAN]: Read-only planning & architecture analysis enabled.",
+                        NoticeLevel::Success,
+                    ));
+                }
+                self.sync_virtualizer();
             }
             "/effort" | "/reasoning-effort" => {
                 if parts.len() > 1 {
@@ -3179,25 +3233,51 @@ impl App {
             "/verify" | "/check" => {
                 let cwd = self.cwd.clone();
                 let tx = self.event_tx.clone();
+                let trust_decision = self.trust_store.lock().map(|s| s.evaluate(&cwd)).ok();
                 self.transcript.push(TranscriptItem::notice(
                     "Running autonomous verification (compiler/linter check)...".to_string(),
                     NoticeLevel::Info,
                 ));
                 if let Ok(handle) = tokio::runtime::Handle::try_current() {
                     handle.spawn(async move {
+                        let start = std::time::Instant::now();
                         match m31a_verify::AutonomousVerifier::verify_check(&cwd, std::time::Duration::from_secs(60)).await {
                             Ok(report) => {
+                                let duration_sec = start.elapsed().as_secs_f32();
+                                let trust_str = match trust_decision {
+                                    Some(m31a_trust::TrustDecision::Trusted) => "VERIFIED (Trusted)",
+                                    Some(m31a_trust::TrustDecision::SessionOnly) => "SESSION ONLY",
+                                    Some(m31a_trust::TrustDecision::RequiresConfirmation { .. }) => "UNTRUSTED (Confirmation required)",
+                                    Some(m31a_trust::TrustDecision::Denied { .. }) => "DENIED",
+                                    None => "UNKNOWN",
+                                };
                                 if report.success {
-                                    let _ = tx.send(TuiEvent::Notice(
-                                        format!("Verification PASSED for command `{}`. Workspace is clean.", report.command),
-                                        NoticeLevel::Success,
-                                    )).await;
+                                    let summary = format!(
+                                        "Verification PASSED for command `{}`.\n\
+                                         • Compiler / Linter: [PASSED] (0 errors, 0 warnings, {:.2}s)\n\
+                                         • Workspace Trust:   [{}]\n\
+                                         • Test Suite:        [NOT RUN] (run `/test` for complete test coverage)\n\
+                                         Workspace is clean and ready.",
+                                        report.command,
+                                        duration_sec,
+                                        trust_str
+                                    );
+                                    let _ = tx.send(TuiEvent::Notice(summary, NoticeLevel::Success)).await;
                                 } else {
                                     let prompt = report.self_healing_prompt.unwrap_or(report.raw_output);
-                                    let _ = tx.send(TuiEvent::Notice(
-                                        format!("Verification FAILED ({} errors, {} warnings):\n{}", report.error_count, report.warning_count, prompt),
-                                        NoticeLevel::Error,
-                                    )).await;
+                                    let summary = format!(
+                                        "Verification FAILED for command `{}` ({} errors, {} warnings):\n\
+                                         • Compiler / Linter: [FAILED]\n\
+                                         • Workspace Trust:   [{}]\n\
+                                         • Test Suite:        [NOT RUN]\n\
+                                         Diagnostics:\n{}",
+                                        report.command,
+                                        report.error_count,
+                                        report.warning_count,
+                                        trust_str,
+                                        prompt
+                                    );
+                                    let _ = tx.send(TuiEvent::Notice(summary, NoticeLevel::Error)).await;
                                 }
                             }
                             Err(e) => {
@@ -3210,12 +3290,14 @@ impl App {
             "/test" => {
                 let cwd = self.cwd.clone();
                 let tx = self.event_tx.clone();
+                let trust_decision = self.trust_store.lock().map(|s| s.evaluate(&cwd)).ok();
                 self.transcript.push(TranscriptItem::notice(
                     "Running workspace test suite...".to_string(),
                     NoticeLevel::Info,
                 ));
                 if let Ok(handle) = tokio::runtime::Handle::try_current() {
                     handle.spawn(async move {
+                        let start = std::time::Instant::now();
                         match m31a_verify::AutonomousVerifier::verify_tests(
                             &cwd,
                             std::time::Duration::from_secs(120),
@@ -3223,25 +3305,41 @@ impl App {
                         .await
                         {
                             Ok(report) => {
+                                let duration_sec = start.elapsed().as_secs_f32();
+                                let trust_str = match trust_decision {
+                                    Some(m31a_trust::TrustDecision::Trusted) => "VERIFIED (Trusted)",
+                                    Some(m31a_trust::TrustDecision::SessionOnly) => "SESSION ONLY",
+                                    Some(m31a_trust::TrustDecision::RequiresConfirmation { .. }) => "UNTRUSTED (Confirmation required)",
+                                    Some(m31a_trust::TrustDecision::Denied { .. }) => "DENIED",
+                                    None => "UNKNOWN",
+                                };
                                 if report.success {
-                                    let _ = tx.send(TuiEvent::Notice(
-                                        format!(
-                                            "Test suite PASSED for command `{}`. All tests green.",
-                                            report.command
-                                         ),
-                                        NoticeLevel::Success,
-                                    )).await;
+                                    let summary = format!(
+                                        "Test suite PASSED for command `{}`.\n\
+                                         • Test Suite:      [PASSED] (all tests green, {:.2}s)\n\
+                                         • Workspace Trust: [{}]\n\
+                                         Workspace verification complete.",
+                                        report.command,
+                                        duration_sec,
+                                        trust_str
+                                    );
+                                    let _ = tx.send(TuiEvent::Notice(summary, NoticeLevel::Success)).await;
                                 } else {
                                     let prompt =
                                         report.self_healing_prompt.unwrap_or(report.raw_output);
+                                    let summary = format!(
+                                        "Test suite FAILED for command `{}` ({} errors, {} warnings):\n\
+                                         • Test Suite:      [FAILED]\n\
+                                         • Workspace Trust: [{}]\n\
+                                         Diagnostics:\n{}",
+                                        report.command,
+                                        report.error_count,
+                                        report.warning_count,
+                                        trust_str,
+                                        prompt
+                                    );
                                     let _ = tx
-                                        .send(TuiEvent::Notice(
-                                            format!(
-                                                "Test suite FAILED ({} errors, {} warnings):\n{}",
-                                                report.error_count, report.warning_count, prompt
-                                            ),
-                                            NoticeLevel::Error,
-                                        ))
+                                        .send(TuiEvent::Notice(summary, NoticeLevel::Error))
                                         .await;
                                 }
                             }
@@ -5843,7 +5941,7 @@ impl App {
                     max_ctx,
                 ));
                 self.chat_widget
-                    .complete_turn(0, usage.total_tokens as usize);
+                    .complete_turn(duration_ms, usage.total_tokens as usize);
                 self.chat_history = messages;
                 self.bottom_pane.git_status = Self::detect_git_status(&self.cwd);
                 self.update_status_badges();
@@ -6468,7 +6566,12 @@ mod tests {
         assert_eq!(app.collaboration_mode, CollaborationMode::Plan);
         assert_eq!(app.bottom_pane.collaboration_mode, CollaborationMode::Plan);
 
-        // Toggle back to Build mode
+        // Toggle to Review mode
+        app.toggle_collaboration_mode();
+        assert_eq!(app.collaboration_mode, CollaborationMode::Review);
+        assert_eq!(app.bottom_pane.collaboration_mode, CollaborationMode::Review);
+
+        // Toggle back to Build (Default) mode
         app.toggle_collaboration_mode();
         assert_eq!(app.collaboration_mode, CollaborationMode::Default);
         assert_eq!(

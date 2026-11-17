@@ -74,6 +74,9 @@ pub struct Config {
     pub profile: Option<String>,
 
     #[serde(default)]
+    pub onboarding_completed: bool,
+
+    #[serde(default)]
     pub profiles: HashMap<String, ConfigProfile>,
 
     #[serde(default)]
@@ -558,6 +561,7 @@ impl Default for Config {
             reasoning_effort: None,
             mcp_servers: HashMap::new(),
             mcp: McpConfig::default(),
+            onboarding_completed: false,
         }
     }
 }
@@ -930,6 +934,7 @@ impl Config {
                 .chain(base.mcp_servers)
                 .collect(),
             mcp: overlay.mcp,
+            onboarding_completed: overlay.onboarding_completed || base.onboarding_completed,
         }
     }
 

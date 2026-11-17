@@ -281,6 +281,7 @@ impl SetupWizard {
         config.model = final_model.clone();
         config.sandbox = final_sandbox;
         config.approval = final_approval;
+        config.onboarding_completed = true;
 
         std::fs::create_dir_all(&config_dir).with_context(|| {
             format!(

@@ -101,6 +101,10 @@ pub async fn run_tui_app(mut app: App, initial_prompt: Option<String>) -> Result
 
     if let Some(prompt) = initial_prompt {
         app.submit_prompt(prompt);
+    } else if !app.config.onboarding_completed && app.config.api_key.is_none() {
+        app.push_modal(crate::modals::ModalState::setup_wizard(
+            crate::modals::SetupWizardState::new(&app.config, &app.available_models),
+        ));
     }
 
     let mut event_stream = EventStream::new();
@@ -2297,6 +2301,21 @@ pub fn handle_modal_key_event(app: &mut App, modal: ModalState, key: crossterm::
                     KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q') => {
                         // Wizard finished and popped
                     }
+                    KeyCode::Char('1') => {
+                        app.composer.set_text("Explain this repository and its architecture");
+                    }
+                    KeyCode::Char('2') => {
+                        app.composer.set_text("Find and diagnose bugs in this project");
+                    }
+                    KeyCode::Char('3') => {
+                        app.composer.set_text("Write comprehensive tests for core modules");
+                    }
+                    KeyCode::Char('4') => {
+                        app.composer.set_text("Review recent changes and propose improvements");
+                    }
+                    KeyCode::Char('5') => {
+                        app.composer.set_text("Diagnose failed build and verification issues");
+                    }
                     _ => {
                         app.push_modal(ModalState::SetupWizard { state });
                     }
@@ -2745,7 +2764,7 @@ pub fn handle_composer_key_event(app: &mut App, key: crossterm::event::KeyEvent)
             }
         }
         KeyCode::BackTab => {
-            app.toggle_collaboration_mode();
+            app.toggle_collaboration_mode_prev();
         }
         KeyCode::Backspace => {
             app.bottom_pane.on_backspace(&mut app.composer);
@@ -3440,12 +3459,51 @@ pub fn handle_screen_key_event(app: &mut App, key: crossterm::event::KeyEvent) {
                 app.provider_status_message = Some("Active provider endpoint updated".to_string());
             }
             crate::screens::Screen::Settings => {
-                match app.screen_selected_index % 5 {
-                    0 => app.config.tui.vim_mode_default = !app.config.tui.vim_mode_default,
-                    1 => app.config.tui.mouse_enabled = !app.config.tui.mouse_enabled,
-                    2 => app.config.tui.animations = !app.config.tui.animations,
-                    3 => app.auto_scroll = !app.auto_scroll,
-                    4 => app.toggle_collaboration_mode(),
+                match app.screen_selected_index {
+                    0 => {
+                        let next = match app.config.tui.theme.as_deref() {
+                            Some("light") => "contrast",
+                            Some("contrast") | Some("high-contrast") => "everblush",
+                            _ => "light",
+                        };
+                        app.config.tui.theme = Some(next.to_string());
+                        let variant = match next {
+                            "light" => crate::theme::ThemeVariant::Light,
+                            "contrast" => crate::theme::ThemeVariant::HighContrast,
+                            _ => crate::theme::ThemeVariant::Everblush,
+                        };
+                        crate::theme::init_theme(variant);
+                    }
+                    1 => app.config.tui.vim_mode_default = !app.config.tui.vim_mode_default,
+                    2 => app.config.tui.mouse_enabled = !app.config.tui.mouse_enabled,
+                    3 => app.config.tui.animations = !app.config.tui.animations,
+                    4 => app.auto_scroll = !app.auto_scroll,
+                    5 => {
+                        app.config.approval = match app.config.approval {
+                            m31a_core::config::ApprovalPolicy::OnRequest => {
+                                m31a_core::config::ApprovalPolicy::ApproveForMe
+                            }
+                            m31a_core::config::ApprovalPolicy::ApproveForMe => {
+                                m31a_core::config::ApprovalPolicy::Never
+                            }
+                            m31a_core::config::ApprovalPolicy::Never => {
+                                m31a_core::config::ApprovalPolicy::OnRequest
+                            }
+                        };
+                    }
+                    6 => {
+                        app.config.reasoning_effort = match app.config.reasoning_effort.as_deref() {
+                            None => Some("low".to_string()),
+                            Some("low") => Some("medium".to_string()),
+                            Some("medium") => Some("high".to_string()),
+                            _ => None,
+                        };
+                    }
+                    7 => {
+                        app.push_modal(crate::modals::ModalState::setup_wizard(
+                            crate::modals::SetupWizardState::new(&app.config, &app.available_models),
+                        ));
+                    }
                     _ => {}
                 }
                 let _ = app.config.save();
@@ -3718,6 +3776,16 @@ pub fn handle_screen_key_event(app: &mut App, key: crossterm::event::KeyEvent) {
                         }
                     }
                 });
+            }
+        }
+        KeyCode::Char('s') | KeyCode::Char('S') if app.current_screen == crate::screens::Screen::Settings => {
+            match app.config.save() {
+                Ok(()) => {
+                    app.provider_status_message = Some("Configuration successfully saved to disk.".to_string());
+                }
+                Err(e) => {
+                    app.provider_status_message = Some(format!("Failed to save configuration: {e}"));
+                }
             }
         }
         _ => {}

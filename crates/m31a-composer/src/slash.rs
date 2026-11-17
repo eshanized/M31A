@@ -72,7 +72,7 @@ pub const CANONICAL_SLASH_COMMANDS: &[SlashCommand] = &[
     },
     SlashCommand {
         name: "/setup",
-        aliases: &[],
+        aliases: &["/onboarding"],
         description: "Open the interactive setup onboarding wizard or inspect configuration",
         usage: "/setup [wizard|status|settings|gui|edit]",
         category: "Configuration",

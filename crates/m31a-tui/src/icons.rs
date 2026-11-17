@@ -1003,6 +1003,7 @@ mod tests {
 
     #[test]
     fn test_theme_use_icons_fallback() {
+        crate::theme::set_icon_mode(None);
         let mut dark = crate::theme::Theme::dark();
         assert_eq!(
             Icon::Command.render(&dark),
@@ -1012,6 +1013,7 @@ mod tests {
         // When use_icons is disabled, ASCII fallback is strictly used
         dark.typography.use_icons = false;
         assert_eq!(Icon::Command.render(&dark), Icon::Command.ascii_glyph());
+        crate::theme::set_icon_mode(None);
     }
 
     #[test]

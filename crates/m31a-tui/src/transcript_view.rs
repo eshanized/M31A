@@ -38,6 +38,134 @@ pub fn is_read_only_tool(name: &str) -> bool {
     )
 }
 
+/// Generates a concise human-readable description of a tool execution.
+pub fn human_readable_tool_intent(name: &str, arguments: &str) -> String {
+    let parsed: Option<serde_json::Value> = serde_json::from_str(arguments).ok();
+    match name {
+        "read_file" | "read_file_range" => {
+            if let Some(p) = parsed
+                .as_ref()
+                .and_then(|v| v.get("path"))
+                .and_then(|v| v.as_str())
+            {
+                format!("Reading {p}")
+            } else {
+                "Reading file".to_string()
+            }
+        }
+        "write_file" | "edit_file" | "apply_patch" => {
+            if let Some(p) = parsed
+                .as_ref()
+                .and_then(|v| v.get("path"))
+                .and_then(|v| v.as_str())
+            {
+                format!("Editing {p}")
+            } else {
+                "Modifying file".to_string()
+            }
+        }
+        "exec_command" | "execute_command" | "sh" | "bash" => {
+            if let Some(c) = parsed
+                .as_ref()
+                .and_then(|v| v.get("cmd").or_else(|| v.get("command")))
+                .and_then(|v| v.as_str())
+            {
+                let trimmed = c.trim();
+                if trimmed.starts_with("cargo test") {
+                    "Running tests".to_string()
+                } else if trimmed.starts_with("cargo check") {
+                    "Checking codebase".to_string()
+                } else if trimmed.starts_with("cargo clippy") {
+                    "Running linter".to_string()
+                } else if trimmed.starts_with("git diff") {
+                    "Reviewing git diff".to_string()
+                } else if trimmed.starts_with("git status") {
+                    "Checking git status".to_string()
+                } else {
+                    let short_cmd = if trimmed.len() > 32 {
+                        format!("{}...", &trimmed[..32])
+                    } else {
+                        trimmed.to_string()
+                    };
+                    format!("Running: {short_cmd}")
+                }
+            } else {
+                "Executing command".to_string()
+            }
+        }
+        "list_dir" | "dir_list" => {
+            if let Some(p) = parsed
+                .as_ref()
+                .and_then(|v| v.get("path"))
+                .and_then(|v| v.as_str())
+            {
+                format!("Listing directory {p}")
+            } else {
+                "Listing directory".to_string()
+            }
+        }
+        "file_search" | "find_files" => {
+            if let Some(q) = parsed
+                .as_ref()
+                .and_then(|v| v.get("query").or_else(|| v.get("pattern")))
+                .and_then(|v| v.as_str())
+            {
+                format!("Finding files '{q}'")
+            } else {
+                "Searching for files".to_string()
+            }
+        }
+        "grep_search" => {
+            if let Some(q) = parsed
+                .as_ref()
+                .and_then(|v| v.get("query"))
+                .and_then(|v| v.as_str())
+            {
+                format!("Searching codebase for '{q}'")
+            } else {
+                "Searching codebase".to_string()
+            }
+        }
+        "web_search" => {
+            if let Some(q) = parsed
+                .as_ref()
+                .and_then(|v| v.get("query"))
+                .and_then(|v| v.as_str())
+            {
+                format!("Searching web for '{q}'")
+            } else {
+                "Searching web".to_string()
+            }
+        }
+        "fetch_web_page" => {
+            if let Some(u) = parsed
+                .as_ref()
+                .and_then(|v| v.get("url"))
+                .and_then(|v| v.as_str())
+            {
+                format!("Fetching web page {u}")
+            } else {
+                "Fetching web page".to_string()
+            }
+        }
+        "symbol_search" | "definition" => {
+            if let Some(s) = parsed
+                .as_ref()
+                .and_then(|v| v.get("symbol"))
+                .and_then(|v| v.as_str())
+            {
+                format!("Finding symbol '{s}'")
+            } else {
+                "Finding symbol".to_string()
+            }
+        }
+        other => {
+            let readable = other.replace('_', " ");
+            format!("Executing {readable}")
+        }
+    }
+}
+
 /// Collapses long command/tool output while preserving the crucial tail lines
 /// (where error messages, exit codes, and test assertions are located).
 /// Returns `(Option<omitted_count>, tail_lines)`.
@@ -827,6 +955,8 @@ impl TranscriptVirtualizer {
                     ("⚙", Color::White)
                 };
 
+                let human_intent = human_readable_tool_intent(name, arguments);
+
                 if *collapsed {
                     lines.push(Line::from(vec![
                         Span::styled(
@@ -868,13 +998,21 @@ impl TranscriptVirtualizer {
                         ),
                     ]));
 
+                    lines.push(Line::from(vec![
+                        Span::styled("    intent: ", Style::default().fg(Color::Cyan)),
+                        Span::styled(
+                            human_intent,
+                            Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+                        ),
+                    ]));
+
                     let args_preview = if arguments.len() > max_w {
                         format!("{}...", &arguments[..max_w])
                     } else {
                         arguments.clone()
                     };
                     lines.push(Line::from(vec![
-                        Span::styled("    args: ", Style::default().fg(Color::DarkGray)),
+                        Span::styled("    args:   ", Style::default().fg(Color::DarkGray)),
                         Span::styled(args_preview, Style::default().fg(Color::White)),
                     ]));
 
