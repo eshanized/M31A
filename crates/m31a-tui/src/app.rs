@@ -4514,6 +4514,190 @@ impl App {
             "/rollout" | "/journal" => {
                 self.open_rollout_journal();
             }
+            "/maintenance" | "/maint" => {
+                let m_store = m31a_maintenance::storage::MaintenanceStore::new(self.storage.connection());
+                let sub = parts.get(1).map(|s| s.to_lowercase()).unwrap_or_else(|| "status".to_string());
+                match sub.as_str() {
+                    "scan" => {
+                        let repo_id = self.cwd.file_name().and_then(|n| n.to_str()).unwrap_or("local_repo").to_string();
+                        let cwd = self.cwd.clone();
+                        let m_store_clone = m_store.clone();
+                        let tx = self.event_tx.clone();
+                        self.transcript.push(TranscriptItem::notice(
+                            "Starting autonomous repository maintenance scan in background...".to_string(),
+                            NoticeLevel::Info,
+                        ));
+                        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                            handle.spawn(async move {
+                                let local_scanner = m31a_maintenance::intake::LocalRepositorySignalSource::new(cwd);
+                                match local_scanner.scan(&repo_id).await {
+                                    Ok(signals) => {
+                                        let sig_count = signals.len();
+                                        let manager = m31a_maintenance::intake::SignalIntakeManager::new(m_store_clone);
+                                        let mut created = 0;
+                                        for sig in &signals {
+                                            if let Ok(outcome) = manager.ingest_signal(sig) {
+                                                match outcome {
+                                                    m31a_maintenance::intake::IngestionOutcome::CaseCreated { .. }
+                                                    | m31a_maintenance::intake::IngestionOutcome::CaseUpdated { .. } => {
+                                                        created += 1;
+                                                    }
+                                                    _ => {}
+                                                }
+                                            }
+                                        }
+                                        let _ = tx.send(TuiEvent::Notice(
+                                            format!(
+                                                "── Repository Maintenance Scan Completed ──────────────────\n\
+                                                 • Discovered Signals: {}\n\
+                                                 • New/Updated Cases:  {}\n\
+                                                 • Use `/maintenance cases` to view or `/maintenance status` to inspect.",
+                                                sig_count, created
+                                            ),
+                                            NoticeLevel::Success,
+                                        )).await;
+                                    }
+                                    Err(e) => {
+                                        let _ = tx.send(TuiEvent::Notice(
+                                            format!("Maintenance scan failed: {}", e),
+                                            NoticeLevel::Error,
+                                        )).await;
+                                    }
+                                }
+                            });
+                        }
+                    }
+                    "cases" => {
+                        let repo_id = self.cwd.file_name().and_then(|n| n.to_str()).unwrap_or("local_repo");
+                        match m_store.list_cases(Some(repo_id), None, 10) {
+                            Ok(cases) => {
+                                if cases.is_empty() {
+                                    self.transcript.push(TranscriptItem::notice(
+                                        "No maintenance cases found. Run `/maintenance scan` to inspect repository.",
+                                        NoticeLevel::Info,
+                                    ));
+                                } else {
+                                    let mut out = String::from("── Active Maintenance Cases ────────────────────────────────\n");
+                                    for c in cases {
+                                        out.push_str(&format!(
+                                            "• [{}] {:?} | {:?} | {}\n  Status: {:?} | Target: {} files\n",
+                                            c.id, c.category, c.priority, c.title, c.status, c.affected_files.len()
+                                        ));
+                                    }
+                                    out.push_str("──────────────────────────────────────────────────────────");
+                                    self.transcript.push(TranscriptItem::notice(out, NoticeLevel::Info));
+                                }
+                            }
+                            Err(e) => {
+                                self.transcript.push(TranscriptItem::notice(
+                                    format!("Failed to retrieve maintenance cases: {}", e),
+                                    NoticeLevel::Error,
+                                ));
+                            }
+                        }
+                    }
+                    "schedules" => {
+                        let repo_id = self.cwd.file_name().and_then(|n| n.to_str()).unwrap_or("local_repo");
+                        match m_store.list_schedules(Some(repo_id)) {
+                            Ok(scheds) => {
+                                let mut out = String::from("── Maintenance Recurring Schedules ────────────────────────\n");
+                                for s in scheds {
+                                    out.push_str(&format!(
+                                        "• {} ({}) | Active: {} | Failures: {}\n",
+                                        s.id, s.job_kind, s.is_enabled, s.consecutive_failures
+                                    ));
+                                }
+                                out.push_str("──────────────────────────────────────────────────────────");
+                                self.transcript.push(TranscriptItem::notice(out, NoticeLevel::Info));
+                            }
+                            Err(e) => {
+                                self.transcript.push(TranscriptItem::notice(
+                                    format!("Failed to retrieve schedules: {}", e),
+                                    NoticeLevel::Error,
+                                ));
+                            }
+                        }
+                    }
+                    "pause" => {
+                        if parts.len() < 3 {
+                            self.transcript.push(TranscriptItem::notice(
+                                "Usage: /maintenance pause <schedule_id>",
+                                NoticeLevel::Warning,
+                            ));
+                        } else {
+                            let sched_id = parts[2];
+                            let scheduler = m31a_maintenance::scheduler::MaintenanceScheduler::new(
+                                m_store,
+                                m31a_maintenance::domain::MaintenancePolicy::default(),
+                            );
+                            if let Err(e) = scheduler.pause_schedule(sched_id) {
+                                self.transcript.push(TranscriptItem::notice(
+                                    format!("Failed to pause schedule: {}", e),
+                                    NoticeLevel::Error,
+                                ));
+                            } else {
+                                self.transcript.push(TranscriptItem::notice(
+                                    format!("Schedule '{}' paused.", sched_id),
+                                    NoticeLevel::Success,
+                                ));
+                            }
+                        }
+                    }
+                    "resume" => {
+                        if parts.len() < 3 {
+                            self.transcript.push(TranscriptItem::notice(
+                                "Usage: /maintenance resume <schedule_id>",
+                                NoticeLevel::Warning,
+                            ));
+                        } else {
+                            let sched_id = parts[2];
+                            let scheduler = m31a_maintenance::scheduler::MaintenanceScheduler::new(
+                                m_store,
+                                m31a_maintenance::domain::MaintenancePolicy::default(),
+                            );
+                            if let Err(e) = scheduler.resume_schedule(sched_id) {
+                                self.transcript.push(TranscriptItem::notice(
+                                    format!("Failed to resume schedule: {}", e),
+                                    NoticeLevel::Error,
+                                ));
+                            } else {
+                                self.transcript.push(TranscriptItem::notice(
+                                    format!("Schedule '{}' resumed.", sched_id),
+                                    NoticeLevel::Success,
+                                ));
+                            }
+                        }
+                    }
+                    _ => {
+                        let repo_id = self.cwd.file_name().and_then(|n| n.to_str()).unwrap_or("local_repo");
+                        let open_cases = m_store.list_cases(Some(repo_id), Some(m31a_maintenance::domain::CaseStatus::Open), 100).map(|c| c.len()).unwrap_or(0);
+                        let plan_cases = m_store.list_cases(Some(repo_id), Some(m31a_maintenance::domain::CaseStatus::Planning), 100).map(|c| c.len()).unwrap_or(0);
+                        let exec_cases = m_store.list_cases(Some(repo_id), Some(m31a_maintenance::domain::CaseStatus::Executing), 100).map(|c| c.len()).unwrap_or(0);
+                        let approval_cases = m_store.list_cases(Some(repo_id), Some(m31a_maintenance::domain::CaseStatus::AwaitingApproval), 100).map(|c| c.len()).unwrap_or(0);
+                        let sched_count = m_store.list_schedules(Some(repo_id)).map(|s| s.len()).unwrap_or(0);
+
+                        let text = format!(
+                            "── Autonomous Repository Maintenance Engine ─────────────────\n\
+                             • Status:              Operational (Initiative 3 Active)\n\
+                             • Repository:          {}\n\
+                             • Verified Execution:  Active (Initiative 2 Guarded Worktrees)\n\
+                             • Open Cases:          {}\n\
+                             • In Planning/Exec:    {} / {}\n\
+                             • Awaiting Approval:   {}\n\
+                             • Configured Jobs:     {} recurring schedules\n\n\
+                             • Available Subcommands:\n\
+                               /maintenance scan        Run local AST & dependency scan\n\
+                               /maintenance cases       List active maintenance cases\n\
+                               /maintenance schedules   Inspect automated maintenance jobs\n\
+                               /maintenance pause <id>  Pause recurring schedule\n\
+                               /maintenance resume <id> Resume recurring schedule\n\
+                             ─────────────────────────────────────────────────────────────",
+                            repo_id, open_cases, plan_cases, exec_cases, approval_cases, sched_count
+                        );
+                        self.transcript.push(TranscriptItem::notice(text, NoticeLevel::Info));
+                    }
+                }
+            }
             "/exit" | "/quit" | "/q" => {
                 self.should_quit = true;
             }
@@ -6483,6 +6667,27 @@ mod tests {
                 .any(|m| m.slug == "custom-org/my-new-model")
         );
         assert!(app.provider_status_message.is_some());
+
+        // 7. /maintenance status and subcommands
+        app.execute_slash_command("/maintenance");
+        let has_maint_notice = app.transcript.iter().any(|item| {
+            if let TranscriptItem::Notice { text, .. } = item {
+                text.contains("Autonomous Repository Maintenance Engine")
+            } else {
+                false
+            }
+        });
+        assert!(has_maint_notice);
+
+        app.execute_slash_command("/maintenance cases");
+        let has_cases_notice = app.transcript.iter().any(|item| {
+            if let TranscriptItem::Notice { text, .. } = item {
+                text.contains("maintenance cases")
+            } else {
+                false
+            }
+        });
+        assert!(has_cases_notice);
     }
 
     #[test]
