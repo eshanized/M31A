@@ -1,0 +1,54 @@
+# M31A Autonomous Repository Maintenance Policy Configuration
+# Schema Version 1.0.0
+# Place this file at .m31a/maintenance.toml in your workspace root.
+# NOTE: Never put plaintext tokens or secrets in this file. Use environment variable references.
+
+version = "1.0.0"
+enabled = true
+
+# Allowed Autonomy Tiers:
+# - "tier0_observe": Read-only detection, triage, and reporting. No modifications.
+# - "tier1_prepare": Generates plans, prepares branches and reproduction tests, but does not execute remediation.
+# - "tier2_guarded_remediation": Automatically executes and verifies low-to-medium risk remediation in isolated worktrees.
+# - "tier3_restricted_high_impact": Allows execution of high-risk items (major upgrades, security advisories) strictly with human approval.
+autonomy_tier = "tier2_guarded_remediation"
+
+[sources]
+# GitHub integration (webhook & API intake)
+github_repository = "eshanized/M31A"
+github_token_env = "GITHUB_TOKEN"
+webhook_secret_env = "GITHUB_WEBHOOK_SECRET"
+poll_interval_seconds = 300
+enable_local_scanner = true
+
+[scheduling]
+# Automated recurring background maintenance checks
+daily_health_check = true
+weekly_dependency_review = true
+documentation_check = true
+maintenance_window = "02:00-05:00 UTC"
+
+[rules]
+# Target branches eligible for autonomous maintenance remediation
+allowed_branches = ["master", "main"]
+
+# Protected paths where autonomous changes are strictly forbidden
+excluded_paths = [
+    ".git/**",
+    ".github/workflows/security.yml",
+    "deploy/production/**"
+]
+
+# Risk threshold that triggers mandatory human approval: "low", "medium", or "high"
+risk_threshold_for_approval = "medium"
+
+# Max parallel maintenance tasks
+max_concurrency = 2
+max_retries = 3
+timeout_seconds = 1800
+
+[delivery]
+# PR creation policy
+open_draft_pr = true
+branch_prefix = "m31a-maint/"
+labels = ["autonomous-maintenance", "m31a-verified"]
