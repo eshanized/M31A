@@ -433,10 +433,7 @@ pub async fn run_maintenance_command(
             if json_output {
                 println!("{}", serde_json::to_string_pretty(&exec)?);
             } else {
-                println!(
-                    "{}",
-                    "Maintenance Execution Started!".green().bold()
-                );
+                println!("{}", "Maintenance Execution Started!".green().bold());
                 println!("  Execution ID: {}", exec.id);
                 println!("  Workflow ID:  {}", exec.workflow_id.cyan().bold());
                 println!("  Case ID:      {}", exec.case_id);

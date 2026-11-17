@@ -73,9 +73,7 @@ impl LocalRepositorySignalSource {
         {
             for issue in dep_audit.issues {
                 let severity = match issue.severity {
-                    m31a_ast::semver::DependencySeverity::Critical => {
-                        SignalSeverity::Critical
-                    }
+                    m31a_ast::semver::DependencySeverity::Critical => SignalSeverity::Critical,
                     m31a_ast::semver::DependencySeverity::Warning => SignalSeverity::Medium,
                     m31a_ast::semver::DependencySeverity::Info => SignalSeverity::Low,
                 };
@@ -143,9 +141,8 @@ impl LocalRepositorySignalSource {
                     && path.extension().and_then(|e| e.to_str()) == Some("rs")
                     && let Ok(content) = fs::read_to_string(&path)
                 {
-                    let smells = ArchitecturalComplexityAnalyzer::audit_source_complexity(
-                        &path, &content,
-                    );
+                    let smells =
+                        ArchitecturalComplexityAnalyzer::audit_source_complexity(&path, &content);
                     if !smells.is_empty() {
                         let smell = &smells[0];
                         let sig = MaintenanceSignal::new(
