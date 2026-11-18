@@ -117,6 +117,7 @@ export const QuestionDialog: React.FC<{ question: PendingQuestionDto }> = ({
             type="text"
             value={customText}
             onChange={(e) => setCustomText(e.target.value)}
+            aria-label="Your response"
             placeholder="Type your response..."
             style={{
               width: '100%',
@@ -135,7 +136,10 @@ export const QuestionDialog: React.FC<{ question: PendingQuestionDto }> = ({
         <button
           type="button"
           onClick={handleSubmit}
-          disabled={isSubmitting || (question.options.length > 0 && selectedOptions.length === 0 && !customText.trim())}
+          disabled={
+            isSubmitting ||
+            (selectedOptions.length === 0 && !customText.trim())
+          }
           className="btn btn-primary btn-sm"
         >
           <Send size={12} /> Submit Response
