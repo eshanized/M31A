@@ -37,6 +37,10 @@ pub struct PendingQuestionEntry {
 pub struct TurnRequest {
     pub thread_id: String,
     pub prompt: String,
+    /// Optional workspace override; canonicalized and trust-checked before execution.
+    pub workspace_root: Option<PathBuf>,
+    /// Whether the caller has explicit user authorization for a session-only trust grant.
+    pub allow_untrusted_workspace: bool,
     pub images: Vec<PathBuf>,
     pub collaboration_mode: CollaborationMode,
     pub ephemeral: bool,
@@ -50,6 +54,8 @@ impl TurnRequest {
         Self {
             thread_id: thread_id.into(),
             prompt: prompt.into(),
+            workspace_root: None,
+            allow_untrusted_workspace: false,
             images: Vec::new(),
             collaboration_mode: CollaborationMode::Default,
             ephemeral: false,
@@ -57,6 +63,18 @@ impl TurnRequest {
             max_heal_iterations: 3,
             max_steps: 20,
         }
+    }
+
+    /// Run the turn in a specific workspace directory.
+    pub fn with_workspace(mut self, workspace_root: impl Into<PathBuf>) -> Self {
+        self.workspace_root = Some(workspace_root.into());
+        self
+    }
+
+    /// Permit a session-scoped trust grant after explicit user authorization.
+    pub fn with_workspace_authorization(mut self, allow: bool) -> Self {
+        self.allow_untrusted_workspace = allow;
+        self
     }
 
     pub fn with_plan_mode(mut self, plan: bool) -> Self {

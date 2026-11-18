@@ -24,16 +24,16 @@ use m31a_storage::Storage;
 use m31a_tools::ToolRegistry;
 use m31a_trust::TrustStore;
 use m31a_watcher::WorkspaceWatcher;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 
 /// Authoritative container holding initialized shared M31A runtime services.
 #[derive(Clone)]
 pub struct RuntimeServices {
-    pub provider: Arc<ProviderClient>,
+    pub provider: Arc<RwLock<Arc<ProviderClient>>>,
     pub storage: Storage,
     pub tools: Arc<ToolRegistry>,
     pub sandbox: Arc<SandboxRunner>,
-    pub guardian: Arc<GuardianReviewer>,
+    pub guardian: Arc<RwLock<Arc<GuardianReviewer>>>,
     pub exec_policy: ExecPolicy,
     pub hooks: Arc<HookRuntime>,
     pub mcp_manager: Arc<McpManager>,
@@ -43,5 +43,5 @@ pub struct RuntimeServices {
     pub trust_store: Arc<Mutex<TrustStore>>,
     pub features_registry: Arc<FeatureRegistry>,
     pub vault: Arc<LocalEncryptedVault>,
-    pub engine_runtime: Arc<EngineAgentRuntime>,
+    pub engine_runtime: Arc<RwLock<Arc<EngineAgentRuntime>>>,
 }
