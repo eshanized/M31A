@@ -42,6 +42,7 @@ members = [
     "crates/m31a-runtime",
     "crates/m31a-tui",
     "crates/m31a-cli",
+    "apps/desktop/src-tauri",
     "examples/distributed_task_mesh",
 ]
 

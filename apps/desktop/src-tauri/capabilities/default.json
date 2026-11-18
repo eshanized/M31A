@@ -1,0 +1,9 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Authoritative default permissions for M31A desktop frontend",
+  "windows": ["main"],
+  "permissions": [
+    "core:default"
+  ]
+}
