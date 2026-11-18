@@ -103,3 +103,12 @@ export interface PendingInteractionsDto {
   approvals: PendingApprovalDto[];
   questions: PendingQuestionDto[];
 }
+
+export interface ShutdownReportDto {
+  cleanly_stopped: boolean;
+  background_processes_stopped: number;
+  active_turns_cancelled: number;
+  watcher_stopped: boolean;
+  mcp_servers_stopped: number;
+  timestamp: string;
+}
