@@ -9,13 +9,9 @@ use tracing::{info, warn};
 
 /// Initializes the authoritative M31aRuntime from configuration.
 pub async fn init_runtime(custom_cwd: Option<PathBuf>) -> Result<M31aRuntime, RuntimeError> {
-    let mut config = RuntimeConfig::load_default().unwrap_or_else(|_| {
-        let cwd = match &custom_cwd {
-            Some(path) => path.clone(),
-            None => std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
-        };
-        RuntimeConfig::new(m31a_core::Config::default(), cwd)
-    });
+    // Configuration failures must be visible. Silently replacing a malformed
+    // config would discard user-selected models, credentials, and security policy.
+    let mut config = RuntimeConfig::load_default()?;
 
     if let Some(cwd) = custom_cwd {
         config.cwd = cwd;
