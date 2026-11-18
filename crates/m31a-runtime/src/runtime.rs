@@ -239,6 +239,19 @@ impl M31aRuntime {
         &self,
         request: TurnRequest,
     ) -> Result<mpsc::Receiver<RuntimeEvent>, RuntimeError> {
+        self.execute_turn_with_id(request)
+            .await
+            .map(|(_, receiver)| receiver)
+    }
+
+    /// Execute a turn and return its actual runtime-assigned identifier.
+    ///
+    /// Desktop and other interactive clients should retain this identifier for
+    /// cancellation and steering instead of manufacturing a second handle.
+    pub async fn execute_turn_with_id(
+        &self,
+        request: TurnRequest,
+    ) -> Result<(String, mpsc::Receiver<RuntimeEvent>), RuntimeError> {
         let admission = self.admission_lock.lock().map_err(|_| {
             RuntimeError::Shutdown("Runtime admission lock is poisoned".to_string())
         })?;
@@ -294,10 +307,36 @@ impl M31aRuntime {
         );
         engine.authoritative_system_prompt = Some(system_prompt.clone());
 
-        let history = vec![
-            ChatMessage::system(system_prompt),
-            ChatMessage::user(request.prompt.clone()),
-        ];
+        // Rehydrate prior dialogue from the thread's persisted transcript.
+        // Tool records remain in storage for inspection but are not replayed as
+        // standalone provider messages because their original tool-call pairing
+        // is not represented by the storage tuple returned here.
+        let persisted_items = self
+            .services
+            .storage
+            .list_items(&thread_id)
+            .map_err(|error| RuntimeError::Storage(error.to_string()))?;
+        let mut history = vec![ChatMessage::system(system_prompt)];
+        for (item_type, content, _) in persisted_items {
+            match item_type.as_str() {
+                "user" | "user_message" | "user_queued" => {
+                    history.push(ChatMessage::user(content));
+                }
+                "assistant" | "assistant_message" | "agent_response" => {
+                    history.push(ChatMessage::assistant(Some(content), None));
+                }
+                _ => {}
+            }
+        }
+
+        let latest_user_prompt = history
+            .iter()
+            .rev()
+            .find(|message| message.role == m31a_core::types::Role::User)
+            .and_then(|message| message.content.as_deref());
+        if latest_user_prompt != Some(request.prompt.as_str()) {
+            history.push(ChatMessage::user(request.prompt.clone()));
+        }
 
         let (eng_tx, mut eng_rx) = mpsc::unbounded_channel();
         let (steer_tx, steer_rx) = mpsc::unbounded_channel();
@@ -468,7 +507,7 @@ impl M31aRuntime {
             }
         });
 
-        Ok(out_rx)
+        Ok((turn_id, out_rx))
     }
 
     /// Cancel a specific running turn.
