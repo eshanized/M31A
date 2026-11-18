@@ -4,15 +4,16 @@ use crate::config::RuntimeConfig;
 use crate::error::RuntimeError;
 use crate::runtime::M31aRuntime;
 use crate::services::RuntimeServices;
-use m31a_agent_engine::agents::EngineAgentRuntime;
 use m31a_core::LocalEncryptedVault;
 use m31a_core::features::FeatureRegistry;
+use m31a_execpolicy::ExecPolicy;
 use m31a_mcp::McpManager;
-use m31a_proc::{ProcessManager, ProcessManagerConfig};
 use m31a_provider::ProviderClient;
 use m31a_storage::Storage;
 use m31a_trust::TrustStore;
-use std::sync::{Arc, Mutex};
+use std::collections::HashSet;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex, RwLock};
 
 /// Fluent builder for constructing an `M31aRuntime` with optional dependency overrides.
 pub struct RuntimeBuilder {
@@ -86,11 +87,8 @@ impl RuntimeBuilder {
 
         let cwd = self.config.cwd.clone();
         let active_model = self.config.core.model.clone();
-
-        // 1. Discover models catalog
         let available_models = crate::services::provider::discover_available_models(&active_model);
 
-        // 2. Initialize provider client
         let provider = match self.provider_client {
             Some(client) => client,
             None => crate::services::provider::init_provider_client(
@@ -101,20 +99,17 @@ impl RuntimeBuilder {
                 self.config.reasoning_effort.clone(),
             )?,
         };
-        let provider = Arc::new(provider);
 
-        // 3. Initialize storage
-        let storage = match self.storage {
-            Some(s) => s,
+        let mut storage = match self.storage {
+            Some(storage) => storage,
             None => crate::services::storage::init_storage(None)?,
         };
 
-        // 4. Initialize vault
         let vault = match self.vault {
-            Some(v) => v,
+            Some(vault) => vault,
             None => {
                 let vault_dir = cwd.join(".m31a-vault");
-                let _ = std::fs::create_dir_all(&vault_dir);
+                std::fs::create_dir_all(&vault_dir).map_err(RuntimeError::Io)?;
                 Arc::new(
                     LocalEncryptedVault::new(vault_dir)
                         .map_err(|e| RuntimeError::Security(e.to_string()))?,
@@ -122,26 +117,48 @@ impl RuntimeBuilder {
             }
         };
 
-        // 5. Initialize MCP manager
-        let mcp_manager = match self.mcp_manager {
-            Some(m) => m,
-            None => crate::services::mcp::init_mcp_manager(self.config.core.mcp.clone()),
+        let requested_mcp = self.mcp_manager;
+        let mut tools = match self.tools {
+            Some(tools) => tools,
+            None => crate::services::tools::init_tool_registry(
+                Some(storage.clone()),
+                vault.clone(),
+                requested_mcp
+                    .clone()
+                    .unwrap_or_else(|| {
+                        crate::services::mcp::init_mcp_manager(self.config.core.mcp.clone())
+                    }),
+                self.config.core.extra_dirs.clone(),
+                &cwd,
+                self.config.enable_web_search,
+            )?,
         };
 
-        // 6. Initialize trust store
+        // The runtime is the canonical owner. Injected compatibility objects are
+        // normalized onto the same storage, vault, MCP manager, and execution policy.
+        if let Some(tool_storage) = tools.storage_handle() {
+            storage = tool_storage;
+        }
+        tools.set_storage(storage.clone());
+        tools.set_vault(vault.clone());
+        let mcp_manager = requested_mcp.unwrap_or_else(|| tools.mcp_manager());
+        tools.set_mcp_manager(Arc::clone(&mcp_manager));
+
+        let exec_policy = Arc::new(RwLock::new(self.config.exec_policy.clone()));
+        tools.set_exec_policy_handle(Arc::clone(&exec_policy));
+        if !self.config.enable_web_search {
+            tools.disable("web_search");
+        }
+        if let Some(session_id) = self.config.session_id.as_deref() {
+            tools.set_session_id(session_id);
+        }
+        let tools = Arc::new(tools);
+
         let trust_store = match self.trust_store {
-            Some(t) => t,
+            Some(trust_store) => trust_store,
             None => crate::services::workspace::init_trust_store(),
         };
 
-        // 7. Security components: Sandbox & Guardian
-        let sandbox = Arc::new(crate::services::sandbox::init_sandbox());
-        let guardian = crate::services::guardian::init_guardian(&active_model);
-
-        // 8. Lifecycle hooks runtime
-        let hooks = crate::services::hooks::init_hooks(&cwd);
-
-        // 9. Code mode orchestrator (if feature enabled)
         let code_mode = if self
             .config
             .core
@@ -150,78 +167,69 @@ impl RuntimeBuilder {
             .copied()
             .unwrap_or(false)
         {
-            Some(m31a_code_mode::CodeModeOrchestrator::new())
+            let code_runtime = m31a_code_mode::CodeModeRuntime::new()
+                .with_trust_store(Arc::clone(&trust_store));
+            Some(m31a_code_mode::CodeModeOrchestrator::with_runtime(code_runtime))
         } else {
             None
         };
 
-        // 10. Process supervisor
-        let proc_manager = Arc::new(ProcessManager::new(ProcessManagerConfig::default()));
+        let hooks = Arc::new(crate::services::hooks::init_hooks(&cwd, &mcp_manager));
+        let guardian = crate::services::guardian::init_guardian(&active_model);
+        let proc_manager = Arc::clone(&tools.proc_supervisor);
+        let sandbox = Arc::new(tools.sandbox_runner());
 
-        // 11. Workspace watcher
         let watcher =
             crate::services::workspace::init_workspace_watcher(&cwd, self.config.enable_watcher)?;
 
-        // 12. Feature registry
-        let features_registry = Arc::new(FeatureRegistry::new());
+        let mut features_registry = FeatureRegistry::new();
+        features_registry.sync_from_map(&self.config.core.features);
+        let features_registry = Arc::new(features_registry);
 
-        // 13. Tool registry
-        let tools = match self.tools {
-            Some(mut t) => {
-                if !self.config.enable_web_search {
-                    t.disable("web_search");
-                }
-                t
-            }
-            None => crate::services::tools::init_tool_registry(
-                Some(storage.clone()),
-                vault.clone(),
-                mcp_manager.clone(),
-                self.config.core.extra_dirs.clone(),
-                &cwd,
-                self.config.enable_web_search,
-            )?,
-        };
-
-        // 14. Child agent engine runtime
-        let engine_runtime = Arc::new(
-            EngineAgentRuntime::new(
-                (*provider).clone(),
-                tools.clone(),
-                storage.clone(),
-                self.config.exec_policy.clone(),
-                cwd.clone(),
-                Some(hooks.clone()),
-                self.config.core.model_context_window,
-                self.config.core.agents.max_depth as u32,
-            )
-            .with_trust_store(trust_store.clone()),
+        let engine_runtime = crate::services::agent::build_engine_runtime(
+            provider.clone(),
+            &tools,
+            &storage,
+            Arc::clone(&exec_policy),
+            cwd.clone(),
+            Some(Arc::clone(&hooks)),
+            self.config.core.model_context_window,
+            self.config.core.agents.max_depth as u32,
+            Arc::clone(&trust_store),
         );
-        tools.set_agent_runtime(engine_runtime.clone());
-        let tools = Arc::new(tools);
+
+        let state = Arc::new(RwLock::new(crate::services::RuntimeServiceState {
+            config: self.config.clone(),
+            provider: Arc::new(provider),
+            guardian,
+            hooks,
+            engine_runtime,
+            watcher,
+        }));
 
         let services = RuntimeServices {
-            provider,
+            state: Arc::clone(&state),
             storage,
-            tools,
+            tools: Arc::clone(&tools),
             sandbox,
-            guardian,
-            exec_policy: self.config.exec_policy.clone(),
-            hooks,
+            exec_policy,
             mcp_manager,
             code_mode,
             proc_manager,
-            watcher,
             trust_store,
             features_registry,
             vault,
-            engine_runtime,
+            session_allowed_files: Arc::new(RwLock::new(HashSet::new())),
         };
 
-        Ok(M31aRuntime::new_internal(
-            self.config,
-            services,
-            available_models,
-        ))
+        // Install a stable delegating adapter so model/workspace commits are
+        // immediately visible to every cloned tool registry.
+        let adapter = Arc::new(crate::services::agent::RuntimeAgentRuntime::new(state));
+        tools.set_agent_runtime(adapter);
+
+        Ok(M31aRuntime::new_internal(services, available_models))
     }
 }
+
+/// Path type alias retained for builder consumers that inspect the workspace root.
+pub type RuntimeWorkspace = PathBuf;

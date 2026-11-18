@@ -281,6 +281,18 @@ impl AgentEngine {
         self
     }
 
+    /// Uses an existing execution-policy handle as the engine's canonical policy.
+    ///
+    /// Runtime-owned engines use this to share policy mutations with the tool
+    /// registry and child-agent runtime.
+    pub fn with_exec_policy_handle(
+        mut self,
+        exec_policy: std::sync::Arc<std::sync::RwLock<ExecPolicy>>,
+    ) -> Self {
+        self.exec_policy = exec_policy;
+        self
+    }
+
     /// Creates an authoritative tool execution dispatcher bound to this engine's security policies.
     pub fn tool_dispatcher(&self) -> crate::dispatcher::AuthoritativeToolDispatcher {
         crate::dispatcher::AuthoritativeToolDispatcher {

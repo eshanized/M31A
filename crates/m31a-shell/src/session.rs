@@ -74,6 +74,20 @@ impl PersistentShellSession {
         had_process
     }
 
+    /// Changes the session working directory.
+    ///
+    /// Any existing PTY process is terminated so the next command starts in the
+    /// new workspace rather than inheriting a process-level working directory.
+    pub fn set_cwd(&mut self, cwd: impl Into<PathBuf>) -> bool {
+        let cwd = cwd.into();
+        if self.cwd == cwd {
+            return false;
+        }
+        self.shutdown();
+        self.cwd = cwd;
+        true
+    }
+
     /// Executes a command within this persistent shell session.
     /// Captures output, updates working directory if `cd` was used,
     /// and keeps the underlying PTY child shell alive across executions.

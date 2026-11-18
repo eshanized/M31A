@@ -53,6 +53,7 @@ pub fn init_workspace_watcher(
         return Ok(None);
     }
 
-    let watcher = WorkspaceWatcher::new(cwd.to_path_buf(), None);
-    Ok(Some(Arc::new(watcher)))
+    let watcher = Arc::new(WorkspaceWatcher::new(cwd.to_path_buf(), None));
+    watcher.start();
+    Ok(Some(watcher))
 }

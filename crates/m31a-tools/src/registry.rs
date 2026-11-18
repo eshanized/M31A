@@ -198,9 +198,56 @@ impl ToolRegistry {
         self
     }
 
+    /// Replaces the storage handle used by this registry.
+    pub fn set_storage(&mut self, storage: Storage) {
+        self.storage = Some(storage);
+    }
+
+    /// Replaces the encrypted-vault handle used by this registry.
+    pub fn set_vault(&mut self, vault: Arc<m31a_core::LocalEncryptedVault>) {
+        self.vault = vault;
+    }
+
+    /// Returns the storage handle used by this registry, if configured.
+    pub fn storage_handle(&self) -> Option<Storage> {
+        self.storage.clone()
+    }
+
     pub fn with_mcp_manager(mut self, mcp_manager: Arc<McpManager>) -> Self {
         self.mcp_manager = mcp_manager;
         self
+    }
+
+    /// Replaces the MCP manager used by this registry.
+    pub fn set_mcp_manager(&mut self, mcp_manager: Arc<McpManager>) {
+        self.mcp_manager = mcp_manager;
+    }
+
+    /// Replaces the execution-policy handle used by this registry.
+    ///
+    /// The handle is shared with every cloned registry and with runtime-created
+    /// agent engines, so policy changes cannot diverge across the tool and
+    /// engine dispatch paths.
+    pub fn set_exec_policy_handle(
+        &self,
+        exec_policy: Arc<std::sync::RwLock<ExecPolicy>>,
+    ) {
+        self.exec_policy = exec_policy;
+    }
+
+    /// Returns the canonical execution-policy handle used by this registry.
+    pub fn exec_policy_handle(&self) -> Arc<std::sync::RwLock<ExecPolicy>> {
+        Arc::clone(&self.exec_policy)
+    }
+
+    /// Returns the sandbox runner owned by this registry.
+    pub fn sandbox_runner(&self) -> SandboxRunner {
+        self.sandbox.clone()
+    }
+
+    /// Returns the sandbox process manager owned by this registry.
+    pub fn sandbox_process_manager(&self) -> Arc<ProcessManager> {
+        Arc::clone(&self.process_manager)
     }
 
     /// Releases all process, MCP, and persistent-shell resources owned by this registry.

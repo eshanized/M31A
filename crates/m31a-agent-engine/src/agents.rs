@@ -33,7 +33,7 @@ use m31a_tools::registry::ToolRegistry;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use tokio::sync::{mpsc, watch};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
@@ -131,7 +131,8 @@ pub struct EngineAgentRuntime {
     base_client: ProviderClient,
     tools: ToolRegistry,
     storage: Storage,
-    exec_policy: ExecPolicy,
+    /// Canonical execution-policy handle shared with child engines and the tool registry.
+    exec_policy: Arc<RwLock<ExecPolicy>>,
     cwd: PathBuf,
     hooks: Option<Arc<m31a_hooks::HookRuntime>>,
     /// Parent context-window budget inherited by children.
@@ -175,7 +176,7 @@ impl EngineAgentRuntime {
             base_client,
             tools,
             storage,
-            exec_policy,
+            exec_policy: Arc::new(RwLock::new(exec_policy)),
             cwd,
             hooks,
             context_window,
@@ -255,6 +256,25 @@ impl EngineAgentRuntime {
     pub fn with_trust_store(mut self, trust_store: Arc<Mutex<m31a_trust::TrustStore>>) -> Self {
         self.trust_store = trust_store;
         self
+    }
+
+    /// Attach an existing execution-policy handle as the canonical policy.
+    ///
+    /// Child engines inherit this same handle, keeping parent, child, and tool
+    /// dispatch decisions synchronized.
+    pub fn with_exec_policy_handle(mut self, exec_policy: Arc<RwLock<ExecPolicy>>) -> Self {
+        self.exec_policy = exec_policy;
+        self
+    }
+
+    /// Returns the canonical execution-policy handle used by child engines.
+    pub fn exec_policy_handle(&self) -> Arc<RwLock<ExecPolicy>> {
+        Arc::clone(&self.exec_policy)
+    }
+
+    /// Returns the model used by newly spawned child agents by default.
+    pub fn base_model(&self) -> &str {
+        self.base_client.model()
     }
 
     /// Attach a worktree manager for git branch isolation during subagent execution.
@@ -645,15 +665,21 @@ impl AgentRuntime for EngineAgentRuntime {
         }
 
         let client = self.base_client.with_model(&model);
+        let exec_policy = self
+            .exec_policy
+            .read()
+            .map(|policy| policy.clone())
+            .unwrap_or_else(|_| ExecPolicy::standard());
         let mut child = AgentEngine::new(
             client,
             child_tools,
             self.storage.clone(),
             ApprovalPolicy::Never,
-            self.exec_policy.clone(),
+            exec_policy,
             role.sandbox_policy,
             child_cwd.clone(),
-        );
+        )
+        .with_exec_policy_handle(self.exec_policy_handle());
         child.compactor = Arc::new(ContextCompactor::new(CompactTokenBudget {
             max_context_tokens: self.context_window,
             ..CompactTokenBudget::default()
