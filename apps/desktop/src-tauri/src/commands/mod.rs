@@ -545,17 +545,6 @@ pub async fn submit_turn(
         .await
         .map_err(|error| error.to_string())?;
 
-    // Store the runtime-assigned identifier in the session turn index for
-    // history correlation, cancellation diagnostics, and later reconciliation.
-    let turn_index = storage
-        .list_turns(&thread_id)
-        .map_err(|error| error.to_string())?
-        .last()
-        .map(|turn| turn.turn_index + 1)
-        .unwrap_or(1);
-    storage
-        .save_turn(&turn_id, &thread_id, turn_index, "active")
-        .map_err(|error| error.to_string())?;
     let thread_id_ret = thread_id.clone();
     let turn_id_ret = turn_id.clone();
 
