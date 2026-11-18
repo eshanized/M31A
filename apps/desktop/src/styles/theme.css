@@ -129,3 +129,15 @@ code, pre {
   font-size: 11px;
   line-height: 16px;
 }
+
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 0.35;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
