@@ -102,7 +102,7 @@ type RuntimeEvent =
   | { type: 'initializing' }
   | { type: 'ready' }
   | { type: 'shutting_down' }
-  | { type: 'shutdown_complete'; data: { report: Record<string, unknown> } }
+  | { type: 'shutdown_complete'; data: { report: ShutdownReportDto } }
   | { type: 'runtime_error'; data: { error: string } }
   | { type: 'thread_created'; data: { thread_id: string; title: string } }
   | { type: 'turn_submitted'; data: { thread_id: string; turn_id: string } }
@@ -120,6 +120,7 @@ type RuntimeEvent =
   | { type: 'agent_finished'; data: { parent_thread_id: string; child_thread_id: string; success: boolean } }
   | { type: 'workflow_step'; data: { workflow_id: string; step: number; total_steps: number; message: string } }
   | { type: 'workspace_changed'; data: { paths: string[] } }
+  | { type: 'verification_result'; data: { check_name: string; passed: boolean; output: string } }
   | { type: 'model_changed'; data: { old_model: string; new_model: string } }
   | { type: 'provider_status'; data: { status: string; message: string } };
 ```
