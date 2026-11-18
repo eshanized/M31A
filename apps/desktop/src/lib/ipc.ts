@@ -57,6 +57,10 @@ export const ipc = {
     return invoke<string>('activate_model', { model });
   },
 
+  async getPendingInteractions(): Promise<PendingInteractionsDto> {
+    return invoke<PendingInteractionsDto>('get_pending_interactions');
+  },
+
   // Sessions
   async listSessions(): Promise<SessionSummaryDto[]> {
     return invoke<SessionSummaryDto[]>('list_sessions');
