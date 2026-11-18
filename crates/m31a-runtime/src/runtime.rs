@@ -686,7 +686,7 @@ impl M31aRuntime {
         .is_ok();
 
         let stopped_processes = self.services.proc_manager.stop_all().await;
-        let background_processes_stopped = stopped_processes
+        let runtime_processes_stopped = stopped_processes
             .iter()
             .filter(|process| process.stopped)
             .count();
@@ -697,6 +697,12 @@ impl M31aRuntime {
             .await
             .iter()
             .any(|process| process.status.is_running());
+
+        // The tool registry owns additional sandbox, background-process, MCP, and shell resources.
+        let tool_shutdown = self.services.tools.shutdown().await;
+        let background_processes_stopped = runtime_processes_stopped
+            + tool_shutdown.background_processes_stopped
+            + tool_shutdown.sandbox_processes_stopped;
 
         let watcher_stopped = if let Some(watcher) = &self.services.watcher {
             watcher.stop();
@@ -711,13 +717,14 @@ impl M31aRuntime {
             .map(|watcher| !watcher.is_running())
             .unwrap_or(true);
 
-        let mcp_servers_stopped = self.services.mcp_manager.shutdown_all().await;
+        let mcp_servers_stopped = tool_shutdown.mcp_servers_stopped;
         let mcp_servers_remaining = !self.services.mcp_manager.list_server_names().await.is_empty();
 
         let report = ShutdownReport {
             cleanly_stopped: turns_drained
                 && !processes_remaining
                 && watcher_cleanly_stopped
+                && tool_shutdown.persistent_shell_stopped
                 && !mcp_servers_remaining,
             background_processes_stopped,
             active_turns_cancelled,
