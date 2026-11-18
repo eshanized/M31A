@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Folder,
   ShieldCheck,
@@ -28,12 +28,21 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
     authorizeCurrentWorkspace,
     runtimeStatus,
     isRuntimeReady,
+    runningTurnId,
+    isSubmittingTurn,
   } = useApp();
+
+  const [workspaceError, setWorkspaceError] = useState<string | null>(null);
+  const [modelError, setModelError] = useState<string | null>(null);
+  const isTurnBusy = Boolean(runningTurnId) || isSubmittingTurn;
 
   const handleModelChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
     try {
       await switchModel(e.target.value);
+      setModelError(null);
     } catch (err) {
+      const message = String(err);
+      setModelError(message);
       console.error('Failed to switch model:', err);
     }
   };
@@ -129,7 +138,12 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
               </span>
               <button
                 type="button"
-                onClick={authorizeCurrentWorkspace}
+                onClick={() => {
+                  setWorkspaceError(null);
+                  void authorizeCurrentWorkspace().catch((err) => {
+                    setWorkspaceError(String(err));
+                  });
+                }}
                 className="btn btn-sm"
                 style={{ padding: '2px 6px', fontSize: '10px' }}
               >
@@ -148,7 +162,8 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
           <select
             value={activeModel}
             onChange={handleModelChange}
-            disabled={!isRuntimeReady || availableModels.length === 0}
+            aria-label="Active model"
+            disabled={!isRuntimeReady || isTurnBusy || availableModels.length === 0}
             style={{
               padding: '3px 8px',
               borderRadius: 'var(--radius-sm)',
@@ -205,6 +220,26 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
         >
           <Sliders size={14} color="var(--text-secondary)" />
         </button>
+        {(workspaceError || modelError) && (
+          <div
+            role="alert"
+            style={{
+              position: 'absolute',
+              top: '46px',
+              right: '12px',
+              zIndex: 20,
+              maxWidth: '420px',
+              padding: '8px 12px',
+              borderRadius: 'var(--radius-sm)',
+              border: '1px solid var(--accent-red)',
+              background: 'var(--bg-secondary)',
+              color: 'var(--accent-red)',
+              fontSize: '11px',
+            }}
+          >
+            {workspaceError || modelError}
+          </div>
+        )}
       </div>
     </header>
   );
