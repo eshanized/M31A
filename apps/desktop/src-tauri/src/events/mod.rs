@@ -25,7 +25,9 @@ pub fn start_event_bridge(app_handle: AppHandle, runtime: M31aRuntime) {
                     }
                 }
                 Err(RecvError::Lagged(skipped)) => {
-                    warn!("Event bridge lagged by {skipped} events; requesting frontend reconciliation");
+                    warn!(
+                        "Event bridge lagged by {skipped} events; requesting frontend reconciliation"
+                    );
                     if let Err(err) = app_handle.emit("m31a://event-gap", skipped) {
                         error!("Failed to signal runtime event gap to webview: {err}");
                     }

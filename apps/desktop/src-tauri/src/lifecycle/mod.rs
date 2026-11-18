@@ -18,8 +18,8 @@ pub async fn init_runtime(custom_cwd: Option<PathBuf>) -> Result<M31aRuntime, Ru
 
     // Configuration failures must remain visible; never discard model,
     // credentials, or administrator-enforced security settings.
-    let core = m31a_core::Config::load()
-        .map_err(|error| RuntimeError::Config(error.to_string()))?;
+    let core =
+        m31a_core::Config::load().map_err(|error| RuntimeError::Config(error.to_string()))?;
     let config = RuntimeConfig::new(core, cwd);
     config.validate()?;
 
