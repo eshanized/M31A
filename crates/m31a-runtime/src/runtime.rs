@@ -591,6 +591,9 @@ impl M31aRuntime {
         new_model: &str,
         new_client: ProviderClient,
     ) -> Result<(), RuntimeError> {
+        let _admission = self.admission_lock.lock().map_err(|_| {
+            RuntimeError::Shutdown("Runtime admission lock is poisoned".to_string())
+        })?;
         if !self.state().is_operational() {
             return Err(RuntimeError::InvalidState {
                 message: "Cannot switch model: runtime is not ready".to_string(),
