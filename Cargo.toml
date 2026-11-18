@@ -42,6 +42,7 @@ members = [
     "crates/m31a-runtime",
     "crates/m31a-tui",
     "crates/m31a-cli",
+    "crates/m31a-ebpf",
     "apps/desktop/src-tauri",
     "examples/distributed_task_mesh",
 ]
@@ -112,6 +113,7 @@ m31a-proc = { path = "crates/m31a-proc" }
 m31a-watcher = { path = "crates/m31a-watcher" }
 m31a-browser = { path = "crates/m31a-browser" }
 m31a-runtime = { path = "crates/m31a-runtime" }
+m31a-ebpf = { path = "crates/m31a-ebpf" }
 m31a-maintenance = { path = "crates/m31a-maintenance" }
 mimalloc = { version = "0.1", default-features = false }
 

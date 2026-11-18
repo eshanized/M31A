@@ -2963,6 +2963,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "m31a-ebpf"
+version = "0.1.15"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "libc",
+ "m31a-core",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "m31a-elicitation"
 version = "0.1.15"
 dependencies = [
