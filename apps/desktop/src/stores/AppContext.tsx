@@ -192,7 +192,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       setActiveSessionDetails(details);
       setWorkspaceInfo({
         path: details.cwd,
-        is_trusted: true,
+        is_trusted: details.workspace_is_trusted,
         exists: true,
       });
       setMessages(
