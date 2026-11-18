@@ -502,17 +502,18 @@ impl M31aRuntime {
             .lock()
             .unwrap()
             .values()
-            .filter(|turn| !turn.cancel_token.is_cancelled())
             .cloned()
             .collect();
 
         let count = turns.len();
         for turn in turns {
-            turn.cancel_token.cancel();
-            self.broadcast_event(RuntimeEvent::TurnCancelled {
-                thread_id: turn.thread_id,
-                turn_id: turn.turn_id,
-            });
+            if !turn.cancel_token.is_cancelled() {
+                turn.cancel_token.cancel();
+                self.broadcast_event(RuntimeEvent::TurnCancelled {
+                    thread_id: turn.thread_id,
+                    turn_id: turn.turn_id,
+                });
+            }
         }
         count
     }
