@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [master, feat/desktop-phase-2]
+    branches: [master, feat/desktop-phase-2, fix/desktop-phase-2-1-integrity]
   pull_request:
     branches: [master, feat/desktop-phase-2]
   workflow_dispatch:
