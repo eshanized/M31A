@@ -7,6 +7,7 @@ import { invoke } from '@tauri-apps/api/core';
 import type {
   EnvironmentInfoDto,
   ModelInfoDto,
+  PendingInteractionsDto,
   RuntimeStatusDto,
   SessionDetailsDto,
   SessionSummaryDto,
@@ -34,14 +35,8 @@ export const ipc = {
     return invoke<WorkspaceInfoDto>('get_active_workspace');
   },
 
-  async setWorkspace(
-    path: string,
-    allowUntrusted = false
-  ): Promise<WorkspaceInfoDto> {
-    return invoke<WorkspaceInfoDto>('set_workspace', {
-      path,
-      allowUntrusted,
-    });
+  async setWorkspace(path: string): Promise<WorkspaceInfoDto> {
+    return invoke<WorkspaceInfoDto>('set_workspace', { path });
   },
 
   async authorizeWorkspace(path: string): Promise<WorkspaceInfoDto> {
