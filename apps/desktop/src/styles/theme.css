@@ -10,7 +10,7 @@
 
   --text-primary: #c9d1d9;
   --text-secondary: #8b949e;
-  --text-muted: #484f58;
+  --text-muted: #7d8590;
   --text-link: #58a6ff;
 
   --accent-blue: #1f6feb;
@@ -42,7 +42,7 @@ body {
   font-size: 13px;
   line-height: 1.5;
   overflow: hidden;
-  user-select: none;
+  user-select: text;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -94,7 +94,7 @@ code, pre {
   white-space: nowrap;
 }
 
-.btn:hover {
+.btn:hover:not(:disabled) {
   background-color: var(--bg-tertiary);
   border-color: var(--text-secondary);
 }
@@ -139,5 +139,12 @@ code, pre {
   50% {
     opacity: 1;
     transform: scale(1);
+  }
+}
+
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
   }
 }
