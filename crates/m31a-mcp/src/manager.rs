@@ -355,12 +355,14 @@ impl McpManager {
     }
 
     /// Closes all connected servers and drains registries.
-    pub async fn shutdown_all(&self) {
+    pub async fn shutdown_all(&self) -> usize {
         self.cached_tool_specs.write().await.clear();
         let mut clients = self.clients.write().await;
+        let stopped = clients.len();
         for (_, client) in clients.drain() {
             client.close().await;
         }
+        stopped
     }
 
     /// Synchronously checks if a server is currently connected without blocking.
