@@ -11,7 +11,7 @@ use m31a_elicitation::ApprovalDecision;
 use m31a_provider::models::ModelInfo;
 use m31a_runtime::context::TurnRequest;
 use m31a_runtime::lifecycle::ShutdownReport;
-use m31a_trust::{TrustDecision, TrustLevel};
+use m31a_trust::TrustDecision;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tauri::{AppHandle, State};
@@ -543,6 +543,18 @@ pub async fn submit_turn(
         .runtime()
         .execute_turn_with_id(request)
         .await
+        .map_err(|error| error.to_string())?;
+
+    // Store the runtime-assigned identifier in the session turn index for
+    // history correlation, cancellation diagnostics, and later reconciliation.
+    let turn_index = storage
+        .list_turns(&thread_id)
+        .map_err(|error| error.to_string())?
+        .last()
+        .map(|turn| turn.turn_index + 1)
+        .unwrap_or(1);
+    storage
+        .save_turn(&turn_id, &thread_id, turn_index, "active")
         .map_err(|error| error.to_string())?;
     let thread_id_ret = thread_id.clone();
     let turn_id_ret = turn_id.clone();
