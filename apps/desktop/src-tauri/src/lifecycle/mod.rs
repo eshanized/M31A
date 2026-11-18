@@ -9,13 +9,19 @@ use tracing::{info, warn};
 
 /// Initializes the authoritative M31aRuntime from configuration.
 pub async fn init_runtime(custom_cwd: Option<PathBuf>) -> Result<M31aRuntime, RuntimeError> {
-    // Configuration failures must be visible. Silently replacing a malformed
-    // config would discard user-selected models, credentials, and security policy.
-    let mut config = RuntimeConfig::load_default()?;
+    // A packaged GUI process may not have a useful current directory. Always
+    // prefer the explicit home workspace supplied by the desktop host.
+    let cwd = match custom_cwd {
+        Some(path) => path,
+        None => std::env::current_dir().map_err(RuntimeError::Io)?,
+    };
 
-    if let Some(cwd) = custom_cwd {
-        config.cwd = cwd;
-    }
+    // Configuration failures must remain visible; never discard model,
+    // credentials, or administrator-enforced security settings.
+    let core = m31a_core::Config::load()
+        .map_err(|error| RuntimeError::Config(error.to_string()))?;
+    let config = RuntimeConfig::new(core, cwd);
+    config.validate()?;
 
     info!(
         "Building authoritative runtime for workspace '{}' with active model '{}'",
