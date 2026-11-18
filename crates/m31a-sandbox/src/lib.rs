@@ -3,6 +3,7 @@
 //! Enforces filesystem and network isolation using Linux Bubblewrap and Landlock, macOS Seatbelt,
 //! Windows containers, and seccomp filters to ensure safe agent tool execution.
 
+pub mod appcontainer;
 pub mod bwrap_builder;
 pub mod daemon_isolation;
 pub mod daemon_mounts;
@@ -11,6 +12,7 @@ pub mod fd_mount;
 pub mod landlock;
 pub mod mxc;
 pub mod network_proxy;
+pub mod platform;
 pub mod policy_transforms;
 pub mod process_hardening;
 pub mod process_manager;
@@ -26,6 +28,7 @@ pub mod terminal_sanitizer;
 pub mod violation;
 pub mod wslg;
 
+pub use appcontainer::{AppContainerSandbox, AppContainerSecurityPlan};
 pub use bwrap_builder::{
     BwrapMountPlan, BwrapNetworkMode, BwrapOptions, CanonicalSandboxPlan,
     LINUX_PLATFORM_DEFAULT_READ_ROOTS, PROTECTED_METADATA_NAMES, build_bwrap_arguments,
@@ -37,6 +40,7 @@ pub use fd_mount::verify_fd_mounts;
 pub use network_proxy::{
     ConnectionAuditRecord, NetworkFirewallRule, NetworkProxyFirewall, ProxyDecision,
 };
+pub use platform::{PlatformCapabilityReport, SandboxBackendKind, SandboxError, SandboxPlatform};
 pub use policy_transforms::{
     EffectiveMountPlan, FileSystemAccessMode, FileSystemPermissions, FileSystemSandboxEntry,
     build_effective_mount_plan,

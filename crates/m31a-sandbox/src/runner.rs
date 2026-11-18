@@ -21,6 +21,7 @@ use tracing::{debug, warn};
 
 // Both backends are plain-std implementations that compile on every target;
 // they are only ever *invoked* on their own platform (see [`SandboxRunner::select_backend`]).
+use crate::appcontainer::AppContainerSandbox;
 use crate::mxc::MxcSandbox;
 use crate::seatbelt::SeatbeltSandbox;
 
@@ -33,6 +34,7 @@ const OUTPUT_DRAIN_GRACE: Duration = Duration::from_secs(10);
 enum SandboxBackend {
     Bubblewrap,
     Seatbelt,
+    AppContainer,
     Mxc,
     Process,
 }
@@ -200,6 +202,8 @@ impl SandboxRunner {
     fn select_backend(&self, policy: SandboxPolicy) -> SandboxBackend {
         if cfg!(target_os = "macos") && SeatbeltSandbox::is_available() {
             SandboxBackend::Seatbelt
+        } else if cfg!(target_os = "windows") && AppContainerSandbox::is_available() {
+            SandboxBackend::AppContainer
         } else if cfg!(target_os = "windows") && MxcSandbox::is_available() {
             SandboxBackend::Mxc
         } else if cfg!(target_os = "linux")
@@ -339,6 +343,11 @@ impl SandboxRunner {
                     stderr: out.stderr,
                     timed_out: false,
                 })
+            }
+            SandboxBackend::AppContainer => {
+                let appcontainer = AppContainerSandbox::new(policy, cwd)?;
+                let parts: Vec<String> = command.to_tokens();
+                appcontainer.execute(&parts, cwd, timeout, &hardened_env).await
             }
             SandboxBackend::Mxc => {
                 let mxc = MxcSandbox::new(policy, cwd)?;
