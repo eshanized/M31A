@@ -152,12 +152,20 @@ async fn test_runtime_service_ownership_and_agent_runtime_wiring() {
     assert!(runtime.tools().is_allowed("spawn_agent"));
 
     // Verify trust store authorization evaluation
-    let trust_res = m31a_runtime::services::workspace::verify_workspace_trust(
-        &runtime.trust_store(),
+    let trust_store = runtime.trust_store();
+    let denied_by_default = m31a_runtime::services::workspace::verify_workspace_trust(
+        &trust_store,
+        temp_path,
+        false,
+    );
+    assert!(denied_by_default.is_err());
+
+    let explicit_session_grant = m31a_runtime::services::workspace::verify_workspace_trust(
+        &trust_store,
         temp_path,
         true,
     );
-    assert!(trust_res.is_ok());
+    assert!(explicit_session_grant.is_ok());
 }
 
 #[tokio::test]
