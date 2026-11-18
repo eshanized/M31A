@@ -341,6 +341,7 @@ impl M31aRuntime {
 
         let mut engine =
             self.create_agent_engine(Some(workspace.clone()), request.collaboration_mode);
+        engine.persist_items = !request.ephemeral;
 
         let active_model = self.active_model();
         let system_prompt = crate::services::agent::build_system_prompt(
@@ -358,9 +359,9 @@ impl M31aRuntime {
         engine.authoritative_system_prompt = Some(system_prompt.clone());
 
         // Rehydrate prior dialogue from the thread's persisted transcript.
-        // Tool records remain in storage for inspection but are not replayed as
-        // standalone provider messages because their original tool-call pairing
-        // is not represented by the storage tuple returned here.
+        // Tool records remain available for inspection but are not replayed as
+        // standalone provider messages because their original call pairing is
+        // not represented by the compact storage tuple.
         let persisted_items = self
             .services
             .storage
@@ -379,14 +380,22 @@ impl M31aRuntime {
             }
         }
 
-        let latest_user_prompt = history
-            .iter()
-            .rev()
-            .find(|message| message.role == m31a_core::types::Role::User)
-            .and_then(|message| message.content.as_deref());
-        if latest_user_prompt != Some(request.prompt.as_str()) {
-            history.push(ChatMessage::user(request.prompt.clone()));
+        // The runtime owns prompt persistence so every presentation surface
+        // receives identical transcript continuity. Ephemeral turns stay out
+        // of durable session storage.
+        if !request.ephemeral {
+            self.services
+                .storage
+                .save_item(
+                    &uuid::Uuid::new_v4().to_string(),
+                    &thread_id,
+                    None,
+                    "user",
+                    &request.prompt,
+                )
+                .map_err(|error| RuntimeError::Storage(error.to_string()))?;
         }
+        history.push(ChatMessage::user(request.prompt.clone()));
 
         let (eng_tx, mut eng_rx) = mpsc::unbounded_channel();
         let (steer_tx, steer_rx) = mpsc::unbounded_channel();
