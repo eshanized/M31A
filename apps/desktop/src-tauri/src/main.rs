@@ -2,5 +2,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    m31a_desktop_lib::run();
+    if let Err(error) = m31a_desktop_lib::run() {
+        eprintln!("M31A Desktop failed to start: {error}");
+        std::process::exit(1);
+    }
 }
