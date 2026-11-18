@@ -25,3 +25,17 @@ export async function subscribeToRuntimeEvents(
     }
   });
 }
+
+export const EVENT_GAP_CHANNEL_NAME = 'm31a://event-gap';
+
+/**
+ * Subscribe to loss notifications from the Rust broadcast bridge.
+ * Callers should re-fetch authoritative runtime state after a gap.
+ */
+export async function subscribeToRuntimeEventGaps(
+  listener: (skipped: number) => void
+): Promise<UnlistenFn> {
+  return listen<number>(EVENT_GAP_CHANNEL_NAME, (event) => {
+    listener(event.payload);
+  });
+}
