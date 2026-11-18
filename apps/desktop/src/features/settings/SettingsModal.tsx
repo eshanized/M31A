@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { X, Server, Layers, Cpu, ShieldCheck } from 'lucide-react';
 import { useApp } from '../../stores/AppContext';
 
@@ -9,12 +9,31 @@ export const SettingsModal: React.FC<{ isOpen: boolean; onClose: () => void }> =
   const { environmentInfo, runtimeStatus, workspaceInfo, activeModel, availableModels } =
     useApp();
 
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   const currentModelInfo = availableModels.find((m) => m.id === activeModel);
+  const capabilities = currentModelInfo
+    ? [
+        currentModelInfo.supports_tools ? 'Tools' : null,
+        currentModelInfo.supports_thinking ? 'Thinking' : null,
+        currentModelInfo.supports_vision ? 'Vision' : null,
+      ].filter((value): value is string => value !== null).join(' • ') || 'None'
+    : 'N/A';
 
   return (
     <div
+      role="presentation"
       style={{
         position: 'fixed',
         inset: 0,
@@ -26,6 +45,9 @@ export const SettingsModal: React.FC<{ isOpen: boolean; onClose: () => void }> =
       }}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Runtime Information and Settings"
         style={{
           width: '520px',
           maxWidth: '90vw',
@@ -56,6 +78,7 @@ export const SettingsModal: React.FC<{ isOpen: boolean; onClose: () => void }> =
             type="button"
             onClick={onClose}
             className="btn btn-sm"
+            aria-label="Close settings"
             style={{ background: 'transparent', border: 'none', padding: '4px' }}
           >
             <X size={16} />
@@ -145,11 +168,7 @@ export const SettingsModal: React.FC<{ isOpen: boolean; onClose: () => void }> =
               </span>
 
               <span style={{ color: 'var(--text-secondary)' }}>Capabilities:</span>
-              <span>
-                {currentModelInfo?.supports_tools ? 'Tools • ' : ''}
-                {currentModelInfo?.supports_thinking ? 'Thinking • ' : ''}
-                {currentModelInfo?.supports_vision ? 'Vision' : ''}
-              </span>
+              <span>{capabilities}</span>
             </div>
           </div>
 
@@ -196,11 +215,20 @@ export const SettingsModal: React.FC<{ isOpen: boolean; onClose: () => void }> =
                 <span style={{ color: 'var(--text-secondary)' }}>Trust Status:</span>
                 <span
                   style={{
-                    color: workspaceInfo?.is_trusted ? 'var(--accent-green)' : 'var(--accent-red)',
+                    color:
+                      workspaceInfo == null
+                        ? 'var(--text-secondary)'
+                        : workspaceInfo.is_trusted
+                        ? 'var(--accent-green)'
+                        : 'var(--accent-red)',
                     fontWeight: 600,
                   }}
                 >
-                  {workspaceInfo?.is_trusted ? 'Authoritative Trust Granted' : 'Untrusted (Guarded Mode)'}
+                  {workspaceInfo == null
+                    ? 'Unknown'
+                    : workspaceInfo.is_trusted
+                    ? 'Authoritative Trust Granted'
+                    : 'Untrusted (Guarded Mode)'}
                 </span>
               </div>
             </div>
