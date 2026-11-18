@@ -39,7 +39,7 @@ The design strictly prevents the desktop frontend from becoming a secondary or d
 ### 2.1 The Rust Authoritative Core
 The frontend must **never** execute shell commands, alter files, or grant workspace permissions independently.
 
-- **Workspace Path Canonicalization**: Handled in `m31a_desktop::security::validate_and_canonicalize_workspace_path`. Paths are validated, checked for directory existence, and canonicalized against symlink escapes before being admitted to the runtime.
+- **Workspace Path Canonicalization**: Handled in `m31a_desktop_lib::security::validate_and_canonicalize_workspace_path`. Paths are validated, checked for directory existence, and canonicalized after resolving symlinks before being admitted to the runtime.
 - **Trust Evaluation**: All workspace operations query `m31a_trust::TrustStore`. Selecting a workspace never grants trust. A workspace requiring confirmation can be authorized only after a native operating-system confirmation dialog; an explicit `Denied` decision is never overridden by a session grant.
 - **Session Isolation**: Every submitted turn resolves the session's persisted `cwd`, canonicalizes it, and verifies it matches the active workspace before execution.
 - **Approval Gate**: Interactive approvals (`ApprovalRequested`) and user questions (`QuestionRequested`) originate from the runtime's elicitation and execution policy engines (`m31a-execpolicy`, `m31a-elicitation`). Frontend decisions are submitted as typed requests (`respond_approval`, `respond_question`) to Rust, which unblocks the waiting future.
@@ -58,7 +58,7 @@ Outbound frontend `fetch`/WebSocket connections are restricted by `connect-src`;
 
 ### 3.1 Startup & Singleton Runtime
 The desktop application initializes the authoritative `M31aRuntime` during Tauri application setup:
-1. `init_runtime(config)` is called asynchronously during `tauri::Builder::setup`.
+1. `init_runtime(Some(home_dir))` is invoked through `tauri::async_runtime::block_on` inside `tauri::Builder::setup`; setup waits synchronously for initialization to complete.
 2. A single `M31aRuntime` instance is wrapped inside `DesktopState`.
 3. `DesktopState` is registered as Tauri managed state via `app.manage(desktop_state)`.
 4. The background event bridge (`start_event_bridge`) subscribes to `runtime.subscribe_events()` and forwards events to Tauri webviews.
@@ -68,7 +68,7 @@ The desktop application initializes the authoritative `M31aRuntime` during Tauri
 When the desktop application window is closed or an exit request is received:
 1. The Tauri event loop intercepts `RunEvent::ExitRequested`.
 2. `lifecycle::teardown_desktop_application` sets `is_shutting_down = true`.
-3. `runtime.shutdown().await` is invoked, gracefully flushing pending telemetry, committing storage transactions, and generating a `ShutdownReport`.
+3. `runtime.shutdown().await` is invoked to cancel and drain active turns, stop managed processes, tool-owned resources, the watcher, MCP clients, and generate a `ShutdownReport`. It does not claim to flush arbitrary telemetry or storage transactions.
 
 ---
 
