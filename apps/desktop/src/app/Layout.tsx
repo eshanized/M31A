@@ -12,6 +12,7 @@ export const Layout: React.FC = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const { pendingApprovals, pendingQuestions, activeSessionId } = useApp();
+
   const sessionApprovals = pendingApprovals.filter(
     (approval) => approval.thread_id === activeSessionId
   );
@@ -49,9 +50,9 @@ export const Layout: React.FC = () => {
             position: 'relative',
           }}
         >
-          {/* Floating or pinned authorization and clarification cards */}
           {(sessionApprovals.length > 0 || sessionQuestions.length > 0) && (
             <div
+              aria-label="Pending runtime interactions"
               style={{
                 maxHeight: '32vh',
                 overflowY: 'auto',
@@ -59,20 +60,16 @@ export const Layout: React.FC = () => {
                 borderBottom: '1px solid var(--border-primary)',
               }}
             >
-              {sessionApprovals.map((appr) => (
-                <ApprovalCard key={appr.request_id} approval={appr} />
+              {sessionApprovals.map((approval) => (
+                <ApprovalCard key={approval.request_id} approval={approval} />
               ))}
-            </div>
-              {sessionQuestions.map((q) => (
-                <QuestionDialog key={q.question_id} question={q} />
+              {sessionQuestions.map((question) => (
+                <QuestionDialog key={question.question_id} question={question} />
               ))}
             </div>
           )}
 
-          {/* Central conversation timeline */}
           <ChatTimeline />
-
-          {/* Interactive message composer */}
           <Composer />
         </main>
       </div>
