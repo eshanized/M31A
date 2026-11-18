@@ -91,6 +91,7 @@ rand = "0.10"
 which = "7.0"
 unicode-width = "0.2"
 unicode-segmentation = "1.12"
+image = { version = "0.25", default-features = false, features = ["png"] }
 m31a-core = { path = "crates/m31a-core" }
 m31a-provider = { path = "crates/m31a-provider" }
 m31a-execpolicy = { path = "crates/m31a-execpolicy" }

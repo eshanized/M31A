@@ -20,6 +20,7 @@ pub mod scope;
 pub mod self_heal;
 pub mod verification_timeline;
 pub mod visual_tdd;
+pub mod visual_tdd_v2;
 
 pub use benchmark::{
     AutonomousEngineeringBenchmark, AutonomousEngineeringBenchmarkReport, BenchmarkMetric,
@@ -70,6 +71,13 @@ pub use visual_tdd::{
     AssertionOutcome, UiActionStep, UiAssertion, VisualTddReport, VisualTddRunner,
     VisualTddScenario,
 };
+pub use visual_tdd_v2::{
+    BaselineManifest, BaselineRecord, BaselineStatus, BaselineStore, ComparisonOutcome,
+    ComparisonThreshold, DiffBoundingBox, HeatmapOptions, LayoutRepairCoordinator,
+    LayoutRepairPatch, LayoutRepairReport, MaskRule, MaskSet, RectRegion, RepairCheckpoint,
+    RepairLoopConfig, ViewportConfig, ViewportPreset, ViewportReport, VisualComparator,
+    VisualHeatmap, VisualRegressionReport, VisualTddV2Runner, VisualTddV2Scenario,
+};
 
 use anyhow::Result;
 use std::path::{Path, PathBuf};
@@ -115,5 +123,15 @@ impl AutonomousVerifier {
         artifact_dir: Option<&Path>,
     ) -> Result<VisualTddReport> {
         VisualTddRunner::run_scenario(scenario, session_opt, artifact_dir).await
+    }
+
+    /// Executes an autonomous Visual TDD v2 multi-resolution test run with baseline comparison.
+    pub async fn verify_visual_state_v2(
+        scenario: &VisualTddV2Scenario,
+        session_opt: Option<Arc<m31a_browser::BrowserSession>>,
+        baseline_store: &BaselineStore,
+        output_dir: &Path,
+    ) -> Result<VisualRegressionReport> {
+        VisualTddV2Runner::run_scenario(scenario, session_opt, baseline_store, output_dir).await
     }
 }
