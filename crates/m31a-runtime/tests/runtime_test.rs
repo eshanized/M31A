@@ -1,5 +1,7 @@
 //! Integration tests for `m31a-runtime`.
 
+#![allow(clippy::field_reassign_with_default)]
+
 use m31a_core::Config;
 use m31a_runtime::{RuntimeBuilder, RuntimeConfig, RuntimeEvent, RuntimeState};
 use tempfile::tempdir;
