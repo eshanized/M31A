@@ -14,7 +14,10 @@ import React, {
   useRef,
 } from 'react';
 import { ipc } from '../lib/ipc';
-import { subscribeToRuntimeEvents } from '../lib/events';
+import {
+  subscribeToRuntimeEventGaps,
+  subscribeToRuntimeEvents,
+} from '../lib/events';
 import type {
   EnvironmentInfoDto,
   ModelInfoDto,
@@ -132,9 +135,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   >([]);
 
   // Ref to track latest state inside event listener callback
-  const runningTurnIdRef = useRef<string | null>(null);
-  runningTurnIdRef.current = runningTurnId;
-
   const activeSessionIdRef = useRef<string | null>(null);
   activeSessionIdRef.current = activeSessionId;
 
@@ -175,16 +175,45 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     }
   }, []);
 
+  const refreshPendingInteractions = useCallback(async () => {
+    try {
+      const pending = await ipc.getPendingInteractions();
+      setPendingApprovals(pending.approvals);
+      setPendingQuestions(pending.questions);
+    } catch (err) {
+      console.error('Failed to reconcile pending runtime interactions:', err);
+    }
+  }, []);
+
   const selectSession = useCallback(async (sessionId: string) => {
     try {
       const details = await ipc.loadSession(sessionId);
       setActiveSessionId(details.id);
       setActiveSessionDetails(details);
-      // Reset chat messages to match loaded session context
-      setMessages([]);
+      setWorkspaceInfo({
+        path: details.cwd,
+        is_trusted: true,
+        exists: true,
+      });
+      setMessages(
+        details.messages.map((message, index) => ({
+          id: message.id,
+          role: message.role,
+          content: message.content,
+          timestamp: details.updated_at * 1000 + index,
+          toolCalls: [],
+        }))
+      );
       setRunningTurnId(null);
+      setPendingApprovals((prev) =>
+        prev.filter((approval) => approval.thread_id === details.id)
+      );
+      setPendingQuestions((prev) =>
+        prev.filter((question) => question.thread_id === details.id)
+      );
     } catch (err) {
       console.error(`Failed to load session ${sessionId}:`, err);
+      throw err;
     }
   }, []);
 
@@ -205,8 +234,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const switchModel = useCallback(async (modelId: string) => {
     try {
-      const updated = await ipc.activateModel(modelId);
-      setActiveModel(updated.id);
+      const updatedModel = await ipc.activateModel(modelId);
+      setActiveModel(updatedModel);
     } catch (err) {
       console.error('Failed to switch model:', err);
       throw err;
@@ -215,7 +244,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const selectWorkspace = useCallback(async (path: string) => {
     try {
-      const ws = await ipc.setWorkspace(path, false);
+      const ws = await ipc.setWorkspace(path);
       setWorkspaceInfo(ws);
     } catch (err) {
       console.error('Failed to set workspace:', err);
@@ -236,6 +265,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
 
   // Handle Runtime Event Bridge Stream
   const handleRuntimeEvent = useCallback((event: RuntimeEvent) => {
+    // Every conversation-scoped event must match the currently selected session.
+    const eventThreadId =
+      'data' in event && 'thread_id' in event.data
+        ? event.data.thread_id
+        : undefined;
+    if (
+      eventThreadId &&
+      activeSessionIdRef.current &&
+      eventThreadId !== activeSessionIdRef.current
+    ) {
+      return;
+    }
+
     switch (event.type) {
       case 'initializing':
         setRuntimeStatus((prev) => (prev ? { ...prev, state: 'Initializing' } : null));
@@ -256,16 +298,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
           setActiveSessionId(thread_id);
         }
         setRunningTurnId(turn_id);
-        // Ensure there is an assistant response placeholder
         setMessages((prev) => {
-          const lastMsg = prev[prev.length - 1];
-          if (lastMsg && lastMsg.role === 'assistant' && lastMsg.status === 'streaming') {
+          const assistantId = `assistant-${turn_id}`;
+          if (prev.some((message) => message.id === assistantId)) {
             return prev;
           }
           return [
             ...prev,
             {
-              id: `assistant-${turn_id}`,
+              id: assistantId,
               role: 'assistant',
               content: '',
               reasoning: '',
@@ -282,7 +323,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         const { turn_id, delta } = event.data;
         setMessages((prev) => {
           return prev.map((msg) => {
-            if (msg.role === 'assistant' && (msg.id === `assistant-${turn_id}` || msg.status === 'streaming')) {
+            if (msg.role === 'assistant' && (msg.id === `assistant-${turn_id}`)) {
               return {
                 ...msg,
                 content: msg.content + delta,
@@ -358,7 +399,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
 
       case 'turn_completed': {
         const { turn_id } = event.data;
-        setRunningTurnId(null);
+        setRunningTurnId((current) => (current === turn_id ? null : current));
+        setPendingApprovals((prev) =>
+          prev.filter((approval) => approval.turn_id !== turn_id)
+        );
+        setPendingQuestions((prev) =>
+          prev.filter((question) => question.turn_id !== turn_id)
+        );
         setMessages((prev) =>
           prev.map((msg) => {
             if (msg.role === 'assistant' && (msg.id === `assistant-${turn_id}` || msg.status === 'streaming')) {
@@ -386,7 +433,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
 
       case 'turn_failed': {
         const { turn_id, error } = event.data;
-        setRunningTurnId(null);
+        setRunningTurnId((current) => (current === turn_id ? null : current));
+        setPendingApprovals((prev) =>
+          prev.filter((approval) => approval.turn_id !== turn_id)
+        );
+        setPendingQuestions((prev) =>
+          prev.filter((question) => question.turn_id !== turn_id)
+        );
         setMessages((prev) =>
           prev.map((msg) => {
             if (msg.role === 'assistant' && (msg.id === `assistant-${turn_id}` || msg.status === 'streaming')) {
@@ -460,7 +513,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
           thread_id: activeSessionId,
           prompt: trimmed,
           collaboration_mode: collaborationMode,
-          allow_untrusted_workspace: false,
         });
 
         if (!activeSessionId) {
@@ -543,27 +595,55 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     []
   );
 
-  // Subscribe to Runtime Events on Mount
+  // Subscribe to runtime events and reconcile snapshots after event loss.
   useEffect(() => {
-    let unlisten: (() => void) | undefined;
+    let mounted = true;
+    let unlistenEvents: (() => void) | undefined;
+    let unlistenGaps: (() => void) | undefined;
 
     refreshRuntime();
     refreshSessions();
+    refreshPendingInteractions();
 
     subscribeToRuntimeEvents(handleRuntimeEvent)
-      .then((fn) => {
-        unlisten = fn;
+      .then((unlisten) => {
+        if (mounted) {
+          unlistenEvents = unlisten;
+        } else {
+          unlisten();
+        }
       })
       .catch((err) => {
         console.error('Failed to initialize runtime event bridge listener:', err);
       });
 
+    subscribeToRuntimeEventGaps((skipped) => {
+      console.warn(`Runtime event stream dropped ${skipped} events; reconciling pending interactions.`);
+      refreshPendingInteractions();
+      refreshRuntime();
+    })
+      .then((unlisten) => {
+        if (mounted) {
+          unlistenGaps = unlisten;
+        } else {
+          unlisten();
+        }
+      })
+      .catch((err) => {
+        console.error('Failed to initialize runtime event-gap listener:', err);
+      });
+
     return () => {
-      if (unlisten) {
-        unlisten();
-      }
+      mounted = false;
+      unlistenEvents?.();
+      unlistenGaps?.();
     };
-  }, [refreshRuntime, refreshSessions, handleRuntimeEvent]);
+  }, [
+    refreshRuntime,
+    refreshSessions,
+    refreshPendingInteractions,
+    handleRuntimeEvent,
+  ]);
 
   const isRuntimeReady =
     runtimeStatus?.is_operational === true && !runtimeError;
