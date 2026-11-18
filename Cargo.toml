@@ -43,6 +43,7 @@ members = [
     "crates/m31a-tui",
     "crates/m31a-cli",
     "crates/m31a-ebpf",
+    "crates/m31a-wasm",
     "apps/desktop/src-tauri",
     "examples/distributed_task_mesh",
 ]
@@ -93,6 +94,8 @@ which = "7.0"
 unicode-width = "0.2"
 unicode-segmentation = "1.12"
 image = { version = "0.25", default-features = false, features = ["png"] }
+wasmi = "2.0.1"
+wat = "1.226"
 m31a-core = { path = "crates/m31a-core" }
 m31a-provider = { path = "crates/m31a-provider" }
 m31a-execpolicy = { path = "crates/m31a-execpolicy" }
@@ -114,6 +117,7 @@ m31a-watcher = { path = "crates/m31a-watcher" }
 m31a-browser = { path = "crates/m31a-browser" }
 m31a-runtime = { path = "crates/m31a-runtime" }
 m31a-ebpf = { path = "crates/m31a-ebpf" }
+m31a-wasm = { path = "crates/m31a-wasm" }
 m31a-maintenance = { path = "crates/m31a-maintenance" }
 mimalloc = { version = "0.1", default-features = false }
 

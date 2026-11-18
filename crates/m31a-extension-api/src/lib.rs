@@ -16,6 +16,20 @@ use tokio::sync::RwLock;
 
 pub const M31A_PLUGIN_ABI_VERSION: u32 = 1;
 
+pub use m31a_wasm as wasm;
+pub use m31a_wasm::{
+    WasmCapability, WasmError, WasmPluginInstance, WasmPluginManifest, WasmResourceLimits,
+    WasmRuntime,
+};
+
+/// Plugin format representation distinguishing between native C ABI cdylibs and sandboxed WebAssembly modules.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PluginFormat {
+    NativeCdylib,
+    WebAssembly,
+}
+
 pub const M31A_PLUGIN_OK: c_int = 0;
 pub const M31A_PLUGIN_ERR_PANIC: c_int = -1;
 pub const M31A_PLUGIN_ERR_INVALID_ARG: c_int = -2;
