@@ -31,7 +31,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
-use tokio::sync::{broadcast, mpsc, Mutex as AsyncMutex};
+use tokio::sync::{Mutex as AsyncMutex, broadcast, mpsc};
 use tokio_util::sync::CancellationToken;
 
 /// Authoritative central application runtime for M31A.
@@ -276,10 +276,8 @@ impl M31aRuntime {
         let turn_id = uuid::Uuid::new_v4().to_string();
         let thread_id = request.thread_id.clone();
 
-        let mut engine = self.create_agent_engine(
-            Some(workspace.clone()),
-            request.collaboration_mode,
-        );
+        let mut engine =
+            self.create_agent_engine(Some(workspace.clone()), request.collaboration_mode);
 
         let active_model = self.active_model();
         let system_prompt = crate::services::agent::build_system_prompt(
@@ -468,7 +466,6 @@ impl M31aRuntime {
                     }
                 }
             }
-
         });
 
         Ok(out_rx)
@@ -636,7 +633,9 @@ impl M31aRuntime {
             .with_trust_store(Arc::clone(&self.services.trust_store)),
         );
 
-        self.services.tools.set_agent_runtime(Arc::clone(&engine_runtime));
+        self.services
+            .tools
+            .set_agent_runtime(Arc::clone(&engine_runtime));
         *self.services.provider.write().unwrap() = Arc::new(new_client);
         *self.services.guardian.write().unwrap() = guardian;
         *self.services.engine_runtime.write().unwrap() = engine_runtime;
@@ -724,7 +723,12 @@ impl M31aRuntime {
             .unwrap_or(true);
 
         let mcp_servers_stopped = tool_shutdown.mcp_servers_stopped;
-        let mcp_servers_remaining = !self.services.mcp_manager.list_server_names().await.is_empty();
+        let mcp_servers_remaining = !self
+            .services
+            .mcp_manager
+            .list_server_names()
+            .await
+            .is_empty();
 
         let report = ShutdownReport {
             cleanly_stopped: turns_drained
