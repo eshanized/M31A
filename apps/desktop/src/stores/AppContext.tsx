@@ -81,7 +81,7 @@ export interface AppContextValue {
   authorizeCurrentWorkspace: () => Promise<void>;
   selectSession: (sessionId: string) => Promise<void>;
   createNewSession: (title?: string) => Promise<string | null>;
-  submitTurn: (prompt: string) => Promise<void>;
+  submitTurn: (prompt: string) => Promise<boolean>;
   cancelActiveTurn: () => Promise<void>;
   steerActiveTurn: (message: string) => Promise<void>;
   setCollaborationMode: (mode: 'default' | 'plan' | 'review') => void;
@@ -498,7 +498,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   const submitTurn = useCallback(
     async (prompt: string) => {
       const trimmed = prompt.trim();
-      if (!trimmed || isSubmittingTurn || runningTurnId) return;
+      if (!trimmed || isSubmittingTurn || runningTurnId) return false;
 
       setIsSubmittingTurn(true);
       const userMessageId = `user-${Date.now()}`;
@@ -526,10 +526,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
           refreshSessions();
         }
         setRunningTurnId(handle.turn_id);
+        return true;
       } catch (err) {
         console.error('Failed to submit turn:', err);
         setMessages((prev) => [
-          ...prev,
+          ...prev.filter((message) => message.id !== userMessageId),
           {
             id: `err-${Date.now()}`,
             role: 'system',
@@ -537,6 +538,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
             timestamp: Date.now(),
           },
         ]);
+        return false;
       } finally {
         setIsSubmittingTurn(false);
       }
