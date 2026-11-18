@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [master]
+    branches: [master, feat/desktop-phase-2, fix/desktop-phase-2-1-integrity]
   pull_request:
-    branches: [master]
+    branches: [master, feat/desktop-phase-2]
   workflow_dispatch:
 
 env:
@@ -30,7 +30,7 @@ jobs:
 
       - name: Install system dependencies
         run: |
-          sudo apt-get update && sudo apt-get install -y protobuf-compiler bubblewrap libwebkit2gtk-4.1-dev libgtk-3-dev
+          sudo apt-get update && sudo apt-get install -y protobuf-compiler bubblewrap libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
 
       - name: Cache Cargo dependencies
@@ -67,7 +67,7 @@ jobs:
 
       - name: Install system dependencies
         run: |
-          sudo apt-get update && sudo apt-get install -y protobuf-compiler bubblewrap libwebkit2gtk-4.1-dev libgtk-3-dev
+          sudo apt-get update && sudo apt-get install -y protobuf-compiler bubblewrap libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
 
       - name: Cache Cargo dependencies
@@ -194,7 +194,7 @@ jobs:
         run: ln -sf "$HOME/.cargo/bin/dist" "$HOME/.cargo/bin/cargo-dist"
 
       - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler bubblewrap musl-tools libwebkit2gtk-4.1-dev libgtk-3-dev
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler bubblewrap musl-tools libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev
 
       - name: Cache Cargo dependencies
         uses: actions/cache@v4
@@ -220,6 +220,36 @@ jobs:
           name: m31a-release-artifacts
           path: target/distrib/
           retention-days: 7
+
+  desktop-frontend:
+    name: Desktop Frontend Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - name: Install desktop dependencies
+        run: npm ci
+        working-directory: apps/desktop
+
+      - name: Typecheck desktop frontend
+        run: npm run typecheck
+        working-directory: apps/desktop
+
+      - name: Run desktop frontend tests
+        run: npm test
+        working-directory: apps/desktop
+
+      - name: Build desktop frontend
+        run: npm run build
+        working-directory: apps/desktop
 
   sdk-verification:
     name: SDK Test Suite
@@ -279,7 +309,7 @@ jobs:
         run: rustup default stable
 
       - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler bubblewrap musl-tools libwebkit2gtk-4.1-dev libgtk-3-dev
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler bubblewrap musl-tools libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev
 
       - name: Cache Cargo dependencies
         uses: actions/cache@v4
@@ -323,7 +353,7 @@ jobs:
 
       - name: Install system dependencies
         run: |
-          sudo apt-get update && sudo apt-get install -y protobuf-compiler bubblewrap libwebkit2gtk-4.1-dev libgtk-3-dev
+          sudo apt-get update && sudo apt-get install -y protobuf-compiler bubblewrap libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
 
       - name: Run live provider integration tests

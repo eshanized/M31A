@@ -7,9 +7,11 @@ import { invoke } from '@tauri-apps/api/core';
 import type {
   EnvironmentInfoDto,
   ModelInfoDto,
+  PendingInteractionsDto,
   RuntimeStatusDto,
   SessionDetailsDto,
   SessionSummaryDto,
+  ShutdownReportDto,
   SubmitTurnPayload,
   TurnHandleDto,
   WorkspaceInfoDto,
@@ -25,8 +27,8 @@ export const ipc = {
     return invoke<EnvironmentInfoDto>('get_environment_info');
   },
 
-  async shutdownRuntime(): Promise<void> {
-    return invoke<void>('shutdown_runtime');
+  async shutdownRuntime(): Promise<ShutdownReportDto> {
+    return invoke<ShutdownReportDto>('shutdown_runtime');
   },
 
   // Workspace
@@ -34,14 +36,8 @@ export const ipc = {
     return invoke<WorkspaceInfoDto>('get_active_workspace');
   },
 
-  async setWorkspace(
-    path: string,
-    allowUntrusted = false
-  ): Promise<WorkspaceInfoDto> {
-    return invoke<WorkspaceInfoDto>('set_workspace', {
-      path,
-      allowUntrusted,
-    });
+  async setWorkspace(path: string): Promise<WorkspaceInfoDto> {
+    return invoke<WorkspaceInfoDto>('set_workspace', { path });
   },
 
   async authorizeWorkspace(path: string): Promise<WorkspaceInfoDto> {
@@ -53,12 +49,16 @@ export const ipc = {
     return invoke<ModelInfoDto[]>('list_available_models');
   },
 
-  async getActiveModel(): Promise<ModelInfoDto> {
-    return invoke<ModelInfoDto>('get_active_model');
+  async getActiveModel(): Promise<string> {
+    return invoke<string>('get_active_model');
   },
 
-  async activateModel(model: string): Promise<ModelInfoDto> {
-    return invoke<ModelInfoDto>('activate_model', { model });
+  async activateModel(model: string): Promise<string> {
+    return invoke<string>('activate_model', { model });
+  },
+
+  async getPendingInteractions(): Promise<PendingInteractionsDto> {
+    return invoke<PendingInteractionsDto>('get_pending_interactions');
   },
 
   // Sessions

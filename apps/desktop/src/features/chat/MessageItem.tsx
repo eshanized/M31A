@@ -15,7 +15,7 @@ export const MessageItem: React.FC<MessageItemProps> = ({ message }) => {
   const renderFormattedContent = (text: string) => {
     if (!text) return null;
 
-    const codeBlockRegex = /```([a-zA-Z0-9_-]*)\n([\s\S]*?)```/g;
+    const codeBlockRegex = /```([^\n`]*)\n([\s\S]*?)```/g;
     const parts = [];
     let lastIndex = 0;
     let match;
@@ -135,23 +135,29 @@ export const MessageItem: React.FC<MessageItemProps> = ({ message }) => {
             overflow: 'hidden',
           }}
         >
-          <div
-            onClick={() => setIsReasoningOpen(!isReasoningOpen)}
+          <button
+            type="button"
+            onClick={() => setIsReasoningOpen((open) => !open)}
+            aria-expanded={isReasoningOpen}
             style={{
               display: 'flex',
               alignItems: 'center',
               gap: '6px',
+              width: '100%',
               padding: '6px 10px',
               cursor: 'pointer',
               color: 'var(--text-secondary)',
               fontSize: '11px',
               fontWeight: 500,
+              textAlign: 'left',
+              background: 'transparent',
+              border: 0,
             }}
           >
             {isReasoningOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
             <BrainCircuit size={13} color="var(--accent-orange)" />
             <span>Thinking Process</span>
-          </div>
+          </button>
           {isReasoningOpen && (
             <div
               style={{

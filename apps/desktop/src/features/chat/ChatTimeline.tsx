@@ -6,9 +6,20 @@ import { MessageItem } from './MessageItem';
 export const ChatTimeline: React.FC = () => {
   const { messages, activeSessionId, isRuntimeReady, submitTurn } = useApp();
   const bottomRef = useRef<HTMLDivElement>(null);
+  const timelineRef = useRef<HTMLDivElement>(null);
+  const nearBottomRef = useRef(true);
+
+  const handleTimelineScroll = () => {
+    const element = timelineRef.current;
+    if (!element) return;
+    nearBottomRef.current =
+      element.scrollHeight - element.scrollTop - element.clientHeight < 96;
+  };
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (nearBottomRef.current) {
+      bottomRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' });
+    }
   }, [messages]);
 
   if (messages.length === 0) {
@@ -117,6 +128,8 @@ export const ChatTimeline: React.FC = () => {
 
   return (
     <div
+      ref={timelineRef}
+      onScroll={handleTimelineScroll}
       style={{
         flex: 1,
         overflowY: 'auto',

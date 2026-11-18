@@ -16,15 +16,22 @@ export const ToolCallView: React.FC<{ toolCall: ToolCallItem }> = ({ toolCall })
         overflow: 'hidden',
       }}
     >
-      <div
-        onClick={() => setIsExpanded(!isExpanded)}
+      <button
+        type="button"
+        onClick={() => setIsExpanded((expanded) => !expanded)}
+        aria-expanded={isExpanded}
         style={{
           display: 'flex',
           alignItems: 'center',
           gap: '8px',
+          width: '100%',
           padding: '8px 12px',
           cursor: 'pointer',
           userSelect: 'none',
+          textAlign: 'left',
+          border: 0,
+          background: 'transparent',
+          color: 'inherit',
         }}
       >
         <span style={{ color: 'var(--text-secondary)' }}>
@@ -81,7 +88,7 @@ export const ToolCallView: React.FC<{ toolCall: ToolCallItem }> = ({ toolCall })
             </span>
           )}
         </div>
-      </div>
+      </button>
 
       {isExpanded && (
         <div

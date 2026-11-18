@@ -86,13 +86,16 @@ export const SessionSidebar: React.FC<{ isOpen: boolean }> = ({ isOpen }) => {
           sessions.map((sess) => {
             const isActive = sess.id === activeSessionId;
             return (
-              <div
+              <button
+                type="button"
                 key={sess.id}
                 onClick={() => selectSession(sess.id)}
+                aria-pressed={isActive}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
                   gap: '8px',
+                  width: '100%',
                   padding: '8px 10px',
                   borderRadius: 'var(--radius-sm)',
                   backgroundColor: isActive ? 'var(--bg-tertiary)' : 'transparent',
@@ -100,6 +103,7 @@ export const SessionSidebar: React.FC<{ isOpen: boolean }> = ({ isOpen }) => {
                   cursor: 'pointer',
                   color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
                   fontSize: '12px',
+                  textAlign: 'left',
                   transition: 'all 0.15s ease',
                 }}
               >
@@ -134,7 +138,7 @@ export const SessionSidebar: React.FC<{ isOpen: boolean }> = ({ isOpen }) => {
                     })}
                   </div>
                 </div>
-              </div>
+              </button>
             );
           })
         )}
