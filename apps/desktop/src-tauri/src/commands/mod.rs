@@ -516,18 +516,6 @@ pub async fn submit_turn(
         _ => CollaborationMode::Default,
     };
 
-    // Persist the user's prompt before starting the runtime so the runtime can
-    // rehydrate prior conversation history consistently for this session.
-    storage
-        .save_item(
-            &uuid::Uuid::new_v4().to_string(),
-            &thread_id,
-            None,
-            "user",
-            trimmed_prompt,
-        )
-        .map_err(|error| error.to_string())?;
-
     let request = TurnRequest {
         thread_id: thread_id.clone(),
         prompt: trimmed_prompt.to_string(),
