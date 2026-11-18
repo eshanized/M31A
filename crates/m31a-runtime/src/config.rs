@@ -118,9 +118,9 @@ impl RuntimeConfig {
             return Err(RuntimeError::Config("Model cannot be empty".to_string()));
         }
 
-        if !self.cwd.exists() {
+        if !self.cwd.is_dir() {
             return Err(RuntimeError::Config(format!(
-                "Workspace directory does not exist: {}",
+                "Workspace path is not an existing directory: {}",
                 self.cwd.display()
             )));
         }
