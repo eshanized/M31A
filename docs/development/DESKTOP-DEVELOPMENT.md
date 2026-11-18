@@ -6,7 +6,7 @@ This guide covers building, testing, and developing the M31A Desktop application
 
 ## 1. Prerequisites
 
-- **Rust**: 1.80+ (`rustup default stable`)
+- **Rust**: 1.90+ (`rustup default stable`); required by the native dialog plugin
 - **Node.js**: 20+ and npm 10+
 - **Linux System Libraries** (for WebKit2GTK / Tauri 2):
   ```bash
@@ -46,7 +46,7 @@ apps/desktop/
 To run the Vite dev server with hot module replacement:
 ```bash
 cd apps/desktop
-npm install
+npm ci
 npm run dev
 ```
 
@@ -77,5 +77,14 @@ cargo test -p m31a-desktop
 ### Workspace Quality Checks
 ```bash
 cargo fmt --all -- --check
-cargo clippy --workspace --all-targets -- -D warnings
+cargo clippy --workspace --all-targets --all-features -- -D warnings
 ```
+
+
+## 5. Workspace trust and event recovery
+
+Selecting a workspace does not grant permission to execute tools or modify files. Workspaces requiring confirmation are authorized only after a native operating-system confirmation dialog. Persistently denied workspaces cannot be overridden by a session-only grant.
+
+The frontend listens for `m31a://event-gap`. When the runtime broadcast receiver reports dropped events, the application calls `get_pending_interactions` to restore outstanding approval and question cards from the authoritative Rust runtime.
+
+Session loading returns the persisted user/assistant transcript and the actual trust state for its stored workspace. Turn submission rejects sessions whose persisted workspace does not match the active canonical workspace.
