@@ -323,7 +323,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         const { turn_id, delta } = event.data;
         setMessages((prev) => {
           return prev.map((msg) => {
-            if (msg.role === 'assistant' && (msg.id === `assistant-${turn_id}`)) {
+            if (msg.role === 'assistant' && msg.id === `assistant-${turn_id}`) {
               return {
                 ...msg,
                 content: msg.content + delta,
@@ -339,7 +339,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         const { turn_id, delta } = event.data;
         setMessages((prev) => {
           return prev.map((msg) => {
-            if (msg.role === 'assistant' && (msg.id === `assistant-${turn_id}` || msg.status === 'streaming')) {
+            if (msg.role === 'assistant' && (msg.id === `assistant-${turn_id}`)) {
               return {
                 ...msg,
                 reasoning: (msg.reasoning || '') + delta,
@@ -355,7 +355,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         const { turn_id, call_id, tool_name, arguments: args } = event.data;
         setMessages((prev) => {
           return prev.map((msg) => {
-            if (msg.role === 'assistant' && (msg.id === `assistant-${turn_id}` || msg.status === 'streaming')) {
+            if (msg.role === 'assistant' && (msg.id === `assistant-${turn_id}`)) {
               const currentTools = msg.toolCalls || [];
               const updatedTools: ToolCallItem[] = [
                 ...currentTools,
@@ -378,7 +378,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         const { turn_id, call_id, output, success } = event.data;
         setMessages((prev) => {
           return prev.map((msg) => {
-            if (msg.role === 'assistant' && (msg.id === `assistant-${turn_id}` || msg.status === 'streaming')) {
+            if (msg.role === 'assistant' && (msg.id === `assistant-${turn_id}`)) {
               const updatedTools = (msg.toolCalls || []).map((tc) => {
                 if (tc.id === call_id) {
                   return {
@@ -408,7 +408,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         );
         setMessages((prev) =>
           prev.map((msg) => {
-            if (msg.role === 'assistant' && (msg.id === `assistant-${turn_id}` || msg.status === 'streaming')) {
+            if (msg.role === 'assistant' && (msg.id === `assistant-${turn_id}`)) {
               return { ...msg, status: 'completed' };
             }
             return msg;
@@ -419,10 +419,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
 
       case 'turn_cancelled': {
         const { turn_id } = event.data;
-        setRunningTurnId(null);
+        setRunningTurnId((current) => (current === turn_id ? null : current));
+        setPendingApprovals((prev) =>
+          prev.filter((approval) => approval.turn_id !== turn_id)
+        );
+        setPendingQuestions((prev) =>
+          prev.filter((question) => question.turn_id !== turn_id)
+        );
         setMessages((prev) =>
           prev.map((msg) => {
-            if (msg.role === 'assistant' && (msg.id === `assistant-${turn_id}` || msg.status === 'streaming')) {
+            if (msg.role === 'assistant' && msg.id === `assistant-${turn_id}`) {
               return { ...msg, status: 'cancelled' };
             }
             return msg;
@@ -442,7 +448,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         );
         setMessages((prev) =>
           prev.map((msg) => {
-            if (msg.role === 'assistant' && (msg.id === `assistant-${turn_id}` || msg.status === 'streaming')) {
+            if (msg.role === 'assistant' && (msg.id === `assistant-${turn_id}`)) {
               return {
                 ...msg,
                 status: 'failed',
@@ -603,12 +609,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
 
     refreshRuntime();
     refreshSessions();
-    refreshPendingInteractions();
 
     subscribeToRuntimeEvents(handleRuntimeEvent)
       .then((unlisten) => {
         if (mounted) {
           unlistenEvents = unlisten;
+          // Subscribe first, then reconcile to close the reconnect race.
+          refreshPendingInteractions();
         } else {
           unlisten();
         }
