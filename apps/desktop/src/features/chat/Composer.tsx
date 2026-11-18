@@ -29,14 +29,17 @@ export const Composer: React.FC = () => {
     const trimmed = input.trim();
     if (!trimmed || isBusy || !isRuntimeReady) return;
 
-    setInput('');
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
+    const submitted = await submitTurn(trimmed);
+    if (submitted) {
+      setInput('');
+      if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto';
+      }
     }
-    await submitTurn(trimmed);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return;
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSubmit();
@@ -137,6 +140,7 @@ export const Composer: React.FC = () => {
           <button
             type="button"
             onClick={cancelActiveTurn}
+            disabled={!runningTurnId}
             className="btn btn-danger btn-sm"
             style={{ padding: '6px 10px', height: '32px' }}
             title="Cancel running turn"
