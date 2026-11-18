@@ -53,6 +53,12 @@ export interface TurnSummaryDto {
   created_at: number;
 }
 
+export interface SessionMessageDto {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+}
+
 export interface SessionDetailsDto {
   id: string;
   title: string;
@@ -61,13 +67,13 @@ export interface SessionDetailsDto {
   created_at: number;
   updated_at: number;
   turns: TurnSummaryDto[];
+  messages: SessionMessageDto[];
 }
 
 export interface SubmitTurnPayload {
   thread_id?: string | null;
   prompt: string;
   collaboration_mode?: 'default' | 'plan' | 'review';
-  allow_untrusted_workspace?: boolean;
 }
 
 export interface TurnHandleDto {
@@ -90,4 +96,9 @@ export interface PendingQuestionDto {
   question: string;
   options: string[];
   multi_select: boolean;
+}
+
+export interface PendingInteractionsDto {
+  approvals: PendingApprovalDto[];
+  questions: PendingQuestionDto[];
 }
