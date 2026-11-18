@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [master]
+    branches: [master, feat/desktop-phase-2]
   pull_request:
-    branches: [master]
+    branches: [master, feat/desktop-phase-2]
   workflow_dispatch:
 
 env:
@@ -220,6 +220,36 @@ jobs:
           name: m31a-release-artifacts
           path: target/distrib/
           retention-days: 7
+
+  desktop-frontend:
+    name: Desktop Frontend Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - name: Install desktop dependencies
+        run: npm ci
+        working-directory: apps/desktop
+
+      - name: Typecheck desktop frontend
+        run: npm run typecheck
+        working-directory: apps/desktop
+
+      - name: Run desktop frontend tests
+        run: npm test
+        working-directory: apps/desktop
+
+      - name: Build desktop frontend
+        run: npm run build
+        working-directory: apps/desktop
 
   sdk-verification:
     name: SDK Test Suite
