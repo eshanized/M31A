@@ -102,6 +102,9 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
+      - name: Build workspace binaries for integration tests
+        run: cargo build --workspace --bins
+
       - name: Run workspace unit and integration tests (Nextest)
         run: |
           if command -v cargo-nextest &>/dev/null; then

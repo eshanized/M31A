@@ -218,7 +218,13 @@ fn test_database_schema_initialization() {
 
 #[test]
 fn test_app_server_json_rpc_startup() {
+    let tmp = tempdir().unwrap();
+    let config_dir = tmp.path().join("m31a_test_config");
+    fs::create_dir_all(&config_dir).unwrap();
+
     let mut child = Command::new(m31a_bin())
+        .env("M31A_HOME", &config_dir)
+        .env("NVIDIA_API_KEY", "nvapi-test-dummy-key-for-jsonrpc-startup")
         .args(["app-server", "--stdio"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -239,7 +245,12 @@ fn test_app_server_json_rpc_startup() {
     drop(stdin);
 
     let output = child.wait_with_output().expect("wait on app-server");
-    assert!(output.status.success());
+    assert!(
+        output.status.success(),
+        "app-server exited with status {:?}, stderr: {}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
+    );
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let resp: serde_json::Value = serde_json::from_str(stdout.trim()).expect("parse rpc response");

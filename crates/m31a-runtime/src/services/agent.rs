@@ -15,6 +15,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 /// Build the canonical system instructions for a given model, tools, and execution context.
+#[allow(clippy::too_many_arguments)]
 pub fn build_system_prompt(
     cwd: &Path,
     model: &str,
@@ -81,6 +82,7 @@ pub fn build_system_prompt(
 }
 
 /// Construct an `AgentEngine` with shared runtime services.
+#[allow(clippy::too_many_arguments)]
 pub fn create_agent_engine(
     client: ProviderClient,
     tools: ToolRegistry,
