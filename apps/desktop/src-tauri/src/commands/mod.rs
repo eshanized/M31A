@@ -259,9 +259,7 @@ pub async fn authorize_workspace(
 
     // Already-trusted workspaces do not need another prompt. Denied workspaces
     // fail closed before the user is shown any authorization affordance.
-    if verify_workspace_trust(&trust_store, &canonical, false)
-        .map_err(|e| e.to_string())?
-    {
+    if verify_workspace_trust(&trust_store, &canonical, false).map_err(|e| e.to_string())? {
         return Ok(WorkspaceInfoDto {
             path: canonical.display().to_string(),
             is_trusted: true,
@@ -491,10 +489,9 @@ pub async fn submit_turn(
         .ok_or_else(|| format!("Session '{thread_id}' does not exist"))?;
     let session_workspace = validate_and_canonicalize_workspace_path(&thread.cwd)
         .map_err(|error| format!("Session workspace is unavailable: {error}"))?;
-    let active_workspace = validate_and_canonicalize_workspace_path(
-        &state.active_workspace().display().to_string(),
-    )
-    .map_err(|error| error.to_string())?;
+    let active_workspace =
+        validate_and_canonicalize_workspace_path(&state.active_workspace().display().to_string())
+            .map_err(|error| error.to_string())?;
     if session_workspace != active_workspace {
         return Err(format!(
             "Session belongs to '{}', but the active workspace is '{}'. Select the session workspace before submitting a turn.",
