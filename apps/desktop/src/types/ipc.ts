@@ -64,6 +64,7 @@ export interface SessionDetailsDto {
   title: string;
   model: string;
   cwd: string;
+  workspace_is_trusted: boolean;
   created_at: number;
   updated_at: number;
   turns: TurnSummaryDto[];
