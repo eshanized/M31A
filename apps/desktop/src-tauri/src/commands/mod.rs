@@ -14,7 +14,8 @@ use m31a_runtime::lifecycle::ShutdownReport;
 use m31a_trust::{TrustDecision, TrustLevel};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use tauri::State;
+use tauri::{AppHandle, State};
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 
 // =============================================================================
 // DTOs
@@ -91,6 +92,13 @@ pub struct TurnSummaryDto {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionMessageDto {
+    pub id: String,
+    pub role: String,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionDetailsDto {
     pub id: String,
     pub title: String,
@@ -99,6 +107,7 @@ pub struct SessionDetailsDto {
     pub created_at: i64,
     pub updated_at: i64,
     pub turns: Vec<TurnSummaryDto>,
+    pub messages: Vec<SessionMessageDto>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -106,13 +115,18 @@ pub struct SubmitTurnPayload {
     pub thread_id: Option<String>,
     pub prompt: String,
     pub collaboration_mode: Option<String>,
-    pub allow_untrusted_workspace: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TurnHandleDto {
     pub thread_id: String,
     pub turn_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PendingInteractionsDto {
+    pub approvals: Vec<PendingApprovalDto>,
+    pub questions: Vec<PendingQuestionDto>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -215,14 +229,14 @@ pub async fn get_active_workspace(
 pub async fn set_workspace(
     state: State<'_, DesktopState>,
     path: String,
-    allow_untrusted: Option<bool>,
 ) -> Result<WorkspaceInfoDto, String> {
     let canonical = validate_and_canonicalize_workspace_path(&path).map_err(|e| e.to_string())?;
 
+    // Selecting a workspace must not authorize it. Untrusted paths may be
+    // selected, but execution remains blocked until native confirmation.
     let trust_store = state.runtime().trust_store();
     let is_trusted =
-        verify_workspace_trust(&trust_store, &canonical, allow_untrusted.unwrap_or(false))
-            .map_err(|e| e.to_string())?;
+        verify_workspace_trust(&trust_store, &canonical, false).map_err(|e| e.to_string())?;
 
     state.set_active_workspace(canonical.clone());
 
@@ -235,19 +249,46 @@ pub async fn set_workspace(
 
 #[tauri::command]
 pub async fn authorize_workspace(
+    app: AppHandle,
     state: State<'_, DesktopState>,
     path: String,
 ) -> Result<WorkspaceInfoDto, String> {
     let canonical = validate_and_canonicalize_workspace_path(&path).map_err(|e| e.to_string())?;
-
     let trust_store = state.runtime().trust_store();
-    let mut store = trust_store
-        .lock()
-        .map_err(|_| "Trust store lock poisoned".to_string())?;
 
-    store
-        .trust(&canonical, TrustLevel::SessionOnly)
-        .map_err(|e| e.to_string())?;
+    // Already-trusted workspaces do not need another prompt. Denied workspaces
+    // fail closed before the user is shown any authorization affordance.
+    if verify_workspace_trust(&trust_store, &canonical, false)
+        .map_err(|e| e.to_string())?
+    {
+        return Ok(WorkspaceInfoDto {
+            path: canonical.display().to_string(),
+            is_trusted: true,
+            exists: true,
+        });
+    }
+
+    let confirmed = app
+        .dialog()
+        .message(format!(
+            "Allow M31A to execute tools and modify files in this workspace for this session?\n\n{}",
+            canonical.display()
+        ))
+        .title("Authorize M31A Workspace")
+        .kind(MessageDialogKind::Warning)
+        .buttons(MessageDialogButtons::OkCancelCustom(
+            "Trust for This Session".to_string(),
+            "Cancel".to_string(),
+        ))
+        .blocking_show();
+
+    if !confirmed {
+        return Err("Workspace authorization was cancelled".to_string());
+    }
+
+    // Re-evaluate after the native prompt. In particular, a concurrent or
+    // persistent Denied decision must never be overridden by this grant.
+    verify_workspace_trust(&trust_store, &canonical, true).map_err(|e| e.to_string())?;
 
     Ok(WorkspaceInfoDto {
         path: canonical.display().to_string(),
@@ -352,8 +393,8 @@ pub async fn create_session(
         title: session_title,
         model: active_model,
         cwd,
-        created_at: now.timestamp_millis(),
-        updated_at: now.timestamp_millis(),
+        created_at: now.timestamp(),
+        updated_at: now.timestamp(),
         is_active: true,
     })
 }
@@ -382,6 +423,31 @@ pub async fn load_session(
         })
         .collect();
 
+    let session_workspace = validate_and_canonicalize_workspace_path(&thread.cwd)
+        .map_err(|error| format!("Session workspace is unavailable: {error}"))?;
+    let trust_store = state.runtime().trust_store();
+    verify_workspace_trust(&trust_store, &session_workspace, false)
+        .map_err(|error| error.to_string())?;
+
+    let messages = storage
+        .list_items(&session_id)
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .filter_map(|(item_type, content, id)| {
+            let role = match item_type.as_str() {
+                "user" | "user_message" | "user_queued" => "user",
+                "assistant" | "assistant_message" | "agent_response" => "assistant",
+                _ => return None,
+            };
+            Some(SessionMessageDto {
+                id,
+                role: role.to_string(),
+                content,
+            })
+        })
+        .collect();
+
+    state.set_active_workspace(session_workspace);
     state.set_active_session_id(Some(session_id.clone()));
 
     Ok(SessionDetailsDto {
@@ -392,6 +458,7 @@ pub async fn load_session(
         created_at: thread.created_at,
         updated_at: thread.updated_at,
         turns,
+        messages,
     })
 }
 
@@ -409,14 +476,37 @@ pub async fn submit_turn(
         return Err("Prompt cannot be empty".to_string());
     }
 
-    // Resolve or automatically create active session
+    // Resolve or automatically create the active session, then bind execution
+    // to the session's persisted workspace rather than trusting a renderer path.
     let thread_id = match payload.thread_id.or_else(|| state.active_session_id()) {
         Some(id) => id,
-        None => {
-            let session = create_session(state.clone(), None).await?;
-            session.id
-        }
+        None => create_session(state.clone(), None).await?.id,
     };
+    let storage = state.runtime().storage();
+    let thread = storage
+        .get_thread(&thread_id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("Session '{thread_id}' does not exist"))?;
+    let session_workspace = validate_and_canonicalize_workspace_path(&thread.cwd)
+        .map_err(|error| format!("Session workspace is unavailable: {error}"))?;
+    let active_workspace = validate_and_canonicalize_workspace_path(
+        &state.active_workspace().display().to_string(),
+    )
+    .map_err(|error| error.to_string())?;
+    if session_workspace != active_workspace {
+        return Err(format!(
+            "Session belongs to '{}', but the active workspace is '{}'. Select the session workspace before submitting a turn.",
+            session_workspace.display(),
+            active_workspace.display()
+        ));
+    }
+
+    let trust_store = state.runtime().trust_store();
+    if !verify_workspace_trust(&trust_store, &session_workspace, false)
+        .map_err(|error| error.to_string())?
+    {
+        return Err("Workspace requires explicit native confirmation before execution".to_string());
+    }
 
     let collab_mode = match payload.collaboration_mode.as_deref() {
         Some("plan") => CollaborationMode::Plan,
@@ -424,13 +514,23 @@ pub async fn submit_turn(
         _ => CollaborationMode::Default,
     };
 
-    let active_ws = state.active_workspace();
+    // Persist the user's prompt before starting the runtime so the runtime can
+    // rehydrate prior conversation history consistently for this session.
+    storage
+        .save_item(
+            &uuid::Uuid::new_v4().to_string(),
+            &thread_id,
+            None,
+            "user",
+            trimmed_prompt,
+        )
+        .map_err(|error| error.to_string())?;
 
     let request = TurnRequest {
         thread_id: thread_id.clone(),
         prompt: trimmed_prompt.to_string(),
-        workspace_root: Some(active_ws),
-        allow_untrusted_workspace: payload.allow_untrusted_workspace.unwrap_or(false),
+        workspace_root: Some(session_workspace),
+        allow_untrusted_workspace: false,
         images: Vec::new(),
         collaboration_mode: collab_mode,
         ephemeral: false,
@@ -439,14 +539,12 @@ pub async fn submit_turn(
         max_steps: 50,
     };
 
-    let mut out_rx = state
+    let (turn_id, mut out_rx) = state
         .runtime()
-        .execute_turn(request)
+        .execute_turn_with_id(request)
         .await
-        .map_err(|e| e.to_string())?;
-
+        .map_err(|error| error.to_string())?;
     let thread_id_ret = thread_id.clone();
-    let turn_id = uuid::Uuid::new_v4().to_string();
     let turn_id_ret = turn_id.clone();
 
     // Spawn a lightweight task to consume the turn receiver channel so it flows freely
@@ -490,6 +588,42 @@ pub async fn steer_turn(
         .runtime()
         .steer_turn(&thread_id, &turn_id, trimmed)
         .map_err(|e| e.to_string())
+}
+
+// =============================================================================
+// Pending Interaction Recovery
+// =============================================================================
+
+#[tauri::command]
+pub async fn get_pending_interactions(
+    state: State<'_, DesktopState>,
+) -> Result<PendingInteractionsDto, String> {
+    let runtime = state.runtime();
+    Ok(PendingInteractionsDto {
+        approvals: runtime
+            .pending_approval_snapshots()
+            .into_iter()
+            .map(|item| PendingApprovalDto {
+                request_id: item.request_id,
+                thread_id: item.thread_id,
+                turn_id: item.turn_id,
+                command: item.command,
+                reason: item.reason,
+            })
+            .collect(),
+        questions: runtime
+            .pending_question_snapshots()
+            .into_iter()
+            .map(|item| PendingQuestionDto {
+                question_id: item.question_id,
+                thread_id: item.thread_id,
+                turn_id: item.turn_id,
+                question: item.question,
+                options: item.options,
+                multi_select: item.multi_select,
+            })
+            .collect(),
+    })
 }
 
 // =============================================================================
