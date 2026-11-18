@@ -104,6 +104,7 @@ pub struct SessionDetailsDto {
     pub title: String,
     pub model: String,
     pub cwd: String,
+    pub workspace_is_trusted: bool,
     pub created_at: i64,
     pub updated_at: i64,
     pub turns: Vec<TurnSummaryDto>,
@@ -426,7 +427,7 @@ pub async fn load_session(
     let session_workspace = validate_and_canonicalize_workspace_path(&thread.cwd)
         .map_err(|error| format!("Session workspace is unavailable: {error}"))?;
     let trust_store = state.runtime().trust_store();
-    verify_workspace_trust(&trust_store, &session_workspace, false)
+    let workspace_is_trusted = verify_workspace_trust(&trust_store, &session_workspace, false)
         .map_err(|error| error.to_string())?;
 
     let messages = storage
@@ -455,6 +456,7 @@ pub async fn load_session(
         title: thread.title,
         model: thread.model,
         cwd: thread.cwd,
+        workspace_is_trusted,
         created_at: thread.created_at,
         updated_at: thread.updated_at,
         turns,
