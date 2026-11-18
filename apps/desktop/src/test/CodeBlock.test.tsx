@@ -23,5 +23,6 @@ describe('CodeBlock Component', () => {
     });
 
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith('const x = 42;');
+    expect(screen.getByRole('button', { name: /copied/i })).toBeInTheDocument();
   });
 });

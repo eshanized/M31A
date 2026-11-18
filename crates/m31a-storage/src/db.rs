@@ -1425,7 +1425,7 @@ impl Storage {
     pub fn list_items(&self, thread_id: &str) -> Result<Vec<(String, String, String)>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT item_type, content, id FROM thread_items WHERE thread_id = ?1 ORDER BY created_at ASC",
+            "SELECT item_type, content, id FROM thread_items WHERE thread_id = ?1 ORDER BY created_at ASC, rowid ASC",
         )?;
         let rows = stmt.query_map(params![thread_id], |row| {
             Ok((row.get(0)?, row.get(1)?, row.get(2)?))

@@ -1,6 +1,7 @@
 //! Execution handles, turn contexts, and in-flight elicitation requests.
 
 use m31a_core::CollaborationMode;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
@@ -20,7 +21,19 @@ pub struct PendingApprovalEntry {
     pub thread_id: String,
     pub turn_id: String,
     pub request_id: String,
+    pub command: String,
+    pub reason: String,
     pub response_tx: oneshot::Sender<m31a_elicitation::ApprovalDecision>,
+}
+
+/// Serializable snapshot of an active approval request for presentation clients.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PendingApprovalSnapshot {
+    pub thread_id: String,
+    pub turn_id: String,
+    pub request_id: String,
+    pub command: String,
+    pub reason: String,
 }
 
 /// Pending interactive question request awaiting user response.
@@ -29,7 +42,21 @@ pub struct PendingQuestionEntry {
     pub thread_id: String,
     pub turn_id: String,
     pub question_id: String,
+    pub question: String,
+    pub options: Vec<String>,
+    pub multi_select: bool,
     pub response_tx: oneshot::Sender<Vec<String>>,
+}
+
+/// Serializable snapshot of an active question request for presentation clients.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PendingQuestionSnapshot {
+    pub thread_id: String,
+    pub turn_id: String,
+    pub question_id: String,
+    pub question: String,
+    pub options: Vec<String>,
+    pub multi_select: bool,
 }
 
 /// Parameters defining a turn submission to the runtime.

@@ -5,7 +5,10 @@
 //! and graceful teardown.
 
 use crate::config::RuntimeConfig;
-use crate::context::{ActiveTurnHandle, PendingApprovalEntry, PendingQuestionEntry, TurnRequest};
+use crate::context::{
+    ActiveTurnHandle, PendingApprovalEntry, PendingApprovalSnapshot, PendingQuestionEntry,
+    PendingQuestionSnapshot, TurnRequest,
+};
 use crate::error::RuntimeError;
 use crate::events::RuntimeEvent;
 use crate::lifecycle::{RuntimeState, ShutdownReport};
@@ -198,6 +201,53 @@ impl M31aRuntime {
         self.event_broadcaster.subscribe()
     }
 
+    /// Return active approval requests so presentation clients can recover after
+    /// an event-stream gap or frontend reconnection.
+    pub fn pending_approval_snapshots(&self) -> Vec<PendingApprovalSnapshot> {
+        let mut snapshots: Vec<_> = self
+            .pending_approvals
+            .lock()
+            .map(|entries| {
+                entries
+                    .values()
+                    .map(|entry| PendingApprovalSnapshot {
+                        thread_id: entry.thread_id.clone(),
+                        turn_id: entry.turn_id.clone(),
+                        request_id: entry.request_id.clone(),
+                        command: entry.command.clone(),
+                        reason: entry.reason.clone(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        snapshots.sort_by(|a, b| a.request_id.cmp(&b.request_id));
+        snapshots
+    }
+
+    /// Return active question requests so presentation clients can recover after
+    /// an event-stream gap or frontend reconnection.
+    pub fn pending_question_snapshots(&self) -> Vec<PendingQuestionSnapshot> {
+        let mut snapshots: Vec<_> = self
+            .pending_questions
+            .lock()
+            .map(|entries| {
+                entries
+                    .values()
+                    .map(|entry| PendingQuestionSnapshot {
+                        thread_id: entry.thread_id.clone(),
+                        turn_id: entry.turn_id.clone(),
+                        question_id: entry.question_id.clone(),
+                        question: entry.question.clone(),
+                        options: entry.options.clone(),
+                        multi_select: entry.multi_select,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        snapshots.sort_by(|a, b| a.question_id.cmp(&b.question_id));
+        snapshots
+    }
+
     /// Broadcast an event across all active subscribers.
     pub fn broadcast_event(&self, event: RuntimeEvent) {
         let _ = self.event_broadcaster.send(event);
@@ -239,6 +289,19 @@ impl M31aRuntime {
         &self,
         request: TurnRequest,
     ) -> Result<mpsc::Receiver<RuntimeEvent>, RuntimeError> {
+        self.execute_turn_with_id(request)
+            .await
+            .map(|(_, receiver)| receiver)
+    }
+
+    /// Execute a turn and return its actual runtime-assigned identifier.
+    ///
+    /// Desktop and other interactive clients should retain this identifier for
+    /// cancellation and steering instead of manufacturing a second handle.
+    pub async fn execute_turn_with_id(
+        &self,
+        request: TurnRequest,
+    ) -> Result<(String, mpsc::Receiver<RuntimeEvent>), RuntimeError> {
         let admission = self.admission_lock.lock().map_err(|_| {
             RuntimeError::Shutdown("Runtime admission lock is poisoned".to_string())
         })?;
@@ -278,6 +341,7 @@ impl M31aRuntime {
 
         let mut engine =
             self.create_agent_engine(Some(workspace.clone()), request.collaboration_mode);
+        engine.persist_items = !request.ephemeral;
 
         let active_model = self.active_model();
         let system_prompt = crate::services::agent::build_system_prompt(
@@ -294,10 +358,44 @@ impl M31aRuntime {
         );
         engine.authoritative_system_prompt = Some(system_prompt.clone());
 
-        let history = vec![
-            ChatMessage::system(system_prompt),
-            ChatMessage::user(request.prompt.clone()),
-        ];
+        // Rehydrate prior dialogue from the thread's persisted transcript.
+        // Tool records remain available for inspection but are not replayed as
+        // standalone provider messages because their original call pairing is
+        // not represented by the compact storage tuple.
+        let persisted_items = self
+            .services
+            .storage
+            .list_items(&thread_id)
+            .map_err(|error| RuntimeError::Storage(error.to_string()))?;
+        let mut history = vec![ChatMessage::system(system_prompt)];
+        for (item_type, content, _) in persisted_items {
+            match item_type.as_str() {
+                "user" | "user_message" | "user_queued" => {
+                    history.push(ChatMessage::user(content));
+                }
+                "assistant" | "assistant_message" | "agent_response" => {
+                    history.push(ChatMessage::assistant(Some(content), None));
+                }
+                _ => {}
+            }
+        }
+
+        // The runtime owns prompt persistence so every presentation surface
+        // receives identical transcript continuity. Ephemeral turns stay out
+        // of durable session storage.
+        if !request.ephemeral {
+            self.services
+                .storage
+                .save_item(
+                    &uuid::Uuid::new_v4().to_string(),
+                    &thread_id,
+                    None,
+                    "user",
+                    &request.prompt,
+                )
+                .map_err(|error| RuntimeError::Storage(error.to_string()))?;
+        }
+        history.push(ChatMessage::user(request.prompt.clone()));
 
         let (eng_tx, mut eng_rx) = mpsc::unbounded_channel();
         let (steer_tx, steer_rx) = mpsc::unbounded_channel();
@@ -418,6 +516,8 @@ impl M31aRuntime {
                                         thread_id: tid.clone(),
                                         turn_id: turn.clone(),
                                         request_id: req_id.clone(),
+                                        command: approval.command.clone().unwrap_or_default(),
+                                        reason: approval.reason.clone(),
                                         response_tx,
                                     },
                                 );
@@ -437,6 +537,9 @@ impl M31aRuntime {
                                         thread_id: tid.clone(),
                                         turn_id: turn.clone(),
                                         question_id: qid.clone(),
+                                        question: question.question.clone(),
+                                        options: question.options.clone(),
+                                        multi_select: question.is_multi_select,
                                         response_tx,
                                     },
                                 );
@@ -468,7 +571,7 @@ impl M31aRuntime {
             }
         });
 
-        Ok(out_rx)
+        Ok((turn_id, out_rx))
     }
 
     /// Cancel a specific running turn.

@@ -44,12 +44,82 @@ describe('Tauri IPC Client', () => {
     };
     vi.mocked(invoke).mockResolvedValueOnce(mockWs);
 
-    const result = await ipc.setWorkspace('/test/new-workspace', false);
+    const result = await ipc.setWorkspace('/test/new-workspace');
     expect(invoke).toHaveBeenCalledWith('set_workspace', {
       path: '/test/new-workspace',
-      allowUntrusted: false,
     });
     expect(result.path).toBe('/test/new-workspace');
+  });
+
+  it('uses string contracts for active model operations', async () => {
+    vi.mocked(invoke).mockResolvedValueOnce('nvidia/model-a');
+    expect(await ipc.getActiveModel()).toBe('nvidia/model-a');
+    expect(invoke).toHaveBeenCalledWith('get_active_model');
+
+    vi.mocked(invoke).mockResolvedValueOnce('nvidia/model-b');
+    expect(await ipc.activateModel('nvidia/model-b')).toBe('nvidia/model-b');
+    expect(invoke).toHaveBeenCalledWith('activate_model', {
+      model: 'nvidia/model-b',
+    });
+  });
+
+  it('retrieves pending approvals and questions for event reconciliation', async () => {
+    const pending = {
+      approvals: [{
+        request_id: 'approval-1',
+        thread_id: 'thread-1',
+        turn_id: 'turn-1',
+        command: 'cargo test',
+        reason: 'Execution requires approval',
+      }],
+      questions: [{
+        question_id: 'question-1',
+        thread_id: 'thread-1',
+        turn_id: 'turn-1',
+        question: 'Continue?',
+        options: ['Yes', 'No'],
+        multi_select: false,
+      }],
+    };
+    vi.mocked(invoke).mockResolvedValueOnce(pending);
+
+    expect(await ipc.getPendingInteractions()).toEqual(pending);
+    expect(invoke).toHaveBeenCalledWith('get_pending_interactions');
+  });
+
+  it('invokes authorize_workspace with a native-confirmation request', async () => {
+    const resultValue = {
+      path: '/test/workspace',
+      is_trusted: true,
+      exists: true,
+    };
+    vi.mocked(invoke).mockResolvedValueOnce(resultValue);
+
+    expect(await ipc.authorizeWorkspace('/test/workspace')).toEqual(resultValue);
+    expect(invoke).toHaveBeenCalledWith('authorize_workspace', {
+      path: '/test/workspace',
+    });
+  });
+
+  it('invokes cancel_turn with the exact runtime turn identifier', async () => {
+    vi.mocked(invoke).mockResolvedValueOnce(undefined);
+
+    await ipc.cancelTurn('thread-1', 'turn-runtime-1');
+    expect(invoke).toHaveBeenCalledWith('cancel_turn', {
+      threadId: 'thread-1',
+      turnId: 'turn-runtime-1',
+    });
+  });
+
+  it('invokes steer_turn with the exact runtime turn identifier', async () => {
+    vi.mocked(invoke).mockResolvedValueOnce(undefined);
+
+    await ipc.steerTurn('thread-1', 'turn-runtime-1', 'Continue carefully');
+    expect(invoke).toHaveBeenCalledWith('steer_turn', {
+      threadId: 'thread-1',
+      turnId: 'turn-runtime-1',
+      message: 'Continue carefully',
+    });
   });
 
   it('invokes submit_turn with prompt payload', async () => {
