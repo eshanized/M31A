@@ -11,7 +11,13 @@ import { useApp } from '../stores/AppContext';
 export const Layout: React.FC = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const { pendingApprovals, pendingQuestions } = useApp();
+  const { pendingApprovals, pendingQuestions, activeSessionId } = useApp();
+  const sessionApprovals = pendingApprovals.filter(
+    (approval) => approval.thread_id === activeSessionId
+  );
+  const sessionQuestions = pendingQuestions.filter(
+    (question) => question.thread_id === activeSessionId
+  );
 
   return (
     <div
@@ -44,17 +50,20 @@ export const Layout: React.FC = () => {
           }}
         >
           {/* Floating or pinned authorization and clarification cards */}
-          {pendingApprovals.length > 0 && (
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
-              {pendingApprovals.map((appr) => (
+          {(sessionApprovals.length > 0 || sessionQuestions.length > 0) && (
+            <div
+              style={{
+                maxHeight: '32vh',
+                overflowY: 'auto',
+                flexShrink: 0,
+                borderBottom: '1px solid var(--border-primary)',
+              }}
+            >
+              {sessionApprovals.map((appr) => (
                 <ApprovalCard key={appr.request_id} approval={appr} />
               ))}
             </div>
-          )}
-
-          {pendingQuestions.length > 0 && (
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
-              {pendingQuestions.map((q) => (
+              {sessionQuestions.map((q) => (
                 <QuestionDialog key={q.question_id} question={q} />
               ))}
             </div>
