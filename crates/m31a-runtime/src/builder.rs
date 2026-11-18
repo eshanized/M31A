@@ -139,11 +139,8 @@ impl RuntimeBuilder {
                 #[cfg(unix)]
                 {
                     use std::os::unix::fs::PermissionsExt;
-                    std::fs::set_permissions(
-                        &vault_dir,
-                        std::fs::Permissions::from_mode(0o700),
-                    )
-                    .map_err(|error| {
+                    std::fs::set_permissions(&vault_dir, std::fs::Permissions::from_mode(0o700))
+                        .map_err(|error| {
                         RuntimeError::Security(format!(
                             "Failed to restrict encrypted vault permissions for '{}': {error}",
                             vault_dir.display()
@@ -171,9 +168,9 @@ impl RuntimeBuilder {
 
         // 7. Security components: Sandbox & Guardian
         let sandbox = Arc::new(crate::services::sandbox::init_sandbox());
-        let guardian = Arc::new(RwLock::new(
-            crate::services::guardian::init_guardian(&active_model),
-        ));
+        let guardian = Arc::new(RwLock::new(crate::services::guardian::init_guardian(
+            &active_model,
+        )));
 
         // 8. Lifecycle hooks runtime
         let hooks = crate::services::hooks::init_hooks(&cwd);
