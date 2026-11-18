@@ -6,6 +6,9 @@ authors = ["Eshan Roy"]
 license = "MIT"
 description = "Tauri 2 desktop host and authoritative runtime integration for M31A"
 
+[package.metadata.dist]
+dist = false
+
 [lib]
 name = "m31a_desktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
