@@ -87,6 +87,18 @@ export type RuntimeEvent =
       data: { status: string; message: string };
     }
   | {
+      type: 'agent_spawned';
+      data: { parent_thread_id: string; child_thread_id: string; role: string };
+    }
+  | {
+      type: 'agent_finished';
+      data: { parent_thread_id: string; child_thread_id: string; success: boolean };
+    }
+  | {
+      type: 'workflow_step';
+      data: { workflow_id: string; step: number; total_steps: number; message: string };
+    }
+  | {
       type: 'verification_result';
       data: { check_name: string; passed: boolean; output: string };
     };
