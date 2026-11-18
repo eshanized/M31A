@@ -100,9 +100,9 @@ Service handles returned by the runtime are shared handles, not independently co
 
 ### Turn ownership
 
-A turn-specific `AgentEngine` remains lightweight. The runtime creates it from the canonical provider, tools, storage, approval/sandbox policies, execution policy, Guardian, hooks, code-mode orchestrator, trust store, and child-agent runtime.
+A turn-specific `AgentEngine` remains lightweight. The runtime creates it from the canonical provider, tools, storage, approval/sandbox policies, execution policy, Guardian, hooks, code-mode orchestrator, trust store, and child-agent runtime. Provider, Guardian, and child-agent runtime handles are replaceable shared references, so model activation updates future turns rather than only the TUI's local fields.
 
-The engine is configured with the runtime-owned shared execution-policy handle and session authorization state. A turn receives a child cancellation token from the runtime's root cancellation token. Therefore:
+The engine is configured with the runtime-owned shared execution-policy handle and session authorization state. A turn receives a child cancellation token from the runtime's root cancellation token. Its workspace can override the runtime default through `TurnRequest::with_workspace`; the runtime canonicalizes it before use. Session-scoped authorization must be enabled through `TurnRequest::with_workspace_authorization` only after the presentation layer obtains user consent. Therefore:
 
 1. cancelling a turn cancels only that turn;
 2. shutting down the runtime cancels the root token and all outstanding child turns;
@@ -129,8 +129,14 @@ Initializing -> Ready -> ShuttingDown -> Stopped
 
 - `Ready` is the only operational state.
 - `shutdown()` cancels active turns, stops the watcher, stops managed background processes, closes MCP connections, and releases terminal shell/process resources.
-- Shutdown is idempotent. Concurrent or repeated calls converge on one stored `ShutdownReport` and do not repeat destructive cleanup.
-- The runtime root cancellation token is never reset. A stopped runtime cannot accept new turns.
+- Shutdown is serialized across runtime clones. Concurrent or repeated calls receive the same stored `ShutdownReport` and do not repeat destructive cleanup.
+- Turn cancellation remains registered until its task exits; cleanup also drops outstanding approval and question responders.
+- Shutdown waits up to ten seconds for cancelled turns to exit. `cleanly_stopped` is false when turns or managed processes remain.
+- The report includes the number of MCP clients closed. The runtime root cancellation token is never reset, and a stopped runtime cannot accept new turns.
+
+## Vault handling
+
+The default encrypted vault lives under the canonical workspace root at `.m31a-vault`. Creation failures are fatal, symlinked vault paths are rejected, and Unix permissions are restricted to `0700`. A caller-supplied vault remains caller-managed and must enforce equivalent storage protections.
 
 ## Events
 
@@ -151,7 +157,7 @@ The Phase 1 boundary preserves the following invariants:
 2. Sandbox and approval policies are attached to every engine created by the runtime.
 3. `ExecPolicy` remains enforced in Rust and is shared by the runtime-owned engines.
 4. Guardian review remains in Rust and is shared across turns.
-5. Workspace trust remains fail-closed. An untrusted workspace is not implicitly authorized merely because the runtime is executing a turn.
+5. Workspace trust remains fail-closed. Each turn workspace is canonicalized and checked independently; an untrusted workspace is rejected unless the request carries an explicit session-authorization decision from its caller.
 6. Approval and question responses use Rust channels (`oneshot`); JSON-RPC and TUI adapters only transport the decision.
 7. Web-search and other gated tools remain disabled unless explicitly enabled.
 8. The runtime does not expose an unrestricted shell/process API that bypasses `ToolRegistry`, `ExecPolicy`, approval, Guardian, or sandbox checks.
