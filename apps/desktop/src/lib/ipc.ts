@@ -11,6 +11,7 @@ import type {
   RuntimeStatusDto,
   SessionDetailsDto,
   SessionSummaryDto,
+  ShutdownReportDto,
   SubmitTurnPayload,
   TurnHandleDto,
   WorkspaceInfoDto,
@@ -26,8 +27,8 @@ export const ipc = {
     return invoke<EnvironmentInfoDto>('get_environment_info');
   },
 
-  async shutdownRuntime(): Promise<void> {
-    return invoke<void>('shutdown_runtime');
+  async shutdownRuntime(): Promise<ShutdownReportDto> {
+    return invoke<ShutdownReportDto>('shutdown_runtime');
   },
 
   // Workspace
