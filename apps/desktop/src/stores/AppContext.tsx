@@ -605,47 +605,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
 
   // Subscribe to runtime events and reconcile snapshots after event loss.
   useEffect(() => {
-    let mounted = true;
-    let unlistenEvents: (() => void) | undefined;
-    let unlistenGaps: (() => void) | undefined;
-
     refreshRuntime();
     refreshSessions();
 
-    subscribeToRuntimeEvents(handleRuntimeEvent)
-      .then((unlisten) => {
-        if (mounted) {
-          unlistenEvents = unlisten;
-          // Subscribe first, then reconcile to close the reconnect race.
-          refreshPendingInteractions();
-        } else {
-          unlisten();
-        }
-      })
-      .catch((err) => {
-        console.error('Failed to initialize runtime event bridge listener:', err);
-      });
-
-    subscribeToRuntimeEventGaps((skipped) => {
+    const eventsSubscription = subscribeToRuntimeEvents(handleRuntimeEvent);
+    const gapsSubscription = subscribeToRuntimeEventGaps((skipped) => {
       console.warn(`Runtime event stream dropped ${skipped} events; reconciling pending interactions.`);
       refreshPendingInteractions();
       refreshRuntime();
-    })
-      .then((unlisten) => {
-        if (mounted) {
-          unlistenGaps = unlisten;
-        } else {
-          unlisten();
-        }
-      })
+    });
+
+    // Fetch snapshots only after the event listeners are registered, closing
+    // the gap where a pending request could be created during subscription.
+    void eventsSubscription.ready
+      .then(() => refreshPendingInteractions())
       .catch((err) => {
-        console.error('Failed to initialize runtime event-gap listener:', err);
+        console.error('Failed to initialize runtime event bridge listener:', err);
       });
+    void gapsSubscription.ready.catch((err) => {
+      console.error('Failed to initialize runtime event-gap listener:', err);
+    });
 
     return () => {
-      mounted = false;
-      unlistenEvents?.();
-      unlistenGaps?.();
+      eventsSubscription.dispose();
+      gapsSubscription.dispose();
     };
   }, [
     refreshRuntime,
