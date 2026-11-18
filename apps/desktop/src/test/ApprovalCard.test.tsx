@@ -1,10 +1,14 @@
-import { describe, it, expect, vi } from 'vitest';
+import { beforeEach, describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import { AppProvider } from '../stores/AppContext';
 import { ApprovalCard } from '../features/approvals/ApprovalCard';
 import { invoke } from '@tauri-apps/api/core';
 
 describe('ApprovalCard Component', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it('renders command, reason, and triggers allow once decision', async () => {
     vi.mocked(invoke).mockImplementation(async (cmd: string) => {
       if (cmd === 'get_runtime_status') {
