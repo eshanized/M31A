@@ -55,6 +55,25 @@ impl PersistentShellSession {
         self.env.insert(key.into(), value.into());
     }
 
+    /// Returns whether an underlying PTY shell process is currently running.
+    pub fn is_running(&self) -> bool {
+        self.process.is_some()
+    }
+
+    /// Terminates the underlying PTY shell, if one is running.
+    ///
+    /// This is intentionally idempotent so runtime shutdown can safely call it
+    /// more than once. The next explicit [`Self::execute`] call starts a fresh
+    /// shell because the terminated process handle is cleared.
+    pub fn shutdown(&mut self) -> bool {
+        let had_process = self.process.is_some();
+        if let Some(process) = self.process.as_mut() {
+            process.terminate();
+        }
+        self.process = None;
+        had_process
+    }
+
     /// Executes a command within this persistent shell session.
     /// Captures output, updates working directory if `cd` was used,
     /// and keeps the underlying PTY child shell alive across executions.

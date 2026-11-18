@@ -3,14 +3,13 @@
 //! Defines RPC request/response schemas, error codes, notification types, and session parameters.
 
 use anyhow::{Context, Result, anyhow, bail};
+use m31a_agent_engine::EngineEvent;
 use m31a_agent_engine::agents::EngineAgentRuntime;
 use m31a_agent_engine::speculative::{SpeculativeArena, SpeculativeBranchConfig};
 use m31a_agent_engine::workflow::{WorkflowExecutionConfig, WorkflowOrchestrator};
-use m31a_agent_engine::{AgentEngine, EngineEvent};
 use m31a_core::types::ChatMessage;
-use m31a_core::{ApprovalPolicy, CollaborationMode, Config, SkillLoader, SystemPromptBuilder};
+use m31a_core::{CollaborationMode, Config, SkillLoader};
 use m31a_execpolicy::ExecPolicy;
-use m31a_guardian::GuardianReviewer;
 use m31a_maintenance::{
     CaseStatus, LocalRepositorySignalSource, MaintenanceConfigFile, MaintenancePlanner,
     MaintenanceScheduler, MaintenanceStore, MaintenanceWorkflowRunner, PlanApprovalState,
@@ -104,10 +103,12 @@ pub struct AppServer {
     pub pending_approvals: Arc<Mutex<HashMap<String, PendingApprovalEntry>>>,
     pub pending_questions: Arc<Mutex<HashMap<String, PendingQuestionEntry>>>,
     pub active_turns: Arc<Mutex<HashMap<String, ActiveTurnHandle>>>,
+    pub runtime: Arc<m31a_runtime::M31aRuntime>,
 }
 
 impl AppServer {
-    pub fn new(config: Arc<Config>, storage: Storage, tools: Arc<ToolRegistry>) -> Result<Self> {
+    /// Construct an AppServer backed by an authoritative `M31aRuntime`.
+    pub fn with_runtime(runtime: Arc<m31a_runtime::M31aRuntime>) -> Result<Self> {
         let (broadcaster, _) = broadcast::channel(1024);
         let admission = Arc::new(crate::turn_admission::TurnAdmissionController::default());
         let multiplexer = Arc::new(crate::connection_multiplexer::ConnectionMultiplexer::default());
@@ -120,50 +121,14 @@ impl AppServer {
         let pending_questions = Arc::new(Mutex::new(HashMap::new()));
         let active_turns = Arc::new(Mutex::new(HashMap::new()));
         let resource_validator = Arc::new(
-            crate::resource_validator::ResourceValidator::with_storage(storage.clone()),
+            crate::resource_validator::ResourceValidator::with_storage(runtime.storage().clone()),
         );
-        let trust_store = Arc::new(Mutex::new(m31a_trust::TrustStore::new()));
 
-        let hooks = Arc::new(m31a_hooks::HookRuntime::new(
-            m31a_hooks::HookConfig::discover(
-                &std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
-            ),
-        ));
-
-        // Construct provider and agent runtime before initializing the server.
-        // This ensures the server always has a real runtime or fails early.
-        let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-        let provider_type = ProviderType::resolve(
-            config.model_provider.as_deref(),
-            &config.model,
-            Some(&config.api_base),
-        )?;
-        let provider_config = ProviderConfig {
-            provider_type,
-            api_base: Some(config.api_base.clone()),
-            api_key: config.api_key.clone(),
-            model: config.model.clone(),
-            extra: std::collections::HashMap::new(),
-        };
-        let provider = ProviderBuilder::build_client(provider_config).map_err(|err| {
-            anyhow::anyhow!(
-                "Failed to initialize provider for model '{}': {}",
-                config.model,
-                err
-            )
-        })?;
-
-        let engine_runtime = Arc::new(m31a_agent_engine::agents::EngineAgentRuntime::new(
-            provider,
-            (*tools).clone(),
-            storage.clone(),
-            ExecPolicy::standard(),
-            cwd.clone(),
-            Some(hooks.clone()),
-            config.model_context_window,
-            config.agents.max_depth as u32,
-        ));
-        tools.set_agent_runtime(engine_runtime.clone());
+        let config = Arc::new(runtime.config().core.clone());
+        let storage = runtime.storage().clone();
+        let tools = runtime.tools();
+        let hooks = runtime.hooks();
+        let trust_store = runtime.trust_store();
 
         Ok(Self {
             config,
@@ -179,7 +144,19 @@ impl AppServer {
             pending_approvals,
             pending_questions,
             active_turns,
+            runtime,
         })
+    }
+
+    pub fn new(config: Arc<Config>, storage: Storage, tools: Arc<ToolRegistry>) -> Result<Self> {
+        let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let runtime_config = m31a_runtime::RuntimeConfig::new((*config).clone(), cwd);
+        let runtime = m31a_runtime::RuntimeBuilder::new(runtime_config)
+            .with_storage(storage)
+            .with_tools((*tools).clone())
+            .build_sync()?;
+        let runtime = Arc::new(runtime);
+        Self::with_runtime(runtime)
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<JsonRpcNotification> {
@@ -332,7 +309,7 @@ impl AppServer {
     /// multiplexer. Runs detached from the request loop; completion is reported
     /// as notifications and persisted onto the turn row.
     fn spawn_engine_turn(&self, thread_id: &str, turn_id: &str, prompt: &str) {
-        let Some(ref api_key) = self.config.api_key else {
+        if self.config.api_key.is_none() {
             self.notify(
                 "notification/turn_failed",
                 Some(serde_json::json!({
@@ -353,133 +330,22 @@ impl AppServer {
             .map(|t| PathBuf::from(t.cwd))
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
 
-        let provider_type = match ProviderType::resolve(
-            self.config.model_provider.as_deref(),
-            &self.config.model,
-            Some(&self.config.api_base),
-        ) {
-            Ok(pt) => pt,
-            Err(e) => {
-                self.notify(
-                    "notification/turn_failed",
-                    Some(serde_json::json!({
-                        "turn_id": turn_id,
-                        "thread_id": thread_id,
-                        "error": format!("Failed to resolve provider: {e}"),
-                    })),
-                );
-                return;
-            }
-        };
-        let provider_config = ProviderConfig {
-            provider_type,
-            api_base: Some(self.config.api_base.clone()),
-            api_key: Some(api_key.to_string()),
-            model: self.config.model.clone(),
-            extra: std::collections::HashMap::new(),
-        };
-        let provider = match ProviderBuilder::build_client(provider_config) {
-            Ok(p) => p,
-            Err(e) => {
-                self.notify(
-                    "notification/turn_failed",
-                    Some(serde_json::json!({
-                        "turn_id": turn_id,
-                        "thread_id": thread_id,
-                        "error": format!("Failed to initialize provider: {e}"),
-                    })),
-                );
-                return;
-            }
-        };
-        let mut engine = AgentEngine::new(
-            provider,
-            (*self.tools).clone(),
-            self.storage.clone(),
-            self.config.approval,
-            ExecPolicy::standard(),
-            self.config.sandbox,
-            cwd.clone(),
-        );
-        if self.config.approval == ApprovalPolicy::ApproveForMe {
-            engine.guardian = Some(Arc::new(GuardianReviewer::new(&self.config.model)));
-        }
-        engine.routing_enabled = self.config.routing_enabled;
-        engine.tool_output_token_limit = self.config.tool_output_token_limit;
-        engine.code_mode = if self
-            .config
-            .features
-            .get("code_mode")
-            .copied()
-            .unwrap_or(false)
-        {
-            Some(m31a_code_mode::CodeModeOrchestrator::new())
-        } else {
-            None
-        };
-        engine.hooks = Some(self.hooks.clone());
-        engine.dangerously_bypass = self.config.dangerously_bypass;
+        let mut engine = self
+            .runtime
+            .create_agent_engine(Some(cwd.clone()), CollaborationMode::Default);
 
-        let model_meta = if let Some(info) = m31a_provider::find_model(&self.config.model) {
-            m31a_core::prompts::ModelMetadata {
-                provider: info.originator.clone(),
-                model_id: info.slug.clone(),
-                model_family: m31a_core::prompts::ModelFamily::from_model_slug(&info.slug),
-                context_window: info.context_window as usize,
-                max_output_tokens: Some(info.max_output_tokens as usize),
-                supports_tools: info.supports_tools,
-                supports_reasoning: info.supports_thinking,
-                supports_vision: info.supports_vision,
-                supports_parallel_tools: info.supports_tools,
-            }
-        } else {
-            m31a_core::prompts::ModelMetadata::conservative(
-                self.config
-                    .model_provider
-                    .as_deref()
-                    .unwrap_or("NVIDIA NIM / Upstream Provider"),
-                &self.config.model,
-            )
-        };
-
-        let mut tool_defs = engine.tools.definitions();
-        if let Some(ref cm) = engine.code_mode {
-            tool_defs.extend(cm.tool_definitions(&tool_defs));
-        }
-
-        let snapshot = m31a_core::prompts::PromptRuntimeSnapshot::gather_from_environment(
+        let system_instructions = m31a_runtime::services::agent::build_system_prompt(
             &cwd,
             &self.config.model,
-            &format!("{:?}", self.config.sandbox),
+            self.config.model_provider.as_deref(),
+            self.config.sandbox,
+            self.config.approval,
             CollaborationMode::Default,
-        )
-        .with_user_custom_instructions(self.config.system_prompt.clone())
-        .with_provider(
-            self.config
-                .model_provider
-                .as_deref()
-                .unwrap_or("NVIDIA NIM / Upstream Provider"),
-        )
-        .with_model_metadata(model_meta)
-        .with_tool_definitions(&tool_defs)
-        .with_security_policy(m31a_core::prompts::SecurityPolicySnapshot {
-            sandbox_policy: format!("{:?}", self.config.sandbox),
-            approval_policy: format!("{:?}", self.config.approval),
-            execution_mode: "app_server".to_string(),
-            workspace_root: cwd.clone(),
-            allows_escalation: false,
-        })
-        .with_collaboration(m31a_core::prompts::CollaborationCapabilitiesSnapshot {
-            max_spawn_depth: self.config.agents.max_depth,
-            current_spawn_depth: 0,
-            can_spawn_subagents: self.config.agents.max_depth > 0
-                && engine.tools.is_allowed("spawn_agent"),
-            available_roles: Vec::new(),
-            worktree_isolation_supported: true,
-            inter_agent_channels_enabled: engine.tools.is_allowed("post_message"),
-        });
-
-        let system_instructions = SystemPromptBuilder::build_canonical(&snapshot);
+            self.config.system_prompt.clone(),
+            &self.tools,
+            engine.code_mode.as_ref(),
+            self.config.agents.max_depth,
+        );
         engine.authoritative_system_prompt = Some(system_instructions.clone());
         let history = vec![
             ChatMessage::system(system_instructions),

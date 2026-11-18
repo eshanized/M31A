@@ -10,7 +10,7 @@ use m31a_core::types::{ChatMessage, SessionMetadata, TokenUsage};
 use m31a_core::{ApprovalPolicy, HookEngine, MemoryManager, SandboxPolicy, WorktreeManager};
 use m31a_execpolicy::ExecPolicy;
 use m31a_guardian::GuardianReviewer;
-use m31a_provider::models::{ModelInfo, get_nvidia_model_catalog};
+use m31a_provider::models::ModelInfo;
 use m31a_provider::{ProviderBuilder, ProviderClient, ProviderConfig, ProviderType};
 use m31a_sandbox::runner::SandboxRunner;
 use m31a_storage::db::Storage;
@@ -232,6 +232,7 @@ pub struct App {
     pub engine_runtime: Arc<m31a_agent_engine::agents::EngineAgentRuntime>,
     pub agent_runtime: Arc<dyn m31a_tools::agent_runtime::AgentRuntime>,
     pub vault: Arc<m31a_core::LocalEncryptedVault>,
+    pub runtime: Arc<m31a_runtime::M31aRuntime>,
     pub terminal_width: u16,
     pub terminal_height: u16,
     /// Terminal chime / audio bell on turn completion, approval, and failures
@@ -358,103 +359,40 @@ impl App {
         mcp_manager: Arc<McpManager>,
         trust_store: Arc<std::sync::Mutex<m31a_trust::TrustStore>>,
     ) -> Result<Self> {
+        let runtime_config = m31a_runtime::RuntimeConfig::new(config, cwd);
+        let runtime = m31a_runtime::RuntimeBuilder::new(runtime_config)
+            .with_storage(storage)
+            .with_vault(vault)
+            .with_mcp_manager(mcp_manager)
+            .with_trust_store(trust_store)
+            .build_sync()?;
+        Self::from_runtime(Arc::new(runtime))
+    }
+
+    /// Construct a presentation TUI client around an initialized runtime.
+    pub fn from_runtime(runtime: Arc<m31a_runtime::M31aRuntime>) -> Result<Self> {
+        let config = runtime.config().core.clone();
+        let cwd = runtime.config().cwd.clone();
         let active_model = config.model.clone();
-        let cached_models = m31a_provider::load_cached_models();
-        let mut available_models = get_nvidia_model_catalog();
-        for m in cached_models {
-            if !available_models
-                .iter()
-                .any(|existing| existing.slug == m.slug)
-            {
-                available_models.push(m);
-            }
-        }
-        if !available_models.iter().any(|m| m.slug == active_model) {
-            let model_info = if let Some(m) = m31a_provider::find_model(&active_model) {
-                m
-            } else if let Some(c) = m31a_provider::find_canonical_model(&active_model) {
-                ModelInfo {
-                    slug: c.id.clone(),
-                    display_name: c.name.clone(),
-                    description: c.description.clone(),
-                    context_window: c.context_window.unwrap_or(0),
-                    max_output_tokens: c.max_output_tokens.unwrap_or(0),
-                    supports_tools: c.capabilities.tool_calling,
-                    supports_thinking: c.capabilities.reasoning,
-                    supports_vision: c.capabilities.vision,
-                    supports_audio: c.capabilities.audio,
-                    originator: c.publisher.clone(),
-                    ..ModelInfo::default()
-                }
-            } else {
-                ModelInfo {
-                    slug: active_model.clone(),
-                    display_name: active_model.clone(),
-                    description: format!("Configured custom model: {}", active_model),
-                    context_window: 0,
-                    max_output_tokens: 0,
-                    supports_tools: false,
-                    supports_thinking: false,
-                    supports_vision: false,
-                    supports_audio: false,
-                    originator: "custom".to_string(),
-                    ..ModelInfo::default()
-                }
-            };
-            available_models.insert(0, model_info);
-        }
-
-        let provider_type = ProviderType::resolve(
-            config.model_provider.as_deref(),
-            &active_model,
-            Some(&config.api_base),
-        )?;
-        let provider_config = ProviderConfig {
-            provider_type,
-            api_base: Some(config.api_base.clone()),
-            api_key: config.api_key.clone().filter(|k| !k.trim().is_empty()),
-            model: active_model.clone(),
-            extra: std::collections::HashMap::new(),
-        };
-        m31a_provider::validate_provider_config(&provider_config)?;
-        let nim_client = ProviderBuilder::build_client(provider_config)?
-            .with_reasoning_effort(config.reasoning_effort.clone());
-
-        let tools = ToolRegistry::new_isolated(
-            Some(storage.clone()),
-            vault.clone(),
-            mcp_manager.clone(),
-            config.extra_dirs.clone(),
-            &cwd,
-        );
-        let sandbox_runner = SandboxRunner::new();
-        let guardian = Arc::new(GuardianReviewer::new(&active_model));
-        let hooks = Arc::new(m31a_hooks::HookRuntime::new(
-            m31a_hooks::HookConfig::discover(&cwd),
-        ));
-        let code_mode = if config.features.get("code_mode").copied().unwrap_or(false) {
-            Some(m31a_code_mode::CodeModeOrchestrator::new())
-        } else {
-            None
-        };
-        let exec_policy = ExecPolicy::standard();
-
-        let engine_runtime = Arc::new(
-            m31a_agent_engine::agents::EngineAgentRuntime::new(
-                nim_client.clone(),
-                tools.clone(),
-                storage.clone(),
-                exec_policy.clone(),
-                cwd.clone(),
-                Some(hooks.clone()),
-                config.model_context_window,
-                config.agents.max_depth as u32,
-            )
-            .with_trust_store(trust_store.clone()),
-        );
-        let tools = tools;
-        tools.set_agent_runtime(engine_runtime.clone());
+        let available_models = runtime.available_models();
+        let nim_client = (*runtime.provider()).clone();
+        let storage = runtime.storage().clone();
+        let tools = (*runtime.tools()).clone();
+        let sandbox_runner = (*runtime.sandbox()).clone();
+        let guardian = runtime.guardian();
+        let hooks = runtime.hooks();
+        let code_mode = runtime.services().code_mode.clone();
+        let exec_policy = runtime.config().exec_policy.clone();
         let collaboration_mode = CollaborationMode::Default;
+        let mcp_manager = runtime.mcp_manager();
+        let proc_supervisor = runtime.proc_manager();
+        let watcher_opt = runtime.watcher();
+        let trust_store = runtime.trust_store();
+        let features_registry = runtime.features_registry();
+        let vault = runtime.vault();
+        let engine_runtime = runtime.engine_runtime();
+        let agent_runtime: Arc<dyn m31a_tools::agent_runtime::AgentRuntime> =
+            engine_runtime.clone();
 
         let session_id = uuid::Uuid::new_v4().to_string();
 
@@ -533,7 +471,6 @@ impl App {
         bottom_pane.token_meter = Some(crate::bottom_pane::TokenContextMeter::new(0, max_context));
         let chat_widget = crate::chatwidget::ChatWidgetState::new(24);
         let transcript_virtualizer = crate::transcript_view::TranscriptVirtualizer::new();
-        let proc_supervisor = tools.proc_supervisor.clone();
 
         // Initialize theme based on user configuration or ambient terminal probe
         if let Some(theme_name) = &config.tui.theme {
@@ -577,8 +514,9 @@ impl App {
             });
         }
 
-        let mut watcher_opt = None;
-        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        let watcher_opt = if let Some(w) = watcher_opt {
+            Some(w)
+        } else if let Ok(handle) = tokio::runtime::Handle::try_current() {
             let watcher = Arc::new(m31a_watcher::WorkspaceWatcher::new(cwd.clone(), None));
             let mut watcher_rx = watcher.subscribe();
             watcher.start();
@@ -591,10 +529,11 @@ impl App {
                         .await;
                 }
             });
-            watcher_opt = Some(watcher);
-        }
+            Some(watcher)
+        } else {
+            None
+        };
 
-        let config_features = config.features.clone();
         let auto_scroll = config.tui.auto_scroll;
 
         let mut app = Self {
@@ -650,11 +589,7 @@ impl App {
             transcript_virtualizer,
             proc_supervisor,
             watcher: watcher_opt,
-            features_registry: {
-                let mut reg = m31a_core::features::FeatureRegistry::new();
-                reg.sync_from_map(&config_features);
-                Arc::new(reg)
-            },
+            features_registry,
             last_ctrl_c_press: None,
             quick_dials: {
                 let mut map = std::collections::BTreeMap::new();
@@ -670,9 +605,10 @@ impl App {
             mouse_selection: None,
             deferred_interrupts: crate::interrupts::DeferredInterruptQueue::new(),
             trust_store,
-            engine_runtime: engine_runtime.clone(),
-            agent_runtime: engine_runtime,
+            engine_runtime,
+            agent_runtime,
             vault,
+            runtime: Arc::clone(&runtime),
             terminal_width: 80,
             terminal_height: 24,
             sound_enabled: true,
@@ -6266,23 +6202,11 @@ impl App {
     }
 
     fn spawn_turn(&mut self) {
-        let mut engine = m31a_agent_engine::AgentEngine::new(
-            self.nim_client.clone(),
-            self.tools.clone(),
-            self.storage.clone(),
-            self.config.approval,
-            self.exec_policy.clone(),
-            self.config.sandbox,
-            self.cwd.clone(),
-        );
-        // Share the app-level Guardian so the circuit breaker persists across turns.
+        let mut engine = self
+            .runtime
+            .create_agent_engine(Some(self.cwd.clone()), self.collaboration_mode);
         engine.guardian = Some(self.guardian.clone());
-        engine.routing_enabled = self.config.routing_enabled;
-        engine.tool_output_token_limit = self.config.tool_output_token_limit;
         engine.code_mode = self.code_mode.clone();
-        engine.hooks = Some(self.hooks.clone());
-        engine.collaboration_mode = self.collaboration_mode;
-        engine.dangerously_bypass = self.config.dangerously_bypass;
 
         let messages = self.chat_history.clone();
         let event_tx = self.event_tx.clone();

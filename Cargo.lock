@@ -1604,6 +1604,7 @@ dependencies = [
  "m31a-hooks",
  "m31a-maintenance",
  "m31a-provider",
+ "m31a-runtime",
  "m31a-storage",
  "m31a-tools",
  "m31a-trust",
@@ -1690,6 +1691,7 @@ dependencies = [
  "m31a-prompts",
  "m31a-provider",
  "m31a-review",
+ "m31a-runtime",
  "m31a-sandbox",
  "m31a-shell",
  "m31a-storage",
@@ -2135,6 +2137,40 @@ dependencies = [
 ]
 
 [[package]]
+name = "m31a-runtime"
+version = "0.1.15"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "futures",
+ "futures-util",
+ "m31a-agent-engine",
+ "m31a-code-mode",
+ "m31a-core",
+ "m31a-elicitation",
+ "m31a-execpolicy",
+ "m31a-features",
+ "m31a-guardian",
+ "m31a-hooks",
+ "m31a-mcp",
+ "m31a-proc",
+ "m31a-provider",
+ "m31a-sandbox",
+ "m31a-storage",
+ "m31a-tools",
+ "m31a-trust",
+ "m31a-watcher",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "m31a-sandbox"
 version = "0.1.15"
 dependencies = [
@@ -2316,6 +2352,7 @@ dependencies = [
  "m31a-proc",
  "m31a-provider",
  "m31a-review",
+ "m31a-runtime",
  "m31a-sandbox",
  "m31a-storage",
  "m31a-term",

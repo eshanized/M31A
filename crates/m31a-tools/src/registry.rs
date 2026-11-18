@@ -21,10 +21,25 @@ use crate::patch::{apply_patch_to_workspace, parse_patch};
 use m31a_core::context_compactor::ContextCompactor;
 use m31a_core::types::ChatMessage;
 
+/// Summary of resources released by [`ToolRegistry::shutdown`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ToolShutdownReport {
+    /// Background unified-exec sessions terminated by the sandbox process manager.
+    pub sandbox_processes_stopped: usize,
+    /// Long-running supervised background processes terminated.
+    pub background_processes_stopped: usize,
+    /// Connected MCP servers closed.
+    pub mcp_servers_stopped: usize,
+    /// Whether the persistent shell was released.
+    pub persistent_shell_stopped: bool,
+}
+
 #[derive(Clone)]
 pub struct ToolRegistry {
     sandbox: SandboxRunner,
-    exec_policy: ExecPolicy,
+    /// Shared execution policy. Runtime-owned engines receive the same handle so
+    /// policy mutations cannot diverge between the registry and agent engine.
+    exec_policy: Arc<std::sync::RwLock<ExecPolicy>>,
     storage: Option<Storage>,
     process_manager: Arc<ProcessManager>,
     pub proc_supervisor: Arc<m31a_proc::ProcessManager>,
@@ -76,7 +91,7 @@ impl ToolRegistry {
         );
         Self {
             sandbox: SandboxRunner::new(),
-            exec_policy: ExecPolicy::standard(),
+            exec_policy: Arc::new(std::sync::RwLock::new(ExecPolicy::standard())),
             storage,
             process_manager: Arc::new(ProcessManager::new()),
             proc_supervisor: Arc::new(m31a_proc::ProcessManager::default()),
@@ -188,6 +203,28 @@ impl ToolRegistry {
         self
     }
 
+    /// Releases all process, MCP, and persistent-shell resources owned by this registry.
+    ///
+    /// The operation is deterministic and idempotent. Tool execution remains
+    /// policy-bound; shutdown only tears down resources that were already
+    /// created through the registry.
+    pub async fn shutdown(&self) -> ToolShutdownReport {
+        let sandbox_processes_stopped = self.process_manager.stop_all().await;
+        let background_processes_stopped = self.proc_supervisor.stop_all().await.len();
+        let mcp_servers_stopped = self.mcp_manager.list_server_names().await.len();
+        self.mcp_manager.shutdown_all().await;
+
+        let mut persistent_shell = self.persistent_shell.lock().await;
+        let persistent_shell_stopped = persistent_shell.shutdown();
+
+        ToolShutdownReport {
+            sandbox_processes_stopped,
+            background_processes_stopped,
+            mcp_servers_stopped,
+            persistent_shell_stopped,
+        }
+    }
+
     /// Fully isolated constructor guaranteeing zero writes or reads from `~/.m31a`.
     pub fn new_isolated(
         storage: Option<Storage>,
@@ -198,7 +235,7 @@ impl ToolRegistry {
     ) -> Self {
         Self {
             sandbox: SandboxRunner::new(),
-            exec_policy: ExecPolicy::standard(),
+            exec_policy: Arc::new(std::sync::RwLock::new(ExecPolicy::standard())),
             storage,
             process_manager: Arc::new(ProcessManager::new()),
             proc_supervisor: Arc::new(m31a_proc::ProcessManager::default()),
@@ -2933,7 +2970,7 @@ impl ToolRegistry {
                     .and_then(|v| v.as_u64())
                     .unwrap_or(0);
 
-                let decision = self.exec_policy.evaluate(cmd);
+                let decision = self.exec_policy.read().unwrap().evaluate(cmd);
                 if decision == Decision::Deny {
                     return Err(anyhow!(
                         "Command execution rejected by policy (critical safety denial): {}",

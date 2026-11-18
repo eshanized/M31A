@@ -26,6 +26,7 @@ m31a-code-mode = { path = "../m31a-code-mode" }
 m31a-storage = { path = "../m31a-storage" }
 m31a-app-server = { path = "../m31a-app-server" }
 m31a-tui = { path = "../m31a-tui" }
+m31a-runtime = { path = "../m31a-runtime" }
 m31a-term = { path = "../m31a-term" }
 m31a-fuzzy = { path = "../m31a-fuzzy" }
 m31a-diff = { path = "../m31a-diff" }

@@ -8,18 +8,17 @@ use anyhow::{Context, Result, anyhow, bail};
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::{Shell, generate};
 use colored::*;
-use m31a_agent_engine::{AgentEngine, EngineEvent};
+use m31a_agent_engine::EngineEvent;
 use m31a_app_server::AppServer;
 use m31a_core::types::ChatMessage;
 use m31a_core::types::Role;
 use m31a_core::{
     ApprovalPolicy, CollaborationMode, CompactTokenBudget, Config, ContextCompactor, HookEngine,
     HookEvent, McpServerConfig, MemoryManager, MemoryRecord, SandboxPolicy, Session,
-    SystemPromptBuilder, WorktreeManager,
+    WorktreeManager,
 };
 use m31a_execpolicy::ExecPolicy;
-use m31a_guardian::GuardianReviewer;
-use m31a_provider::{ProviderBuilder, ProviderConfig, ProviderType, get_nvidia_model_catalog};
+use m31a_provider::get_nvidia_model_catalog;
 use m31a_sandbox::SandboxRunner;
 use m31a_storage::Storage;
 use m31a_tools::ToolRegistry;
@@ -3717,7 +3716,7 @@ async fn run_turn(
     plan: bool,
     reasoning_effort: Option<String>,
 ) -> Result<()> {
-    let api_key = config.api_key.as_ref().context("NVIDIA_API_KEY is not set. Run `export NVIDIA_API_KEY=\"nvapi-...\"` or update ~/.m31a/config.toml")?;
+    let _api_key = config.api_key.as_ref().context("NVIDIA_API_KEY is not set. Run `export NVIDIA_API_KEY=\"nvapi-...\"` or update ~/.m31a/config.toml")?;
 
     // Workspace Trust Check: enforce centralized trust policy across interactive and headless modes
     let mut trust_store = m31a_trust::TrustStore::new();
@@ -3759,32 +3758,14 @@ async fn run_turn(
         }
     };
 
-    let provider_type = ProviderType::resolve(
-        config.model_provider.as_deref(),
-        &config.model,
-        Some(&config.api_base),
-    )?;
-    let provider_config = ProviderConfig {
-        provider_type,
-        api_base: Some(config.api_base.clone()),
-        api_key: Some(api_key.to_string()),
-        model: config.model.clone(),
-        extra: HashMap::new(),
-    };
-    let provider = ProviderBuilder::build_client(provider_config)?
-        .with_reasoning_effort(reasoning_effort.or_else(|| config.reasoning_effort.clone()));
-    let mut tools = ToolRegistry::new();
-    // `--search` gates the live web_search tool: hidden from tool definitions and rejected at execution time.
-    if !search {
-        tools.disable("web_search");
-    }
     let storage = Storage::open_default()?;
+    let runtime_config = m31a_runtime::RuntimeConfig::new(config.clone(), cwd.to_path_buf())
+        .with_web_search(search)
+        .with_reasoning_effort(reasoning_effort.or_else(|| config.reasoning_effort.clone()));
 
-    // Shared hooks runtime: parent engine + §4.3 child engines all dispatch
-    // through the same hook configuration.
-    let hooks = Arc::new(m31a_hooks::HookRuntime::new(
-        m31a_hooks::HookConfig::discover(cwd),
-    ));
+    let runtime = m31a_runtime::RuntimeBuilder::new(runtime_config)
+        .with_storage(storage.clone())
+        .build_sync()?;
 
     let mut session = Session::new(&config.model, cwd);
 
@@ -3794,84 +3775,20 @@ async fn run_turn(
         m31a_core::prompts::CollaborationMode::Default
     };
 
-    // Initial system prompt assembled via canonical runtime pipeline
-    let model_meta = if let Some(info) = m31a_provider::find_model(&config.model) {
-        m31a_core::prompts::ModelMetadata {
-            provider: info.originator.clone(),
-            model_id: info.slug.clone(),
-            model_family: m31a_core::prompts::ModelFamily::from_model_slug(&info.slug),
-            context_window: info.context_window as usize,
-            max_output_tokens: Some(info.max_output_tokens as usize),
-            supports_tools: info.supports_tools,
-            supports_reasoning: info.supports_thinking,
-            supports_vision: info.supports_vision,
-            supports_parallel_tools: info.supports_tools,
-        }
-    } else {
-        m31a_core::prompts::ModelMetadata::conservative(
-            config
-                .model_provider
-                .as_deref()
-                .unwrap_or("NVIDIA NIM / Upstream Provider"),
-            &config.model,
-        )
-    };
-
-    let mut tool_defs = tools.definitions();
-    if config.features.get("code_mode").copied().unwrap_or(false) {
-        let cm = m31a_code_mode::CodeModeOrchestrator::new();
-        tool_defs.extend(cm.tool_definitions(&tool_defs));
-    }
-
-    let snapshot = m31a_core::prompts::PromptRuntimeSnapshot::gather_from_environment(
+    let system_instructions = m31a_runtime::services::agent::build_system_prompt(
         cwd,
         &config.model,
-        &format!("{:?}", config.sandbox),
+        config.model_provider.as_deref(),
+        config.sandbox,
+        config.approval,
         collaboration_mode,
-    )
-    .with_user_custom_instructions(config.system_prompt.clone())
-    .with_provider(
-        config
-            .model_provider
-            .as_deref()
-            .unwrap_or("NVIDIA NIM / Upstream Provider"),
-    )
-    .with_model_metadata(model_meta)
-    .with_tool_definitions(&tool_defs)
-    .with_security_policy(m31a_core::prompts::SecurityPolicySnapshot {
-        sandbox_policy: format!("{:?}", config.sandbox),
-        approval_policy: format!("{:?}", config.approval),
-        execution_mode: "cli".to_string(),
-        workspace_root: cwd.to_path_buf(),
-        allows_escalation: false,
-    })
-    .with_collaboration(m31a_core::prompts::CollaborationCapabilitiesSnapshot {
-        max_spawn_depth: config.agents.max_depth,
-        current_spawn_depth: 0,
-        can_spawn_subagents: config.agents.max_depth > 0 && tools.is_allowed("spawn_agent"),
-        available_roles: Vec::new(),
-        worktree_isolation_supported: true,
-        inter_agent_channels_enabled: tools.is_allowed("post_message"),
-    });
-
-    let system_instructions = SystemPromptBuilder::build_canonical(&snapshot);
+        config.system_prompt.clone(),
+        &runtime.tools(),
+        runtime.services().code_mode.as_ref(),
+        config.agents.max_depth,
+    );
 
     let mut history = vec![ChatMessage::system(system_instructions.clone())];
-
-    // §4.3: inject the real child-engine runtime so spawn_agent runs actual
-    // AgentEngine subagents (descriptive fallback when not injected).
-    tools.set_agent_runtime(Arc::new(
-        m31a_agent_engine::agents::EngineAgentRuntime::new(
-            provider.clone(),
-            tools.clone(),
-            storage.clone(),
-            ExecPolicy::standard(),
-            cwd.to_path_buf(),
-            Some(hooks.clone()),
-            config.model_context_window,
-            config.agents.max_depth as u32,
-        ),
-    ));
 
     let mut user_prompt = prompt.to_string();
     if !images.is_empty() {
@@ -3913,48 +3830,15 @@ async fn run_turn(
         println!("\n{} {}", "User:".bold().cyan(), user_prompt);
     }
 
-    // Unified engine turn loop (report §2.1): single canonical implementation shared
-    // with the TUI — execpolicy, steering hooks, parallel dispatch, inline compaction,
-    // Guardian review, and persistence now all flow through the engine.
-    let engine = AgentEngine::new(
-        provider,
-        tools,
-        storage,
-        config.approval,
-        ExecPolicy::standard(),
-        config.sandbox,
-        cwd.to_path_buf(),
-    );
-    let mut engine = AgentEngine {
-        guardian: if config.approval == ApprovalPolicy::ApproveForMe {
-            Some(Arc::new(GuardianReviewer::new(&config.model)))
-        } else {
-            None
-        },
-        hooks: Some(hooks),
-        persist_items: !ephemeral,
-        self_heal,
-        max_heal_iterations,
-        routing_enabled: config.routing_enabled,
-        tool_output_token_limit: config.tool_output_token_limit,
-        code_mode: if config.features.get("code_mode").copied().unwrap_or(false) {
-            Some(m31a_code_mode::CodeModeOrchestrator::new())
-        } else {
-            None
-        },
-        compactor: Arc::new(ContextCompactor::new(CompactTokenBudget {
-            max_context_tokens: config.model_context_window,
-            ..CompactTokenBudget::default()
-        })),
-        collaboration_mode: if plan {
-            m31a_core::prompts::CollaborationMode::Plan
-        } else {
-            m31a_core::prompts::CollaborationMode::Default
-        },
-        authoritative_system_prompt: Some(system_instructions.clone()),
-        dangerously_bypass: config.dangerously_bypass,
-        ..engine
-    };
+    let mut engine = runtime.create_agent_engine(Some(cwd.to_path_buf()), collaboration_mode);
+    engine.persist_items = !ephemeral;
+    engine.self_heal = self_heal;
+    engine.max_heal_iterations = max_heal_iterations;
+    engine.compactor = Arc::new(ContextCompactor::new(CompactTokenBudget {
+        max_context_tokens: config.model_context_window,
+        ..CompactTokenBudget::default()
+    }));
+    engine.authoritative_system_prompt = Some(system_instructions.clone());
 
     let (eng_tx, mut eng_rx) = mpsc::unbounded_channel();
     let (_steer_tx, steer_rx) = mpsc::unbounded_channel();

@@ -101,7 +101,7 @@ pub use question::{
     QuestionAnswer, QuestionArgs, QuestionItem, QuestionModalHandler, QuestionResult,
     execute_question, register_question_modal_handler,
 };
-pub use registry::ToolRegistry;
+pub use registry::{ToolRegistry, ToolShutdownReport};
 pub use schedule::{
     CronExpression, PromptDeliveryCallback, ScheduleArgs, ScheduleResult, ScheduledTaskInfo,
     cancel_scheduled_task, execute_schedule, list_scheduled_tasks,

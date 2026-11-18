@@ -30,7 +30,11 @@ fn test_model_family_from_slug() {
     );
     assert_eq!(
         ModelFamily::from_model_slug("openai/gpt-4o"),
-        ModelFamily::Other("openai/gpt-4o".to_string())
+        ModelFamily::OpenAi
+    );
+    assert_eq!(
+        ModelFamily::from_model_slug("custom/custom-unknown-model"),
+        ModelFamily::Other("custom/custom-unknown-model".to_string())
     );
 }
 

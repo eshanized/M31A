@@ -379,6 +379,36 @@ impl ProcessManager {
         Ok(())
     }
 
+    /// Stops every background process currently owned by this manager.
+    ///
+    /// The method is idempotent: terminated processes remain in the manager's
+    /// audit map, but a subsequent call does not attempt to kill them again.
+    pub async fn stop_all(&self) -> usize {
+        let targets = {
+            let processes = self.processes.lock().await;
+            let mut list = Vec::new();
+            for (&session_id, proc) in processes.iter() {
+                let status = proc.status.lock().await;
+                if !matches!(
+                    *status,
+                    ProcessStatus::Exited { .. } | ProcessStatus::Terminated
+                ) {
+                    list.push(session_id);
+                }
+            }
+            list
+        };
+
+        let mut stopped = 0;
+        for session_id in targets {
+            if self.kill_process(session_id).await.is_ok() {
+                stopped += 1;
+            }
+        }
+
+        stopped
+    }
+
     pub async fn list_processes(&self) -> Vec<ProcessInfo> {
         let processes = self.processes.lock().await;
         let mut list = Vec::new();
