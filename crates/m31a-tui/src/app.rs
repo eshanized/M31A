@@ -5334,6 +5334,19 @@ impl App {
             anyhow::bail!("{err_msg}");
         }
 
+        if let Err(error) = self
+            .runtime
+            .activate_model(target_slug, candidate_client.clone())
+        {
+            let rollback = self.config.save();
+            if let Err(rollback_error) = rollback {
+                anyhow::bail!(
+                    "Runtime model activation failed ({error}); configuration rollback also failed ({rollback_error})"
+                );
+            }
+            anyhow::bail!("Runtime model activation failed: {error}");
+        }
+
         self.config = candidate_config;
         self.active_model = target_slug.to_string();
         self.bottom_pane.active_model = target_slug.to_string();
