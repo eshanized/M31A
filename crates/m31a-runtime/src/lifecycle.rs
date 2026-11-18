@@ -30,11 +30,9 @@ impl RuntimeState {
 pub struct ShutdownReport {
     pub cleanly_stopped: bool,
     pub background_processes_stopped: usize,
-    pub sandbox_processes_stopped: usize,
     pub active_turns_cancelled: usize,
     pub watcher_stopped: bool,
     pub mcp_servers_stopped: usize,
-    pub persistent_shell_stopped: bool,
     pub timestamp: DateTime<Utc>,
 }
 
@@ -43,11 +41,9 @@ impl Default for ShutdownReport {
         Self {
             cleanly_stopped: true,
             background_processes_stopped: 0,
-            sandbox_processes_stopped: 0,
             active_turns_cancelled: 0,
             watcher_stopped: false,
             mcp_servers_stopped: 0,
-            persistent_shell_stopped: false,
             timestamp: Utc::now(),
         }
     }

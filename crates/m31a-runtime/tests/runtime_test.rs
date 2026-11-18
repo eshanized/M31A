@@ -33,6 +33,15 @@ async fn test_runtime_initialization_and_services() {
     assert!(!runtime.tools().definitions().is_empty());
     assert_eq!(runtime.storage().list_threads(10).unwrap().len(), 0);
     assert!(runtime.watcher().is_none());
+
+    let vault_dir = temp_path.join(".m31a-vault");
+    assert!(vault_dir.is_dir());
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&vault_dir).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o700);
+    }
 }
 
 #[tokio::test]
@@ -53,6 +62,16 @@ async fn test_runtime_validation_rejects_nonexistent_directory() {
     let config = RuntimeConfig::new(core, non_existent);
     let result = RuntimeBuilder::new(config).build().await;
     assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn test_runtime_validation_rejects_workspace_file() {
+    let temp = tempdir().unwrap();
+    let file = temp.path().join("not-a-workspace");
+    std::fs::write(&file, "not a directory").unwrap();
+
+    let config = RuntimeConfig::new(Config::default(), file);
+    assert!(config.validate().is_err());
 }
 
 #[tokio::test]
@@ -77,8 +96,11 @@ async fn test_runtime_lifecycle_graceful_shutdown_is_idempotent() {
 
     let mut event_rx = runtime.subscribe_events();
 
-    // First shutdown call
-    let report1 = runtime.shutdown().await.expect("First shutdown succeeds");
+    // Concurrent shutdown callers converge on one completed teardown report.
+    let (first, second) = tokio::join!(runtime.shutdown(), runtime.shutdown());
+    let report1 = first.expect("First shutdown succeeds");
+    let report2 = second.expect("Concurrent shutdown succeeds");
+    assert_eq!(report1, report2);
     assert!(report1.cleanly_stopped);
     assert_eq!(runtime.state(), RuntimeState::Stopped);
     assert!(runtime.state().is_terminal());
@@ -96,12 +118,13 @@ async fn test_runtime_lifecycle_graceful_shutdown_is_idempotent() {
     assert!(saw_shutting_down);
     assert!(saw_shutdown_complete);
 
-    // Repeated shutdown call must be idempotent and succeed cleanly
-    let report2 = runtime
+    // Repeated shutdown returns the original report.
+    let report3 = runtime
         .shutdown()
         .await
         .expect("Repeated shutdown succeeds");
-    assert!(report2.cleanly_stopped);
+    assert_eq!(report1, report3);
+    assert!(report3.cleanly_stopped);
     assert_eq!(runtime.state(), RuntimeState::Stopped);
 }
 
@@ -129,12 +152,14 @@ async fn test_runtime_service_ownership_and_agent_runtime_wiring() {
     assert!(runtime.tools().is_allowed("spawn_agent"));
 
     // Verify trust store authorization evaluation
-    let trust_res = m31a_runtime::services::workspace::verify_workspace_trust(
-        &runtime.trust_store(),
-        temp_path,
-        true,
-    );
-    assert!(trust_res.is_ok());
+    let trust_store = runtime.trust_store();
+    let denied_by_default =
+        m31a_runtime::services::workspace::verify_workspace_trust(&trust_store, temp_path, false);
+    assert!(denied_by_default.is_err());
+
+    let explicit_session_grant =
+        m31a_runtime::services::workspace::verify_workspace_trust(&trust_store, temp_path, true);
+    assert!(explicit_session_grant.is_ok());
 }
 
 #[tokio::test]

@@ -228,10 +228,7 @@ impl ToolRegistry {
     /// The handle is shared with every cloned registry and with runtime-created
     /// agent engines, so policy changes cannot diverge across the tool and
     /// engine dispatch paths.
-    pub fn set_exec_policy_handle(
-        &self,
-        exec_policy: Arc<std::sync::RwLock<ExecPolicy>>,
-    ) {
+    pub fn set_exec_policy_handle(&mut self, exec_policy: Arc<std::sync::RwLock<ExecPolicy>>) {
         self.exec_policy = exec_policy;
     }
 
@@ -258,11 +255,11 @@ impl ToolRegistry {
     pub async fn shutdown(&self) -> ToolShutdownReport {
         let sandbox_processes_stopped = self.process_manager.stop_all().await;
         let background_processes_stopped = self.proc_supervisor.stop_all().await.len();
-        let mcp_servers_stopped = self.mcp_manager.list_server_names().await.len();
-        self.mcp_manager.shutdown_all().await;
+        let mcp_servers_stopped = self.mcp_manager.shutdown_all().await;
 
         let mut persistent_shell = self.persistent_shell.lock().await;
-        let persistent_shell_stopped = persistent_shell.shutdown();
+        let _ = persistent_shell.shutdown();
+        let persistent_shell_stopped = !persistent_shell.is_running();
 
         ToolShutdownReport {
             sandbox_processes_stopped,

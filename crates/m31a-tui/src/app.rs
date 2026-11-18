@@ -5299,21 +5299,6 @@ impl App {
         target_slug: &str,
         candidate_client: ProviderClient,
     ) -> Result<String> {
-        let new_engine_runtime = Arc::new(
-            m31a_agent_engine::agents::EngineAgentRuntime::new(
-                candidate_client.clone(),
-                self.tools.clone(),
-                self.storage.clone(),
-                self.exec_policy.clone(),
-                self.cwd.clone(),
-                Some(self.hooks.clone()),
-                self.config.model_context_window,
-                self.config.agents.max_depth as u32,
-            )
-            .with_trust_store(self.trust_store.clone()),
-        );
-        let new_guardian = Arc::new(GuardianReviewer::new(target_slug));
-
         let mut candidate_config = self.config.clone();
         candidate_config.model = target_slug.to_string();
         if let Some(info) = m31a_provider::find_model(target_slug) {
@@ -5334,6 +5319,22 @@ impl App {
             anyhow::bail!("{err_msg}");
         }
 
+        if let Err(error) = self
+            .runtime
+            .activate_model(target_slug, candidate_client.clone())
+        {
+            let rollback = self.config.save();
+            if let Err(rollback_error) = rollback {
+                anyhow::bail!(
+                    "Runtime model activation failed ({error}); configuration rollback also failed ({rollback_error})"
+                );
+            }
+            anyhow::bail!("Runtime model activation failed: {error}");
+        }
+
+        let new_engine_runtime = self.runtime.engine_runtime();
+        let new_guardian = self.runtime.guardian();
+
         self.config = candidate_config;
         self.active_model = target_slug.to_string();
         self.bottom_pane.active_model = target_slug.to_string();
@@ -5342,8 +5343,7 @@ impl App {
             self.config.model_context_window,
         ));
         self.nim_client = candidate_client;
-        self.tools.set_agent_runtime(new_engine_runtime.clone());
-        self.engine_runtime = new_engine_runtime.clone();
+        self.engine_runtime = Arc::clone(&new_engine_runtime);
         self.agent_runtime = new_engine_runtime;
         self.guardian = new_guardian;
         if let Some(ref mut ms) = self.models_screen_state {
