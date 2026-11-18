@@ -549,8 +549,11 @@ impl M31aRuntime {
             .remove(request_id)
             .ok_or_else(|| RuntimeError::ApprovalNotFound(request_id.to_string()))?;
 
-        let _ = entry.response_tx.send(decision);
-        Ok(())
+        entry.response_tx.send(decision).map_err(|_| {
+            RuntimeError::Turn(format!(
+                "Approval request '{request_id}' is no longer active"
+            ))
+        })
     }
 
     /// Respond to an interactive question request.
@@ -566,8 +569,11 @@ impl M31aRuntime {
             .remove(question_id)
             .ok_or_else(|| RuntimeError::QuestionNotFound(question_id.to_string()))?;
 
-        let _ = entry.response_tx.send(answers);
-        Ok(())
+        entry.response_tx.send(answers).map_err(|_| {
+            RuntimeError::Turn(format!(
+                "Question request '{question_id}' is no longer active"
+            ))
+        })
     }
 
     /// Build a new provider and replace the active model across runtime services.
