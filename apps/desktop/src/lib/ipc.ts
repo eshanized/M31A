@@ -48,12 +48,12 @@ export const ipc = {
     return invoke<ModelInfoDto[]>('list_available_models');
   },
 
-  async getActiveModel(): Promise<ModelInfoDto> {
-    return invoke<ModelInfoDto>('get_active_model');
+  async getActiveModel(): Promise<string> {
+    return invoke<string>('get_active_model');
   },
 
-  async activateModel(model: string): Promise<ModelInfoDto> {
-    return invoke<ModelInfoDto>('activate_model', { model });
+  async activateModel(model: string): Promise<string> {
+    return invoke<string>('activate_model', { model });
   },
 
   // Sessions
