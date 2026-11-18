@@ -401,7 +401,11 @@ impl Theme {
     }
 
     pub fn effective_icon_mode(&self) -> crate::icons::IconMode {
-        effective_icon_mode(self)
+        if !self.typography.use_icons {
+            crate::icons::IconMode::Ascii
+        } else {
+            self.icon_mode
+        }
     }
 
     /// Get color for semantic role
