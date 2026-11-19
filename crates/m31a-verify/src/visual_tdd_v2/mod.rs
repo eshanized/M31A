@@ -161,17 +161,26 @@ impl VisualTddV2Runner {
                     } => {
                         let timeout = timeout_ms.unwrap_or(2000);
                         let start = std::time::Instant::now();
+                        let check = format!(
+                            "document.querySelector({}) !== null",
+                            serde_json::to_string(selector)?
+                        );
+                        let mut appeared = false;
                         while start.elapsed().as_millis() < timeout as u128 {
-                            let check = format!(
-                                "document.querySelector({}) !== null",
-                                serde_json::to_string(selector)?
-                            );
                             if let Ok(res) = session.evaluate(&check).await
                                 && res.trim() == "true"
                             {
+                                appeared = true;
                                 break;
                             }
                             tokio::time::sleep(Duration::from_millis(50)).await;
+                        }
+                        if !appeared {
+                            anyhow::bail!(
+                                "Timed out after {} ms waiting for selector {:?}",
+                                timeout,
+                                selector
+                            );
                         }
                     }
                     UiActionStep::WaitMillis { ms } => {

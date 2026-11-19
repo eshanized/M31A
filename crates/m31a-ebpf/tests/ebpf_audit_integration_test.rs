@@ -57,6 +57,22 @@ fn test_process_provenance_and_child_tracking() {
     } else {
         panic!("Expected ProcessExec");
     }
+
+    // Exit provenance is captured before PID deregistration and the dead PID
+    // must not be reinserted by parent inheritance.
+    auditor.ingest_event(AuditEventKind::ProcessExit {
+        pid: 4002,
+        ppid: 4001,
+        exit_code: 0,
+        duration_ms: 18,
+    });
+    let exits = auditor.query_events(&AuditQueryFilter {
+        turn_id: Some("turn-999".to_string()),
+        ..Default::default()
+    });
+    assert!(matches!(exits.last().unwrap().kind, AuditEventKind::ProcessExit { pid: 4002, .. }));
+    assert_eq!(exits.last().unwrap().turn_id.as_deref(), Some("turn-999"));
+    assert_eq!(auditor.summary().active_processes_tracked, 1);
 }
 
 #[test]
@@ -81,12 +97,14 @@ fn test_bounded_ring_buffer_backpressure_and_overflow_visibility() {
     // Buffer should remain bounded at capacity
     assert_eq!(summary.queued_events_count, 5);
 
-    // Overflow visibility: an overflow event must be present in the ring buffer
+    // The accepted history stays intact; every rejected incoming record is
+    // reported exactly through the loss counter instead of a fabricated queue item.
     let records = auditor.query_events(&m31a_ebpf::AuditQueryFilter::default());
+    assert_eq!(records.len(), 5);
     assert!(
         records
             .iter()
-            .any(|r| matches!(r.kind, AuditEventKind::RingBufferOverflow { .. }))
+            .all(|r| !matches!(r.kind, AuditEventKind::RingBufferOverflow { .. }))
     );
 }
 

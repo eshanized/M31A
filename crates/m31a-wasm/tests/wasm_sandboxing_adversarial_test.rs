@@ -141,18 +141,43 @@ fn test_adversarial_memory_page_limit_enforcement() {
     };
 
     let res = runtime.load_plugin(manifest, &wasm_bytes, std::env::temp_dir(), "{}");
-    assert!(res.is_err());
-    if let Err(e) = res {
-        match e {
-            WasmError::MemoryLimitExceeded { pages, max_pages } => {
-                assert_eq!(pages, 100);
-                assert_eq!(max_pages, 16);
-            }
-            other => panic!("Expected MemoryLimitExceeded, got {:?}", other),
-        }
-    } else {
-        panic!("Expected error but succeeded");
-    }
+    assert!(
+        matches!(res, Err(WasmError::ModuleValidationFailed(_))),
+        "initial memory above the configured store limit must be rejected before instantiation: {:?}",
+        res
+    );
+}
+
+#[test]
+fn test_memory_growth_is_limited_after_instantiation() {
+    let runtime = WasmRuntime::new();
+    let wat = r#"
+(module
+  (memory (export "memory") 1)
+  (func (export "m31a_tool_call") (param i32 i32 i32 i32) (result i32)
+    (i32.const 1)
+    (memory.grow)
+  )
+)
+"#;
+    let wasm_bytes = wat::parse_str(wat).unwrap();
+    let manifest = WasmPluginManifest {
+        name: "memory-grower".to_string(),
+        version: "1.0.0".to_string(),
+        abi_version: 1,
+        description: "Attempts to grow memory beyond its configured ceiling".to_string(),
+        author: None,
+        capabilities: Vec::new(),
+        limits: WasmResourceLimits {
+            max_memory_pages: 1,
+            max_fuel: 100_000,
+            execution_deadline_ms: 1000,
+        },
+    };
+    let mut instance = runtime
+        .load_plugin(manifest, &wasm_bytes, std::env::temp_dir(), "{}")
+        .unwrap();
+    assert!(instance.call_tool("grow", "{}").is_err());
 }
 
 #[test]
@@ -179,6 +204,18 @@ fn test_unauthorized_filesystem_access_blocked() {
     let wasm_bytes = wat::parse_str(wat).unwrap();
 
     // Manifest grants permission only to "allowed.txt"
+    #[cfg(unix)]
+    {
+        let external_dir = tempdir().unwrap();
+        let external_secret = external_dir.path().join("outside-secret.txt");
+        std::fs::write(&external_secret, "outside-workspace-secret").unwrap();
+        std::os::unix::fs::symlink(
+            &external_secret,
+            dir.path().join("allowed-link.txt"),
+        )
+        .unwrap();
+    }
+
     let manifest = WasmPluginManifest {
         name: "fs-test".to_string(),
         version: "1.0.0".to_string(),
@@ -186,7 +223,7 @@ fn test_unauthorized_filesystem_access_blocked() {
         description: "FS capability test".to_string(),
         author: None,
         capabilities: vec![WasmCapability::RestrictedFsRead {
-            allowed_paths: vec!["allowed.txt".to_string()],
+            allowed_paths: vec!["allowed.txt".to_string(), "allowed-link.txt".to_string()],
         }],
         limits: WasmResourceLimits::default(),
     };
@@ -206,6 +243,13 @@ fn test_unauthorized_filesystem_access_blocked() {
     // 3. Traversal attempt returns error code -3
     let traversal_res = instance.call_tool("read", "../secret.key");
     assert!(traversal_res.is_err());
+
+    // 4. A manifest-authorized workspace symlink must not expose an external file.
+    #[cfg(unix)]
+    {
+        let symlink_res = instance.call_tool("read", "allowed-link.txt");
+        assert!(symlink_res.is_err());
+    }
 }
 
 #[test]

@@ -20,7 +20,7 @@ pub enum BpfCapabilityStatus {
     PrivilegeRequired { reason: String },
     /// Kernel BTF debugging information (`/sys/kernel/btf/vmlinux`) is not present
     BtfUnavailable,
-    /// Operating system is not Linux or kernel is older than 4.18
+    /// Platform is unsupported or no operational kernel event source is available
     UnsupportedPlatform { platform: String, details: String },
 }
 
@@ -36,13 +36,13 @@ impl BpfCapabilityStatus {
                 btf_available,
             } => {
                 format!(
-                    "eBPF tracing fully supported (Kernel: {}, BTF: {})",
+                    "eBPF kernel tracing prerequisites available (Kernel: {}, BTF: {})",
                     kernel_version, btf_available
                 )
             }
             Self::DisabledByKernelSysctl { sysctl_value } => {
                 format!(
-                    "Unprivileged eBPF disabled by kernel sysctl (unprivileged_bpf_disabled={}). Auditing operating in unprivileged-degraded mode.",
+                    "Unprivileged eBPF loading disabled by kernel sysctl (unprivileged_bpf_disabled={}); kernel auditing is unavailable.",
                     sysctl_value
                 )
             }
@@ -93,25 +93,20 @@ impl BpfProbe {
         // 1. Check sysctl unprivileged_bpf_disabled
         if let Ok(val_str) = std::fs::read_to_string(Self::SYSCTL_UNPRIVILEGED_BPF) {
             let val: i32 = val_str.trim().parse().unwrap_or(0);
-            if val != 0 {
-                // If unprivileged BPF is disabled and process is not root (UID != 0)
-                let uid = unsafe { libc::getuid() };
-                if uid != 0 {
-                    return BpfCapabilityStatus::DisabledByKernelSysctl { sysctl_value: val };
-                }
+            if val != 0 && !Self::has_required_capability() {
+                return BpfCapabilityStatus::DisabledByKernelSysctl { sysctl_value: val };
             }
         }
 
         // 2. Check BTF availability
         let btf_available = Path::new(Self::BTF_VMLINUX_PATH).exists();
 
-        // 3. Check privileges
-        let uid = unsafe { libc::getuid() };
-        let euid = unsafe { libc::geteuid() };
-        if uid != 0 && euid != 0 {
-            // Unprivileged user: eBPF tracing programs (kprobes/tracepoints) require CAP_BPF / CAP_SYS_ADMIN
+        // Check the effective capability set, not UID. Root without CAP_BPF/CAP_SYS_ADMIN
+        // must not be reported as privileged, while non-root processes with either
+        // effective capability may proceed to the remaining checks.
+        if !Self::has_required_capability() {
             return BpfCapabilityStatus::PrivilegeRequired {
-                reason: "eBPF tracepoint/kprobe attachment requires CAP_BPF or CAP_SYS_ADMIN. M31A runs unprivileged by design.".to_string(),
+                reason: "eBPF tracepoint/kprobe attachment requires effective CAP_BPF or CAP_SYS_ADMIN.".to_string(),
             };
         }
 
@@ -119,10 +114,41 @@ impl BpfProbe {
             return BpfCapabilityStatus::BtfUnavailable;
         }
 
-        BpfCapabilityStatus::Supported {
-            kernel_version,
-            btf_available,
+        // Kernel prerequisites alone do not mean that auditing is operational.
+        // This crate has no loaded BPF object or kernel ring-buffer reader, so
+        // never claim kernel observation is supported.
+        BpfCapabilityStatus::UnsupportedPlatform {
+            platform: "Linux".to_string(),
+            details: format!(
+                "kernel prerequisites are present ({}; BTF available), but this build has no eBPF program loader or kernel event reader; no kernel events are collected",
+                kernel_version
+            ),
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn has_required_capability() -> bool {
+        let status = match std::fs::read_to_string("/proc/self/status") {
+            Ok(status) => status,
+            Err(_) => return false,
+        };
+        let cap_eff = match status
+            .lines()
+            .find_map(|line| line.strip_prefix("CapEff:"))
+            .map(str::trim)
+        {
+            Some(value) => value,
+            None => return false,
+        };
+        let effective = match u64::from_str_radix(cap_eff, 16) {
+            Ok(value) => value,
+            Err(_) => return false,
+        };
+
+        const CAP_SYS_ADMIN: u32 = 21;
+        const CAP_BPF: u32 = 39;
+        (effective & (1u64 << CAP_SYS_ADMIN) != 0)
+            || (effective & (1u64 << CAP_BPF) != 0)
     }
 
     #[cfg(target_os = "linux")]
@@ -147,22 +173,13 @@ mod tests {
         let status = BpfProbe::probe();
         let desc = status.description();
         assert!(!desc.is_empty());
-        // On our Linux environment with unprivileged_bpf_disabled = 2 and UID 1000,
-        // it should detect DisabledByKernelSysctl or PrivilegeRequired.
+        // No kernel event producer is shipped yet, so the probe must never
+        // claim that kernel syscall auditing is operational.
         #[cfg(target_os = "linux")]
-        {
-            let uid = unsafe { libc::getuid() };
-            if uid != 0 {
-                assert!(
-                    matches!(
-                        status,
-                        BpfCapabilityStatus::DisabledByKernelSysctl { .. }
-                            | BpfCapabilityStatus::PrivilegeRequired { .. }
-                    ),
-                    "Expected DisabledByKernelSysctl or PrivilegeRequired for unprivileged test run, got {:?}",
-                    status
-                );
-            }
-        }
+        assert!(
+            !status.is_supported(),
+            "eBPF must remain unavailable without an attached kernel event source: {:?}",
+            status
+        );
     }
 }

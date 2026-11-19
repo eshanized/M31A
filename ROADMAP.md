@@ -33,16 +33,17 @@ M31A is built to be the premier open-source, sovereign, enterprise-grade autonom
 
 ---
 
-## Phase 3: Multi-Modal Verification & Extended Sandboxing (v0.3.0) — :white_check_mark: Completed
+## Phase 3: Multi-Modal Verification & Extended Sandboxing (v0.3.0) — :construction: Security remediation in progress
 
-- [x] **Autonomous Visual Regression TDD v2**: Multi-resolution screenshot comparison with diff heatmaps, region masking, SHA-256 golden baseline management, and automated layout repair.
-- [x] **eBPF-Based Execution Auditing**: Kernel-level syscall observation, child-process provenance tracking, bounded ring buffer metrics, and micro-overhead benchmark measurement.
-- [x] **Cross-Platform Sandboxing Support**:
-  - Linux: Bubblewrap namespace isolation, Landlock filesystem bounds, and Seccomp syscall filtering.
-  - macOS Sandbox: Hardened Seatbelt SBPL profile generation, network isolation, path escaping, and workspace scoping.
-  - Windows: Native AppContainer process isolation, low-integrity capability SIDs, explicit DACL grants, and fail-closed security.
-  - Unified `SandboxPlatform` abstraction with fail-closed policy validation.
-- [x] **WebAssembly Plugin Architecture**: Sandboxed runtime (`wasmi`) with capability gating, deterministic fuel metering, linear memory bounding, and ABI v1 coexistence with native plugins.
+- [x] **Visual comparison foundation**: Multi-resolution screenshot comparison, heatmaps, region masking, and SHA-256 baseline integrity checks.
+- [ ] **Autonomous visual repair workflow**: Current code provides repair prompts, checkpoints, approval/attempt guards, and rollback primitives; runtime-integrated patch application and verified retry orchestration remain incomplete.
+- [ ] **eBPF-Based Execution Auditing**: The current crate processes caller-supplied events only. Kernel program loading, tracepoint attachment, kernel ring-buffer consumption, and runtime event-source integration are not implemented.
+- [ ] **Cross-Platform Sandboxing**:
+  - [x] Linux: Bubblewrap namespaces, Landlock filesystem bounds, and Seccomp filtering (subject to host capability detection).
+  - [ ] macOS: Seatbelt profile generation exists, but `sandbox-exec` is legacy/deprecation-sensitive; per-destination egress policy and native OS integration tests remain outstanding.
+  - [ ] Windows: AppContainer execution is disabled until restricted process creation is implemented. Restricted policies require a verified MXC backend; otherwise execution fails closed.
+  - [x] Unified `SandboxPlatform` capability reporting and policy abstraction (does not imply every backend is implemented).
+- [x] **WebAssembly Plugin Foundation**: `wasmi` ABI v1, capability declarations, per-invocation fuel, store-level memory limits, component-aware path grants, and bounded host reads. Wall-clock interruption, signed manifests, and comprehensive adversarial validation remain outstanding.
 
 ---
 

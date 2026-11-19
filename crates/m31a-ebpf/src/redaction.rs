@@ -19,15 +19,18 @@ impl SecretRedactor {
             || lower.starts_with("--password=")
             || lower.starts_with("--api-key=")
             || lower.starts_with("--secret=")
-            || lower.starts_with("--auth="))
+            || lower.starts_with("--auth=")
+            || lower.starts_with("-p="))
             && let Some((flag, _val)) = arg.split_once('=')
         {
             return format!("{}={}", flag, Self::REDACTED_MARKER);
         }
 
-        // Common bearer token patterns
-        if lower.starts_with("bearer ") {
-            return format!("Bearer {}", Self::REDACTED_MARKER);
+        // Authorization headers commonly embed Bearer after a header name.
+        if let Some(index) = lower.find("bearer ") {
+            let prefix = &arg[..index];
+            let bearer_prefix = &arg[index..index + "bearer ".len()];
+            return format!("{}{}{}", prefix, bearer_prefix, Self::REDACTED_MARKER);
         }
 
         // High-entropy token prefixes
@@ -60,6 +63,7 @@ impl SecretRedactor {
                 || lower == "--password"
                 || lower == "--api-key"
                 || lower == "--secret"
+                || lower == "--auth"
                 || lower == "-p"
             {
                 out.push(arg.clone());
@@ -114,8 +118,18 @@ mod tests {
         let redacted = SecretRedactor::redact_args(&raw);
         assert_eq!(redacted[0], "curl");
         assert_eq!(redacted[3], "--token=[REDACTED_SECRET]");
+        assert_eq!(redacted[2], "Authorization: Bearer [REDACTED_SECRET]");
         assert_eq!(redacted[4], "--api-key");
         assert_eq!(redacted[5], "[REDACTED_SECRET]");
+        assert_eq!(
+            SecretRedactor::redact_arg("-p=database-secret"),
+            "-p=[REDACTED_SECRET]"
+        );
+        let auth = vec!["--auth".to_string(), "secret-value".to_string()];
+        assert_eq!(
+            SecretRedactor::redact_args(&auth),
+            vec!["--auth", "[REDACTED_SECRET]"]
+        );
     }
 
     #[test]

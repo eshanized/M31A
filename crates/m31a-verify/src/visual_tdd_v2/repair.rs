@@ -1,8 +1,8 @@
 //! Bounded Layout Repair and Self-Healing Engine.
 //!
 //! Provides bounded iterative layout repair for frontends encountering visual regressions.
-//! Uses checkpointing, maximum retry enforcement, and strict approval gating
-//! to prevent runaway mutation loops or broken styles.
+//! Provides guarded repair primitives. Callers must supply an explicit approval
+//! decision before a repair attempt; this module does not autonomously apply patches.
 
 use super::comparator::ComparisonOutcome;
 use anyhow::{Result, bail};
@@ -147,8 +147,15 @@ impl LayoutRepairCoordinator {
         prompt
     }
 
-    /// Enforces the maximum attempt limit before executing a repair iteration.
-    pub fn assert_can_attempt(&self, current_attempt: usize) -> Result<()> {
+    /// Enforces both the configured attempt bound and explicit user approval.
+    pub fn assert_can_attempt(
+        &self,
+        current_attempt: usize,
+        approval_granted: bool,
+    ) -> Result<()> {
+        if self.config.require_approval && !approval_granted {
+            bail!("Visual layout repair requires explicit approval");
+        }
         if current_attempt >= self.config.max_attempts {
             bail!(
                 "Bounded layout repair loop exceeded maximum allowed attempts ({}); aborting to prevent runaway mutations",
@@ -156,6 +163,16 @@ impl LayoutRepairCoordinator {
             );
         }
         Ok(())
+    }
+
+    /// Rolls back checkpoints when rollback-on-failure is enabled.
+    /// Returns true when a rollback was performed.
+    pub fn rollback_after_failure(&self) -> Result<bool> {
+        if !self.config.rollback_on_failure {
+            return Ok(false);
+        }
+        self.rollback_all()?;
+        Ok(true)
     }
 }
 
@@ -181,7 +198,7 @@ mod tests {
         );
 
         // Rollback
-        coordinator.rollback_all().unwrap();
+        assert!(coordinator.rollback_after_failure().unwrap());
         assert_eq!(
             std::fs::read_to_string(&test_file).unwrap(),
             ".button { color: red; }"
@@ -196,8 +213,16 @@ mod tests {
             require_approval: true,
         });
 
-        assert!(coordinator.assert_can_attempt(0).is_ok());
-        assert!(coordinator.assert_can_attempt(1).is_ok());
-        assert!(coordinator.assert_can_attempt(2).is_err());
+        assert!(coordinator.assert_can_attempt(0, false).is_err());
+        assert!(coordinator.assert_can_attempt(0, true).is_ok());
+        assert!(coordinator.assert_can_attempt(1, true).is_ok());
+        assert!(coordinator.assert_can_attempt(2, true).is_err());
+
+        let no_rollback = LayoutRepairCoordinator::new(RepairLoopConfig {
+            max_attempts: 1,
+            rollback_on_failure: false,
+            require_approval: false,
+        });
+        assert!(!no_rollback.rollback_after_failure().unwrap());
     }
 }

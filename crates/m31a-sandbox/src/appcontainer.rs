@@ -85,38 +85,13 @@ impl AppContainerSandbox {
     }
 
     /// Verifies whether the current Windows platform supports native AppContainer creation.
+    /// AppContainer is deliberately unavailable until the child is created with
+    /// CreateProcessW and PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES.
+    ///
+    /// The former implementation launched cmd.exe with the caller's token and did
+    /// not establish an AppContainer boundary.
     pub fn is_available() -> bool {
-        #[cfg(target_os = "windows")]
-        {
-            // AppContainer is supported on Windows 8 / Server 2012 and newer.
-            // Check if Userenv.dll exports CreateAppContainerProfile.
-            Self::check_windows_appcontainer_support()
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            false
-        }
-    }
-
-    #[cfg(target_os = "windows")]
-    fn check_windows_appcontainer_support() -> bool {
-        use std::ffi::CString;
-        unsafe {
-            let lib = libc::dlopen(
-                CString::new("userenv.dll").unwrap().as_ptr(),
-                libc::RTLD_LAZY,
-            );
-            if lib.is_null() {
-                return false;
-            }
-            let sym = libc::dlsym(
-                lib,
-                CString::new("CreateAppContainerProfile").unwrap().as_ptr(),
-            );
-            let available = !sym.is_null();
-            libc::dlclose(lib);
-            available
-        }
+        false
     }
 
     /// Grants AppContainer SID filesystem ACLs to the target workspace path.
@@ -174,28 +149,10 @@ impl AppContainerSandbox {
         timeout: Duration,
         extra_env: &HashMap<String, String>,
     ) -> Result<crate::runner::CommandOutput> {
-        // Build child process with cmd.exe under AppContainer
-        let mut cmd = tokio::process::Command::new("cmd.exe");
-        cmd.arg("/c");
-        for arg in command {
-            cmd.arg(arg);
-        }
-        cmd.current_dir(working_dir);
-        for (k, v) in extra_env {
-            cmd.env(k, v);
-        }
-
-        let output = tokio::time::timeout(timeout, cmd.output())
-            .await
-            .context("AppContainer process execution timed out")?
-            .context("Failed to spawn process in AppContainer")?;
-
-        Ok(crate::runner::CommandOutput {
-            exit_code: output.status.code().unwrap_or(-1),
-            stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-            timed_out: false,
-        })
+        let _ = (command, working_dir, timeout, extra_env);
+        bail!(
+            "Windows AppContainer execution is disabled: this build does not create a restricted AppContainer process token. Use a verified MXC backend or choose an explicitly authorized execution mode."
+        )
     }
 }
 

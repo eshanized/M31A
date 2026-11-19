@@ -53,6 +53,11 @@ impl ExecutionCorrelator {
         }
     }
 
+    /// Reads an existing PID mapping without inheriting or mutating process state.
+    pub fn lookup_pid(&self, pid: u32) -> Option<ExecutionProvenance> {
+        self.active_pids.read().ok()?.get(&pid).cloned()
+    }
+
     /// Propagates provenance to child processes when `execve` or `fork` occurs.
     pub fn inherit_or_lookup(&self, pid: u32, ppid: u32) -> Option<ExecutionProvenance> {
         let read_guard = self.active_pids.read().ok()?;

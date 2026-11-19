@@ -1,9 +1,8 @@
-//! `m31a-ebpf`: Kernel-level eBPF execution auditing and provenance tracing.
+//! `m31a-ebpf`: Execution audit event processing and capability diagnostics.
 //!
-//! Provides Linux kernel-level execution observation, process lineage correlation,
-//! bounded ring buffer event transport, event loss tracking, and secret redaction.
-//! Operates strictly as an observational audit layer without bypassing or altering
-//! authoritative sandbox execution policies.
+//! Provides caller-supplied process-event correlation, bounded userspace buffering,
+//! event-loss tracking, and secret redaction. This build does not attach eBPF programs
+//! or collect kernel events; it never replaces authoritative sandbox policies.
 
 pub mod auditor;
 pub mod benchmark;

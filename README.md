@@ -852,7 +852,7 @@ npm test --prefix sdk/typescript
 | [**CLI Command Reference**](docs/CLI_REFERENCE.md) | Comprehensive reference for all 54 subcommands, arguments, and flags. |
 | [**Configuration Guide**](docs/CONFIGURATION.md) | Complete reference for `config.toml`, profiles, and approval presets. |
 | [**App Server & JSON-RPC Protocol**](docs/APP_SERVER_RPC.md) | Specification of 40+ JSON-RPC methods and SSE streaming events. |
-| [**Sandbox & Security Architecture**](docs/SANDBOX_SECURITY.md) | Linux Bubblewrap isolation, macOS Seatbelt, Windows AppContainer, and eBPF Auditing. |
+| [**Sandbox & Security Architecture**](docs/SANDBOX_SECURITY.md) | Linux isolation, experimental macOS Seatbelt, disabled Windows AppContainer, and eBPF audit-processing status. |
 | [**Extensions, Skills & MCP**](docs/EXTENSIONS_AND_SKILLS.md) | Custom skill creation, YAML frontmatter, WASM plugins, and external MCP servers. |
 | [**Multi-Agent Swarm & Distributed Mesh**](docs/SWARM_AND_MULTI_AGENT.md) | Swarm coordination, message boards, and distributed task mesh. |
 | [**Crates Directory Catalog**](crates/README.md) | Exhaustive map of all 42 crates in the Cargo workspace. |
@@ -866,7 +866,7 @@ npm test --prefix sdk/typescript
 
 - [x] **Phase 1: Baseline Architecture & Release Readiness (v0.1.0 - v0.1.15)**: Modular 39-crate monorepo, NVIDIA NIM frontier models, Ratatui TUI, 4-tier fuzzy patch engine, Bubblewrap sandbox, Vibe coding auto-healing loop, Speculative reality arena, and official TypeScript & Python SDKs.
 - [ ] **Phase 2: IDE Ecosystem & Native Integrations (v0.2.0)**: Official VS Code and Cursor extensions, JetBrains plugin suite, bidirectional Language Server Protocol (LSP) bridge, and cross-session vector-indexed memory graphs.
-- [x] **Phase 3: Multi-Modal Verification & Extended Sandboxing (v0.3.0)**: Visual regression TDD v2 with diff heatmaps and automated layout repair, eBPF-based kernel execution auditing, macOS Seatbelt sandboxing, Windows AppContainer isolation, and sandboxed WebAssembly extensions.
+- [ ] **Phase 3: Multi-Modal Verification & Extended Sandboxing (v0.3.0)**: Visual comparison and sandboxed WebAssembly foundations are implemented; autonomous repair orchestration, kernel eBPF event capture, production macOS Seatbelt validation, and native Windows AppContainer process creation remain incomplete. See `ROADMAP.md` for current status.
 - [ ] **Phase 4: Sovereign Repository Stewardship (v1.0.0+)**: Autonomous continuous dependency migrations, formal proof engine integration (Kani, Coq), and enterprise fleet policy federations.
 
 Consult [`ROADMAP.md`](ROADMAP.md) for full roadmap details.
