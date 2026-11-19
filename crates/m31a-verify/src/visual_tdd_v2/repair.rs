@@ -148,11 +148,7 @@ impl LayoutRepairCoordinator {
     }
 
     /// Enforces both the configured attempt bound and explicit user approval.
-    pub fn assert_can_attempt(
-        &self,
-        current_attempt: usize,
-        approval_granted: bool,
-    ) -> Result<()> {
+    pub fn assert_can_attempt(&self, current_attempt: usize, approval_granted: bool) -> Result<()> {
         if self.config.require_approval && !approval_granted {
             bail!("Visual layout repair requires explicit approval");
         }
