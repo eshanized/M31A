@@ -82,37 +82,49 @@ impl HostContext {
             }
         })?;
         let candidate = root.join(relative);
-        let parent = candidate.parent().ok_or_else(|| WasmError::UnauthorizedCapability {
-            capability: "Requested path has no workspace parent".to_string(),
-        })?;
-        let canonical_parent = parent.canonicalize().map_err(|error| {
-            WasmError::UnauthorizedCapability {
-                capability: format!("Requested parent directory is unavailable: {error}"),
-            }
-        })?;
+        let parent = candidate
+            .parent()
+            .ok_or_else(|| WasmError::UnauthorizedCapability {
+                capability: "Requested path has no workspace parent".to_string(),
+            })?;
+        let canonical_parent =
+            parent
+                .canonicalize()
+                .map_err(|error| WasmError::UnauthorizedCapability {
+                    capability: format!("Requested parent directory is unavailable: {error}"),
+                })?;
 
         if !canonical_parent.starts_with(&root) {
             return Err(WasmError::UnauthorizedCapability {
-                capability: format!("Path escapes workspace through a symlink: '{}'", relative_path),
+                capability: format!(
+                    "Path escapes workspace through a symlink: '{}'",
+                    relative_path
+                ),
             });
         }
 
-        let file_name = candidate.file_name().ok_or_else(|| {
-            WasmError::UnauthorizedCapability {
+        let file_name = candidate
+            .file_name()
+            .ok_or_else(|| WasmError::UnauthorizedCapability {
                 capability: "Requested path does not identify a file".to_string(),
-            }
-        })?;
+            })?;
         let resolved = canonical_parent.join(file_name);
 
         match std::fs::symlink_metadata(&resolved) {
             Ok(metadata) if metadata.file_type().is_symlink() => {
                 return Err(WasmError::UnauthorizedCapability {
-                    capability: format!("Symbolic-link targets are not accessible to WASM host calls: '{}'", relative_path),
+                    capability: format!(
+                        "Symbolic-link targets are not accessible to WASM host calls: '{}'",
+                        relative_path
+                    ),
                 });
             }
             Ok(metadata) if !metadata.is_file() => {
                 return Err(WasmError::UnauthorizedCapability {
-                    capability: format!("Requested path is not a regular file: '{}'", relative_path),
+                    capability: format!(
+                        "Requested path is not a regular file: '{}'",
+                        relative_path
+                    ),
                 });
             }
             Ok(_) => {}
@@ -125,11 +137,12 @@ impl HostContext {
         }
 
         if !is_write {
-            let canonical_file = resolved.canonicalize().map_err(|error| {
-                WasmError::UnauthorizedCapability {
-                    capability: format!("Requested file cannot be canonicalized: {error}"),
-                }
-            })?;
+            let canonical_file =
+                resolved
+                    .canonicalize()
+                    .map_err(|error| WasmError::UnauthorizedCapability {
+                        capability: format!("Requested file cannot be canonicalized: {error}"),
+                    })?;
             if !canonical_file.starts_with(&root) {
                 return Err(WasmError::UnauthorizedCapability {
                     capability: format!("Path escapes workspace: '{}'", relative_path),
