@@ -128,7 +128,9 @@ impl WasmPluginManifest {
                 WasmCapability::RestrictedFsRead { allowed_paths }
                 | WasmCapability::RestrictedFsWrite { allowed_paths } => {
                     if allowed_paths.is_empty()
-                        || allowed_paths.iter().any(|path| !is_safe_relative_path(path))
+                        || allowed_paths
+                            .iter()
+                            .any(|path| !is_safe_relative_path(path))
                     {
                         return Err(WasmError::InvalidManifest(
                             "Filesystem capability paths must be non-empty normalized relative paths without traversal".to_string(),
@@ -237,7 +239,13 @@ execution_deadline_ms = 5000
 
     #[test]
     fn test_manifest_rejects_empty_and_traversal_allowlist_entries() {
-        for bad_path in ["", "../secret", "docs/../secret", "/etc/passwd", "C:\\secret"] {
+        for bad_path in [
+            "",
+            "../secret",
+            "docs/../secret",
+            "/etc/passwd",
+            "C:\\secret",
+        ] {
             let manifest = WasmPluginManifest {
                 name: "invalid-paths".to_string(),
                 version: "1.0.0".to_string(),
