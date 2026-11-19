@@ -106,7 +106,9 @@ impl BpfProbe {
         // effective capability may proceed to the remaining checks.
         if !Self::has_required_capability() {
             return BpfCapabilityStatus::PrivilegeRequired {
-                reason: "eBPF tracepoint/kprobe attachment requires effective CAP_BPF or CAP_SYS_ADMIN.".to_string(),
+                reason:
+                    "eBPF tracepoint/kprobe attachment requires effective CAP_BPF or CAP_SYS_ADMIN."
+                        .to_string(),
             };
         }
 
@@ -147,8 +149,7 @@ impl BpfProbe {
 
         const CAP_SYS_ADMIN: u32 = 21;
         const CAP_BPF: u32 = 39;
-        (effective & (1u64 << CAP_SYS_ADMIN) != 0)
-            || (effective & (1u64 << CAP_BPF) != 0)
+        (effective & (1u64 << CAP_SYS_ADMIN) != 0) || (effective & (1u64 << CAP_BPF) != 0)
     }
 
     #[cfg(target_os = "linux")]
