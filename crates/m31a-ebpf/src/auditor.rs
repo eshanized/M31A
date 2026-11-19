@@ -113,14 +113,12 @@ impl ExecutionAuditor {
                 ppid,
                 exit_code,
                 duration_ms,
-            } => {
-                AuditEventKind::ProcessExit {
-                    pid,
-                    ppid,
-                    exit_code,
-                    duration_ms,
-                }
-            }
+            } => AuditEventKind::ProcessExit {
+                pid,
+                ppid,
+                exit_code,
+                duration_ms,
+            },
             other => other,
         };
 
