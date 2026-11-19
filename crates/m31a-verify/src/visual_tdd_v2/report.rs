@@ -59,11 +59,7 @@ impl VisualRegressionReport {
         md.push_str("|---|---|---|---|---|---|\n");
 
         for vr in &self.viewport_reports {
-            let status_badge = if vr.passed {
-                "✅ Pass"
-            } else {
-                "❌ Fail"
-            };
+            let status_badge = if vr.passed { "✅ Pass" } else { "❌ Fail" };
 
             let mismatch_str = vr
                 .comparison
@@ -74,7 +70,12 @@ impl VisualRegressionReport {
             let heatmap_str = vr
                 .heatmap_path
                 .as_ref()
-                .map(|p| p.file_name().unwrap_or_default().to_string_lossy().to_string())
+                .map(|p| {
+                    p.file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .to_string()
+                })
                 .unwrap_or_else(|| "None".to_string());
 
             md.push_str(&format!(
@@ -90,7 +91,10 @@ impl VisualRegressionReport {
         }
 
         if let Some(ref guidance) = self.self_healing_guidance {
-            md.push_str(&format!("\n### 🩹 Layout Self-Healing Guidance\n\n{}\n", guidance));
+            md.push_str(&format!(
+                "\n### 🩹 Layout Self-Healing Guidance\n\n{}\n",
+                guidance
+            ));
         }
 
         md

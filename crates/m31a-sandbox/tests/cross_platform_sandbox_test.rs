@@ -2,11 +2,10 @@
 
 use m31a_core::config::SandboxPolicy;
 use m31a_sandbox::appcontainer::{
-    AppContainerSandbox, WIN_CAPABILITY_INTERNET_CLIENT, WIN_CAPABILITY_PRIVATE_NETWORK_CLIENT_SERVER,
+    AppContainerSandbox, WIN_CAPABILITY_INTERNET_CLIENT,
+    WIN_CAPABILITY_PRIVATE_NETWORK_CLIENT_SERVER,
 };
-use m31a_sandbox::platform::{
-    PlatformCapabilityReport, SandboxError, SandboxPlatform,
-};
+use m31a_sandbox::platform::{PlatformCapabilityReport, SandboxError, SandboxPlatform};
 use m31a_sandbox::seatbelt::SeatbeltSandbox;
 use std::path::Path;
 
@@ -19,7 +18,10 @@ fn test_macos_seatbelt_profile_security_invariants() {
     assert!(ro_profile.contains("(version 1)"));
     assert!(ro_profile.contains("(deny default)"));
     assert!(ro_profile.contains("(deny file-write*)"));
-    assert!(ro_profile.contains("(deny network*)"), "ReadOnly policy must deny outbound network in Seatbelt");
+    assert!(
+        ro_profile.contains("(deny network*)"),
+        "ReadOnly policy must deny outbound network in Seatbelt"
+    );
     assert!(ro_profile.contains("allow file-read* (subpath \"/Users/dev/workspace\")"));
 
     // 2. Workspace-Write Policy: Allow workspace write, but deny sensitive metadata
@@ -34,7 +36,8 @@ fn test_macos_seatbelt_profile_security_invariants() {
     assert!(rw_profile.contains("/Users/dev/workspace/.aws"));
 
     // 3. DangerFullAccess: Unrestricted access
-    let full_profile = SeatbeltSandbox::generate_profile(SandboxPolicy::DangerFullAccess, ws).unwrap();
+    let full_profile =
+        SeatbeltSandbox::generate_profile(SandboxPolicy::DangerFullAccess, ws).unwrap();
     assert!(full_profile.contains("allow file-write* (subpath \"/\")"));
     assert!(full_profile.contains("allow sysctl-write"));
 }
@@ -56,22 +59,44 @@ fn test_windows_appcontainer_security_plan_invariants() {
     let ro_plan = ro_sandbox.plan();
     assert!(ro_plan.read_only_workspace);
     assert!(!ro_plan.network_enabled);
-    assert!(ro_plan.capability_sids.is_empty(), "ReadOnly AppContainer must have zero network capabilities");
-    assert!(ro_plan.protected_metadata_masks.contains(&".git".to_string()));
-    assert!(ro_plan.protected_metadata_masks.contains(&".env".to_string()));
+    assert!(
+        ro_plan.capability_sids.is_empty(),
+        "ReadOnly AppContainer must have zero network capabilities"
+    );
+    assert!(
+        ro_plan
+            .protected_metadata_masks
+            .contains(&".git".to_string())
+    );
+    assert!(
+        ro_plan
+            .protected_metadata_masks
+            .contains(&".env".to_string())
+    );
 
     // 2. WorkspaceWrite Policy: internetClient capability granted, write permitted
     let rw_sandbox = AppContainerSandbox::new(SandboxPolicy::WorkspaceWrite, ws).unwrap();
     let rw_plan = rw_sandbox.plan();
     assert!(!rw_plan.read_only_workspace);
     assert!(rw_plan.network_enabled);
-    assert_eq!(rw_plan.capability_sids, vec![WIN_CAPABILITY_INTERNET_CLIENT]);
+    assert_eq!(
+        rw_plan.capability_sids,
+        vec![WIN_CAPABILITY_INTERNET_CLIENT]
+    );
 
     // 3. DangerFullAccess: both internet and private network capabilities granted
     let full_sandbox = AppContainerSandbox::new(SandboxPolicy::DangerFullAccess, ws).unwrap();
     let full_plan = full_sandbox.plan();
-    assert!(full_plan.capability_sids.contains(&WIN_CAPABILITY_INTERNET_CLIENT.to_string()));
-    assert!(full_plan.capability_sids.contains(&WIN_CAPABILITY_PRIVATE_NETWORK_CLIENT_SERVER.to_string()));
+    assert!(
+        full_plan
+            .capability_sids
+            .contains(&WIN_CAPABILITY_INTERNET_CLIENT.to_string())
+    );
+    assert!(
+        full_plan
+            .capability_sids
+            .contains(&WIN_CAPABILITY_PRIVATE_NETWORK_CLIENT_SERVER.to_string())
+    );
 }
 
 #[test]
@@ -81,12 +106,18 @@ fn test_windows_appcontainer_icacls_permissions() {
 
     // Read-only ACL
     let ro_cmd = AppContainerSandbox::build_icacls_grant_command(sid, ws, true);
-    let ro_args: Vec<_> = ro_cmd.get_args().map(|a| a.to_string_lossy().to_string()).collect();
+    let ro_args: Vec<_> = ro_cmd
+        .get_args()
+        .map(|a| a.to_string_lossy().to_string())
+        .collect();
     assert!(ro_args.contains(&format!("*\\{}:(OI)(CI)(RX)", sid)));
 
     // Read-write ACL
     let rw_cmd = AppContainerSandbox::build_icacls_grant_command(sid, ws, false);
-    let rw_args: Vec<_> = rw_cmd.get_args().map(|a| a.to_string_lossy().to_string()).collect();
+    let rw_args: Vec<_> = rw_cmd
+        .get_args()
+        .map(|a| a.to_string_lossy().to_string())
+        .collect();
     assert!(rw_args.contains(&format!("*\\{}:(OI)(CI)(M)", sid)));
 }
 

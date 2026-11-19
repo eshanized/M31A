@@ -48,6 +48,8 @@ m31a-collaboration-templates = { path = "../m31a-collaboration-templates" }
 m31a-telemetry = { path = "../m31a-telemetry" }
 m31a-git-attribution = { path = "../m31a-git-attribution" }
 m31a-prompts = { path = "../m31a-prompts" }
+m31a-ebpf = { workspace = true }
+m31a-wasm = { workspace = true }
 m31a-features = { path = "../m31a-features" }
 m31a-extension-api = { path = "../m31a-extension-api" }
 reqwest.workspace = true

@@ -137,7 +137,10 @@ impl LayoutRepairCoordinator {
         }
 
         if let Some(ctx) = dom_context {
-            prompt.push_str(&format!("\n**DOM Elements in Affected Region:**\n```html\n{}\n```\n", ctx));
+            prompt.push_str(&format!(
+                "\n**DOM Elements in Affected Region:**\n```html\n{}\n```\n",
+                ctx
+            ));
         }
 
         prompt.push_str("\nPlease generate a minimal CSS/HTML patch that realigns elements without modifying unrelated layout rules.");

@@ -43,8 +43,11 @@ impl ViewportConfig {
 
     /// Viewport identifier used in filenames and baseline keys.
     pub fn id(&self) -> String {
-        format!("{}_{}x{}@{:.1}x", self.name, self.width, self.height, self.device_scale_factor)
-            .replace(['/', '\\', ' ', ':'], "_")
+        format!(
+            "{}_{}x{}@{:.1}x",
+            self.name, self.width, self.height, self.device_scale_factor
+        )
+        .replace(['/', '\\', ' ', ':'], "_")
     }
 }
 

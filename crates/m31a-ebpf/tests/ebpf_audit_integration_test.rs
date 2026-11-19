@@ -14,7 +14,9 @@ fn test_process_provenance_and_child_tracking() {
     let auditor = ExecutionAuditor::new(500);
 
     // Root execution registered
-    auditor.correlator().register_execution(4001, "turn-999", "sandbox-bwrap-1", "bash build.sh");
+    auditor
+        .correlator()
+        .register_execution(4001, "turn-999", "sandbox-bwrap-1", "bash build.sh");
 
     // Root executes child
     auditor.ingest_event(AuditEventKind::ProcessExec {
@@ -31,7 +33,11 @@ fn test_process_provenance_and_child_tracking() {
         ppid: 4001,
         uid: 1000,
         binary_path: "/usr/bin/rustc".to_string(),
-        args: vec!["rustc".to_string(), "main.rs".to_string(), "--token=super-secret".to_string()],
+        args: vec![
+            "rustc".to_string(),
+            "main.rs".to_string(),
+            "--token=super-secret".to_string(),
+        ],
     });
 
     // Query events by turn_id

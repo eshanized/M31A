@@ -215,14 +215,20 @@ mod tests {
     #[test]
     fn test_auditor_ingest_redact_and_query() {
         let auditor = ExecutionAuditor::new(100);
-        auditor.correlator().register_execution(2000, "turn-101", "sb-sandbox", "cargo build");
+        auditor
+            .correlator()
+            .register_execution(2000, "turn-101", "sb-sandbox", "cargo build");
 
         auditor.ingest_event(AuditEventKind::ProcessExec {
             pid: 2000,
             ppid: 1,
             uid: 1000,
             binary_path: "/usr/bin/cargo".to_string(),
-            args: vec!["cargo".to_string(), "build".to_string(), "--token=secret-token".to_string()],
+            args: vec![
+                "cargo".to_string(),
+                "build".to_string(),
+                "--token=secret-token".to_string(),
+            ],
         });
 
         auditor.ingest_event(AuditEventKind::FileOpen {

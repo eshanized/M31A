@@ -25,7 +25,9 @@ impl AuditBenchmarker {
     /// Executes a benchmark run simulating high-frequency process and filesystem events.
     pub fn run_benchmark(iterations: usize, ring_capacity: usize) -> AuditBenchmarkReport {
         let auditor = ExecutionAuditor::new(ring_capacity);
-        auditor.correlator().register_execution(5000, "bench-turn", "bench-sandbox", "benchmark");
+        auditor
+            .correlator()
+            .register_execution(5000, "bench-turn", "bench-sandbox", "benchmark");
 
         let start = Instant::now();
 

@@ -44,12 +44,18 @@ impl HostContext {
         if is_write {
             if !self.manifest.can_write_path(clean) {
                 return Err(WasmError::UnauthorizedCapability {
-                    capability: format!("Filesystem write permission not declared for path '{}'", clean),
+                    capability: format!(
+                        "Filesystem write permission not declared for path '{}'",
+                        clean
+                    ),
                 });
             }
         } else if !self.manifest.can_read_path(clean) {
             return Err(WasmError::UnauthorizedCapability {
-                capability: format!("Filesystem read permission not declared for path '{}'", clean),
+                capability: format!(
+                    "Filesystem read permission not declared for path '{}'",
+                    clean
+                ),
             });
         }
 
@@ -68,7 +74,11 @@ impl HostContext {
         let len = len as usize;
         let data = memory.data(caller);
 
-        if ptr.checked_add(len).map(|end| end > data.len()).unwrap_or(true) {
+        if ptr
+            .checked_add(len)
+            .map(|end| end > data.len())
+            .unwrap_or(true)
+        {
             return Err(WasmError::BufferOutOfBounds {
                 offset: ptr,
                 len,
@@ -93,7 +103,11 @@ impl HostContext {
         let len = bytes.len();
         let mem_size = memory.data(&mut *caller).len();
 
-        if ptr.checked_add(len).map(|end| end > mem_size).unwrap_or(true) {
+        if ptr
+            .checked_add(len)
+            .map(|end| end > mem_size)
+            .unwrap_or(true)
+        {
             return Err(WasmError::BufferOutOfBounds {
                 offset: ptr,
                 len,

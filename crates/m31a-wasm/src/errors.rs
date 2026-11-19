@@ -13,13 +13,19 @@ pub enum WasmError {
     #[error("WebAssembly ABI version mismatch: expected {expected}, module declared {got}")]
     AbiVersionMismatch { expected: u32, got: u32 },
 
-    #[error("Execution terminated: fuel limit exhausted ({consumed}/{limit} fuel units consumed). Possible infinite loop in guest.")]
+    #[error(
+        "Execution terminated: fuel limit exhausted ({consumed}/{limit} fuel units consumed). Possible infinite loop in guest."
+    )]
     FuelExhausted { consumed: u64, limit: u64 },
 
-    #[error("Memory allocation ceiling exceeded: guest requested {pages} pages, maximum allowed is {max_pages} pages")]
+    #[error(
+        "Memory allocation ceiling exceeded: guest requested {pages} pages, maximum allowed is {max_pages} pages"
+    )]
     MemoryLimitExceeded { pages: u32, max_pages: u32 },
 
-    #[error("Unauthorized capability violation: guest attempted '{capability}' without declared permission in manifest")]
+    #[error(
+        "Unauthorized capability violation: guest attempted '{capability}' without declared permission in manifest"
+    )]
     UnauthorizedCapability { capability: String },
 
     #[error("Host call '{call}' timed out after {timeout_ms}ms")]
@@ -28,7 +34,9 @@ pub enum WasmError {
     #[error("WebAssembly guest trap: {0}")]
     GuestTrap(String),
 
-    #[error("Guest buffer access out of bounds: offset {offset}, length {len}, memory size {mem_size}")]
+    #[error(
+        "Guest buffer access out of bounds: offset {offset}, length {len}, memory size {mem_size}"
+    )]
     BufferOutOfBounds {
         offset: usize,
         len: usize,

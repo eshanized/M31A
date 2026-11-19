@@ -347,7 +347,9 @@ impl SandboxRunner {
             SandboxBackend::AppContainer => {
                 let appcontainer = AppContainerSandbox::new(policy, cwd)?;
                 let parts: Vec<String> = command.to_tokens();
-                appcontainer.execute(&parts, cwd, timeout, &hardened_env).await
+                appcontainer
+                    .execute(&parts, cwd, timeout, &hardened_env)
+                    .await
             }
             SandboxBackend::Mxc => {
                 let mxc = MxcSandbox::new(policy, cwd)?;

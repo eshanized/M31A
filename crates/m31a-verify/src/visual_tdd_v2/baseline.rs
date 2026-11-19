@@ -19,7 +19,10 @@ pub enum BaselineStatus {
     /// No baseline snapshot has been approved yet
     Missing,
     /// Baseline file on disk does not match the manifest SHA-256 hash (tampering/corruption)
-    IntegrityMismatch { expected_sha256: String, actual_sha256: String },
+    IntegrityMismatch {
+        expected_sha256: String,
+        actual_sha256: String,
+    },
     /// Manifest references a file that does not exist on disk
     FileNotFound { path: PathBuf },
 }
@@ -265,6 +268,11 @@ mod tests {
         // Fetching tampered image must fail-closed
         let fetch_res = store.get_baseline_image("login_flow", &vp);
         assert!(fetch_res.is_err());
-        assert!(fetch_res.unwrap_err().to_string().contains("integrity violation"));
+        assert!(
+            fetch_res
+                .unwrap_err()
+                .to_string()
+                .contains("integrity violation")
+        );
     }
 }

@@ -21,19 +21,25 @@ impl SandboxPlatform {
         let mut diagnostics = Vec::new();
 
         let bwrap_available = if cfg!(target_os = "linux") {
-            let available = which::which("bwrap").ok().filter(|path| {
-                std::process::Command::new(path)
-                    .args(["--ro-bind", "/", "/", "/bin/true"])
-                    .stdout(std::process::Stdio::null())
-                    .stderr(std::process::Stdio::null())
-                    .status()
-                    .map(|s| s.success())
-                    .unwrap_or(false)
-            }).is_some();
+            let available = which::which("bwrap")
+                .ok()
+                .filter(|path| {
+                    std::process::Command::new(path)
+                        .args(["--ro-bind", "/", "/", "/bin/true"])
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::null())
+                        .status()
+                        .map(|s| s.success())
+                        .unwrap_or(false)
+                })
+                .is_some();
             if available {
                 diagnostics.push("Functional Bubblewrap container engine detected.".to_string());
             } else {
-                diagnostics.push("Bubblewrap unavailable or unprivileged user namespaces restricted.".to_string());
+                diagnostics.push(
+                    "Bubblewrap unavailable or unprivileged user namespaces restricted."
+                        .to_string(),
+                );
             }
             available
         } else {
@@ -57,7 +63,9 @@ impl SandboxPlatform {
             if available {
                 diagnostics.push("Windows Win32 AppContainer isolation available.".to_string());
             } else {
-                diagnostics.push("Windows AppContainer API not supported on this Windows release.".to_string());
+                diagnostics.push(
+                    "Windows AppContainer API not supported on this Windows release.".to_string(),
+                );
             }
             available
         } else {
@@ -102,7 +110,9 @@ impl SandboxPlatform {
     /// no functional kernel sandbox boundary exists on the host, this returns
     /// `Err(SandboxError::IsolationUnavailable)`. Execution must NEVER silently
     /// fall back to unsandboxed host execution.
-    pub fn assert_policy_enforceable(policy: SandboxPolicy) -> Result<SandboxBackendKind, SandboxError> {
+    pub fn assert_policy_enforceable(
+        policy: SandboxPolicy,
+    ) -> Result<SandboxBackendKind, SandboxError> {
         let caps = Self::probe();
 
         if policy == SandboxPolicy::DangerFullAccess {
@@ -116,7 +126,10 @@ impl SandboxPlatform {
                 policy,
                 reason: format!(
                     "No functional sandbox backend available on host OS '{}' (bwrap={}, seatbelt={}, appcontainer={}). Unsandboxed fallback rejected by fail-closed security policy.",
-                    caps.os, caps.bwrap_available, caps.seatbelt_available, caps.appcontainer_available
+                    caps.os,
+                    caps.bwrap_available,
+                    caps.seatbelt_available,
+                    caps.appcontainer_available
                 ),
             })
         }
@@ -133,7 +146,9 @@ mod tests {
         assert!(!caps.os.is_empty());
 
         // DangerFullAccess should always be allowed
-        assert!(SandboxPlatform::assert_policy_enforceable(SandboxPolicy::DangerFullAccess).is_ok());
+        assert!(
+            SandboxPlatform::assert_policy_enforceable(SandboxPolicy::DangerFullAccess).is_ok()
+        );
 
         // If host has sandbox, ReadOnly is allowed; if not, must fail closed
         let ro_res = SandboxPlatform::assert_policy_enforceable(SandboxPolicy::ReadOnly);

@@ -24,6 +24,9 @@ m31a-watcher = { path = "../m31a-watcher" }
 m31a-mcp = { path = "../m31a-mcp" }
 m31a-features = { path = "../m31a-features" }
 m31a-elicitation = { path = "../m31a-elicitation" }
+m31a-ebpf = { workspace = true }
+m31a-wasm = { workspace = true }
+m31a-verify = { path = "../m31a-verify" }
 
 tokio.workspace = true
 tokio-util.workspace = true

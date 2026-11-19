@@ -7,22 +7,19 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum SandboxError {
-    #[error("Sandbox isolation unavailable for policy '{policy:?}': {reason}. Security policy is fail-closed.")]
+    #[error(
+        "Sandbox isolation unavailable for policy '{policy:?}': {reason}. Security policy is fail-closed."
+    )]
     IsolationUnavailable {
         policy: SandboxPolicy,
         reason: String,
     },
 
     #[error("Sandbox backend '{backend}' failed: {details}")]
-    BackendFailure {
-        backend: String,
-        details: String,
-    },
+    BackendFailure { backend: String, details: String },
 
     #[error("Sandboxed command execution timed out after {duration_ms}ms")]
-    Timeout {
-        duration_ms: u64,
-    },
+    Timeout { duration_ms: u64 },
 
     #[error("Sandboxed execution cancelled by caller")]
     Cancelled,

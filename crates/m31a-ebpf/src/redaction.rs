@@ -15,15 +15,14 @@ impl SecretRedactor {
         let lower = arg.to_ascii_lowercase();
 
         // Flag patterns: --token=..., --password=..., -p=...
-        if lower.starts_with("--token=")
+        if (lower.starts_with("--token=")
             || lower.starts_with("--password=")
             || lower.starts_with("--api-key=")
             || lower.starts_with("--secret=")
-            || lower.starts_with("--auth=")
+            || lower.starts_with("--auth="))
+            && let Some((flag, _val)) = arg.split_once('=')
         {
-            if let Some((flag, _val)) = arg.split_once('=') {
-                return format!("{}={}", flag, Self::REDACTED_MARKER);
-            }
+            return format!("{}={}", flag, Self::REDACTED_MARKER);
         }
 
         // Common bearer token patterns
@@ -87,7 +86,10 @@ impl SecretRedactor {
                 || comp_str == ".aws"
                 || comp_str == ".m31a-vault"
             {
-                return format!("[PROTECTED_PATH]/{}", path.file_name().unwrap_or_default().to_string_lossy());
+                return format!(
+                    "[PROTECTED_PATH]/{}",
+                    path.file_name().unwrap_or_default().to_string_lossy()
+                );
             }
         }
         path_str.to_string()
@@ -122,8 +124,14 @@ mod tests {
         let p2 = "/workspace/.env.production";
         let p3 = "/workspace/src/main.rs";
 
-        assert_eq!(SecretRedactor::redact_path(p1), "[PROTECTED_PATH]/id_ed25519");
-        assert_eq!(SecretRedactor::redact_path(p2), "[PROTECTED_PATH]/.env.production");
+        assert_eq!(
+            SecretRedactor::redact_path(p1),
+            "[PROTECTED_PATH]/id_ed25519"
+        );
+        assert_eq!(
+            SecretRedactor::redact_path(p2),
+            "[PROTECTED_PATH]/.env.production"
+        );
         assert_eq!(SecretRedactor::redact_path(p3), "/workspace/src/main.rs");
     }
 }

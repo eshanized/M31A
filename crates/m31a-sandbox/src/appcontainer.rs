@@ -120,9 +120,17 @@ impl AppContainerSandbox {
     }
 
     /// Grants AppContainer SID filesystem ACLs to the target workspace path.
-    pub fn build_icacls_grant_command(appcontainer_sid: &str, workspace: &Path, read_only: bool) -> Command {
+    pub fn build_icacls_grant_command(
+        appcontainer_sid: &str,
+        workspace: &Path,
+        read_only: bool,
+    ) -> Command {
         let mut cmd = Command::new("icacls");
-        let perm = if read_only { "(OI)(CI)(RX)" } else { "(OI)(CI)(M)" };
+        let perm = if read_only {
+            "(OI)(CI)(RX)"
+        } else {
+            "(OI)(CI)(M)"
+        };
         let grant_arg = format!("*\\{}:{}", appcontainer_sid, perm);
         cmd.arg(workspace.to_string_lossy().to_string())
             .arg("/grant")
@@ -153,7 +161,8 @@ impl AppContainerSandbox {
 
         #[cfg(target_os = "windows")]
         {
-            self.execute_windows_appcontainer(command, working_dir, _timeout, extra_env).await
+            self.execute_windows_appcontainer(command, working_dir, _timeout, extra_env)
+                .await
         }
     }
 
@@ -223,7 +232,10 @@ mod tests {
         let ws = Path::new("C:\\workspace");
         let sid = "S-1-15-2-12345-67890";
         let cmd = AppContainerSandbox::build_icacls_grant_command(sid, ws, false);
-        let args: Vec<_> = cmd.get_args().map(|a| a.to_string_lossy().to_string()).collect();
+        let args: Vec<_> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect();
         assert!(args.contains(&format!("*\\{}:(OI)(CI)(M)", sid)));
     }
 }

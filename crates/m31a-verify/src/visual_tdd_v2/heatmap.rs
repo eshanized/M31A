@@ -87,8 +87,9 @@ impl VisualHeatmap {
     /// Saves heatmap image to a PNG file on disk.
     pub fn save_heatmap(heatmap: &RgbaImage, destination: &Path) -> Result<()> {
         if let Some(parent) = destination.parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("Failed to create directory for heatmap at {:?}", parent))?;
+            std::fs::create_dir_all(parent).with_context(|| {
+                format!("Failed to create directory for heatmap at {:?}", parent)
+            })?;
         }
         heatmap
             .save_with_format(destination, ImageFormat::Png)

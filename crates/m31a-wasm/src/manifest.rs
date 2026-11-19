@@ -40,8 +40,8 @@ pub struct WasmResourceLimits {
 impl Default for WasmResourceLimits {
     fn default() -> Self {
         Self {
-            max_memory_pages: 128,  // 8 MiB default ceiling
-            max_fuel: 2_000_000,   // 2M instructions default
+            max_memory_pages: 128,         // 8 MiB default ceiling
+            max_fuel: 2_000_000,           // 2M instructions default
             execution_deadline_ms: 10_000, // 10s timeout
         }
     }
@@ -76,7 +76,9 @@ impl WasmPluginManifest {
 
     pub fn validate(&self) -> Result<(), WasmError> {
         if self.name.trim().is_empty() {
-            return Err(WasmError::InvalidManifest("Plugin name cannot be empty".to_string()));
+            return Err(WasmError::InvalidManifest(
+                "Plugin name cannot be empty".to_string(),
+            ));
         }
         if self.abi_version != M31A_WASM_ABI_VERSION {
             return Err(WasmError::AbiVersionMismatch {
@@ -91,7 +93,9 @@ impl WasmPluginManifest {
             )));
         }
         if self.limits.max_fuel == 0 {
-            return Err(WasmError::InvalidManifest("max_fuel must be greater than zero".to_string()));
+            return Err(WasmError::InvalidManifest(
+                "max_fuel must be greater than zero".to_string(),
+            ));
         }
         Ok(())
     }
@@ -189,6 +193,12 @@ description = "Invalid ABI"
 "#;
 
         let err = WasmPluginManifest::parse_toml(toml_str).unwrap_err();
-        assert!(matches!(err, WasmError::AbiVersionMismatch { expected: 1, got: 999 }));
+        assert!(matches!(
+            err,
+            WasmError::AbiVersionMismatch {
+                expected: 1,
+                got: 999
+            }
+        ));
     }
 }

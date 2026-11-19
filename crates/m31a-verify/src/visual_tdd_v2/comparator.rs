@@ -363,13 +363,9 @@ mod tests {
         // Mask the 10x10 square
         let masks = MaskSet::new().with_rect(45, 45, 10, 10);
 
-        let (outcome, _) = VisualComparator::compare_images(
-            &img1,
-            &img2,
-            &masks,
-            &ComparisonThreshold::strict(),
-        )
-        .unwrap();
+        let (outcome, _) =
+            VisualComparator::compare_images(&img1, &img2, &masks, &ComparisonThreshold::strict())
+                .unwrap();
 
         assert!(outcome.passed);
         assert_eq!(outcome.mismatched_pixels, 0);

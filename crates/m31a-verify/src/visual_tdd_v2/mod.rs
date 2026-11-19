@@ -14,9 +14,7 @@ pub mod repair;
 pub mod report;
 
 pub use baseline::{BaselineManifest, BaselineRecord, BaselineStatus, BaselineStore};
-pub use comparator::{
-    ComparisonOutcome, ComparisonThreshold, DiffBoundingBox, VisualComparator,
-};
+pub use comparator::{ComparisonOutcome, ComparisonThreshold, DiffBoundingBox, VisualComparator};
 pub use heatmap::{HeatmapOptions, VisualHeatmap};
 pub use masking::{MaskRule, MaskSet, RectRegion};
 pub use multi_res::{ViewportConfig, ViewportPreset};
@@ -180,7 +178,8 @@ impl VisualTddV2Runner {
 
             // 4. Capture screenshot
             let vp_id = vp.id();
-            let shot_path = output_dir.join(format!("{}_{}.png", scenario.name.replace(' ', "_"), vp_id));
+            let shot_path =
+                output_dir.join(format!("{}_{}.png", scenario.name.replace(' ', "_"), vp_id));
             let shot_res = session.screenshot(Some(&shot_path)).await;
 
             let (shot_bytes, screenshot_saved_path) = match shot_res {
@@ -194,103 +193,116 @@ impl VisualTddV2Runner {
             // 5. Baseline Evaluation & Image Comparison
             let baseline_status = baseline_store.check_baseline_status(&scenario.name, vp)?;
 
-            let (vp_passed, failure_reason, comparison_outcome, heatmap_saved_path) = match baseline_status {
-                BaselineStatus::Missing => {
-                    all_passed = false;
-                    (
-                        false,
-                        Some(format!(
-                            "Baseline snapshot missing for viewport '{}'. Review and approve captured screenshot to establish golden baseline.",
-                            vp_id
-                        )),
-                        None,
-                        None,
-                    )
-                }
-                BaselineStatus::IntegrityMismatch { ref expected_sha256, ref actual_sha256 } => {
-                    all_passed = false;
-                    (
-                        false,
-                        Some(format!(
-                            "Baseline integrity check failed for viewport '{}': manifest expected SHA-256 {} but file has {}",
-                            vp_id, expected_sha256, actual_sha256
-                        )),
-                        None,
-                        None,
-                    )
-                }
-                BaselineStatus::FileNotFound { ref path } => {
-                    all_passed = false;
-                    (
-                        false,
-                        Some(format!(
-                            "Baseline file registered in manifest not found at {:?}",
-                            path
-                        )),
-                        None,
-                        None,
-                    )
-                }
-                BaselineStatus::Valid => {
-                    if let Some(ref current_bytes) = shot_bytes {
-                        let golden_bytes = baseline_store
-                            .get_baseline_image(&scenario.name, vp)?
-                            .expect("Valid baseline must have image bytes");
-
-                        match VisualComparator::compare_bytes(
-                            &golden_bytes,
-                            current_bytes,
-                            &scenario.masks,
-                            &scenario.threshold,
-                        ) {
-                            Ok((outcome, diff_img)) => {
-                                let mut heat_path_saved = None;
-                                let fail_reason = outcome.error_details.clone();
-                                if !outcome.passed {
-                                    all_passed = false;
-
-                                    // Generate and save difference heatmap
-                                    let heatmap = VisualHeatmap::annotate_heatmap(
-                                        diff_img,
-                                        &outcome,
-                                        &HeatmapOptions::default(),
-                                    );
-                                    let heat_path = output_dir.join(format!(
-                                        "{}_{}_heatmap.png",
-                                        scenario.name.replace(' ', "_"),
-                                        vp_id
-                                    ));
-                                    if VisualHeatmap::save_heatmap(&heatmap, &heat_path).is_ok() {
-                                        heat_path_saved = Some(heat_path);
-                                    }
-
-                                    // Collect self-healing guidance
-                                    let prompt = LayoutRepairCoordinator::generate_repair_prompt(
-                                        &scenario.name,
-                                        &vp_id,
-                                        &outcome,
-                                        None,
-                                    );
-                                    aggregated_repair_prompts.push(prompt);
-                                }
-                                (outcome.passed, fail_reason, Some(outcome), heat_path_saved)
-                            }
-                            Err(e) => {
-                                all_passed = false;
-                                (false, Some(format!("Image comparison failed: {e}")), None, None)
-                            }
-                        }
-                    } else {
+            let (vp_passed, failure_reason, comparison_outcome, heatmap_saved_path) =
+                match baseline_status {
+                    BaselineStatus::Missing => {
                         all_passed = false;
                         (
                             false,
-                            Some("Screenshot capture failed or browser unavailable".to_string()),
+                            Some(format!(
+                                "Baseline snapshot missing for viewport '{}'. Review and approve captured screenshot to establish golden baseline.",
+                                vp_id
+                            )),
                             None,
                             None,
                         )
                     }
-                }
-            };
+                    BaselineStatus::IntegrityMismatch {
+                        ref expected_sha256,
+                        ref actual_sha256,
+                    } => {
+                        all_passed = false;
+                        (
+                            false,
+                            Some(format!(
+                                "Baseline integrity check failed for viewport '{}': manifest expected SHA-256 {} but file has {}",
+                                vp_id, expected_sha256, actual_sha256
+                            )),
+                            None,
+                            None,
+                        )
+                    }
+                    BaselineStatus::FileNotFound { ref path } => {
+                        all_passed = false;
+                        (
+                            false,
+                            Some(format!(
+                                "Baseline file registered in manifest not found at {:?}",
+                                path
+                            )),
+                            None,
+                            None,
+                        )
+                    }
+                    BaselineStatus::Valid => {
+                        if let Some(ref current_bytes) = shot_bytes {
+                            let golden_bytes = baseline_store
+                                .get_baseline_image(&scenario.name, vp)?
+                                .expect("Valid baseline must have image bytes");
+
+                            match VisualComparator::compare_bytes(
+                                &golden_bytes,
+                                current_bytes,
+                                &scenario.masks,
+                                &scenario.threshold,
+                            ) {
+                                Ok((outcome, diff_img)) => {
+                                    let mut heat_path_saved = None;
+                                    let fail_reason = outcome.error_details.clone();
+                                    if !outcome.passed {
+                                        all_passed = false;
+
+                                        // Generate and save difference heatmap
+                                        let heatmap = VisualHeatmap::annotate_heatmap(
+                                            diff_img,
+                                            &outcome,
+                                            &HeatmapOptions::default(),
+                                        );
+                                        let heat_path = output_dir.join(format!(
+                                            "{}_{}_heatmap.png",
+                                            scenario.name.replace(' ', "_"),
+                                            vp_id
+                                        ));
+                                        if VisualHeatmap::save_heatmap(&heatmap, &heat_path).is_ok()
+                                        {
+                                            heat_path_saved = Some(heat_path);
+                                        }
+
+                                        // Collect self-healing guidance
+                                        let prompt =
+                                            LayoutRepairCoordinator::generate_repair_prompt(
+                                                &scenario.name,
+                                                &vp_id,
+                                                &outcome,
+                                                None,
+                                            );
+                                        aggregated_repair_prompts.push(prompt);
+                                    }
+                                    (outcome.passed, fail_reason, Some(outcome), heat_path_saved)
+                                }
+                                Err(e) => {
+                                    all_passed = false;
+                                    (
+                                        false,
+                                        Some(format!("Image comparison failed: {e}")),
+                                        None,
+                                        None,
+                                    )
+                                }
+                            }
+                        } else {
+                            all_passed = false;
+                            (
+                                false,
+                                Some(
+                                    "Screenshot capture failed or browser unavailable".to_string(),
+                                ),
+                                None,
+                                None,
+                            )
+                        }
+                    }
+                };
 
             viewport_reports.push(ViewportReport {
                 viewport: vp.clone(),

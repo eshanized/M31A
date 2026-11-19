@@ -164,7 +164,10 @@ fn test_baseline_cryptographic_integrity_and_tampering_detection() {
 
     let tampered_status = store.check_baseline_status("dashboard_test", &vp).unwrap();
     match tampered_status {
-        BaselineStatus::IntegrityMismatch { expected_sha256, actual_sha256 } => {
+        BaselineStatus::IntegrityMismatch {
+            expected_sha256,
+            actual_sha256,
+        } => {
             assert_eq!(expected_sha256, record.sha256_hash);
             assert_ne!(actual_sha256, record.sha256_hash);
         }

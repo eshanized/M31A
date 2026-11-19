@@ -56,11 +56,7 @@ pub struct AuditRecord {
 }
 
 impl AuditRecord {
-    pub fn new(
-        turn_id: Option<String>,
-        sandbox_id: Option<String>,
-        kind: AuditEventKind,
-    ) -> Self {
+    pub fn new(turn_id: Option<String>, sandbox_id: Option<String>, kind: AuditEventKind) -> Self {
         let now_ns = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()

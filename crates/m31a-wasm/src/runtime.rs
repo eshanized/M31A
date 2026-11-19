@@ -25,9 +25,9 @@ impl WasmPluginInstance {
 
     /// Invokes a declared tool exported by the WebAssembly plugin.
     pub fn call_tool(&mut self, tool_name: &str, args_json: &str) -> Result<String, WasmError> {
-        let entry = self
-            .entry_tool_call
-            .ok_or_else(|| WasmError::ModuleValidationFailed("Plugin does not export 'm31a_tool_call'".to_string()))?;
+        let entry = self.entry_tool_call.ok_or_else(|| {
+            WasmError::ModuleValidationFailed("Plugin does not export 'm31a_tool_call'".to_string())
+        })?;
 
         // 1. Write tool_name and args_json into guest memory buffer (e.g. at offset 1024 and 2048)
         let name_bytes = tool_name.as_bytes();
@@ -156,16 +156,21 @@ impl WasmRuntime {
             .define(
                 "m31a_host",
                 "host_log",
-                wasmi::Func::wrap(&mut store, |caller: Caller<'_, HostContext>, level: i32, ptr: i32, len: i32| {
-                    if let Some(mem) = caller.data().memory {
-                        if let Ok(msg) = HostContext::read_guest_string(&mem, &caller, ptr as u32, len as u32) {
+                wasmi::Func::wrap(
+                    &mut store,
+                    |caller: Caller<'_, HostContext>, level: i32, ptr: i32, len: i32| {
+                        if let Some(mem) = caller.data().memory
+                            && let Ok(msg) = HostContext::read_guest_string(
+                                &mem, &caller, ptr as u32, len as u32,
+                            )
+                        {
                             match level {
                                 1 => warn!(target: "wasm_guest", "{}", msg),
                                 _ => debug!(target: "wasm_guest", "{}", msg),
                             }
                         }
-                    }
-                }),
+                    },
+                ),
             )
             .map_err(|e| WasmError::Internal(anyhow::anyhow!("Failed to link host_log: {e}")))?;
 
@@ -176,14 +181,24 @@ impl WasmRuntime {
                 "host_fs_read",
                 wasmi::Func::wrap(
                     &mut store,
-                    |mut caller: Caller<'_, HostContext>, path_ptr: i32, path_len: i32, out_ptr: i32, max_len: i32| -> i32 {
+                    |mut caller: Caller<'_, HostContext>,
+                     path_ptr: i32,
+                     path_len: i32,
+                     out_ptr: i32,
+                     max_len: i32|
+                     -> i32 {
                         caller.data_mut().host_calls_count += 1;
                         let mem = match caller.data().memory {
                             Some(m) => m,
                             None => return -1,
                         };
 
-                        let path_str = match HostContext::read_guest_string(&mem, &caller, path_ptr as u32, path_len as u32) {
+                        let path_str = match HostContext::read_guest_string(
+                            &mem,
+                            &caller,
+                            path_ptr as u32,
+                            path_len as u32,
+                        ) {
                             Ok(s) => s,
                             Err(_) => return -2,
                         };
@@ -202,7 +217,14 @@ impl WasmRuntime {
                             return -5; // Buffer too small
                         }
 
-                        if HostContext::write_guest_bytes(&mem, &mut caller, out_ptr as u32, &content).is_err() {
+                        if HostContext::write_guest_bytes(
+                            &mem,
+                            &mut caller,
+                            out_ptr as u32,
+                            &content,
+                        )
+                        .is_err()
+                        {
                             return -6;
                         }
 
@@ -210,17 +232,21 @@ impl WasmRuntime {
                     },
                 ),
             )
-            .map_err(|e| WasmError::Internal(anyhow::anyhow!("Failed to link host_fs_read: {e}")))?;
+            .map_err(|e| {
+                WasmError::Internal(anyhow::anyhow!("Failed to link host_fs_read: {e}"))
+            })?;
 
         // Instantiate and start
         let instance = linker
             .instantiate_and_start(&mut store, &module)
-            .map_err(|e| WasmError::ModuleValidationFailed(format!("Failed to instantiate module: {e}")))?;
+            .map_err(|e| {
+                WasmError::ModuleValidationFailed(format!("Failed to instantiate module: {e}"))
+            })?;
 
         // Extract linear memory
-        let memory = instance
-            .get_memory(&store, "memory")
-            .ok_or_else(|| WasmError::ModuleValidationFailed("Guest module does not export 'memory'".to_string()))?;
+        let memory = instance.get_memory(&store, "memory").ok_or_else(|| {
+            WasmError::ModuleValidationFailed("Guest module does not export 'memory'".to_string())
+        })?;
 
         // Enforce memory page limits
         let initial_pages = memory.size(&store) as u32;
@@ -233,7 +259,9 @@ impl WasmRuntime {
 
         store.data_mut().memory = Some(memory);
 
-        let entry_tool_call = instance.get_typed_func::<(i32, i32, i32, i32), i32>(&store, "m31a_tool_call").ok();
+        let entry_tool_call = instance
+            .get_typed_func::<(i32, i32, i32, i32), i32>(&store, "m31a_tool_call")
+            .ok();
 
         Ok(WasmPluginInstance {
             manifest,

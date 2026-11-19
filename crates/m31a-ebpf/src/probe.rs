@@ -15,20 +15,13 @@ pub enum BpfCapabilityStatus {
         btf_available: bool,
     },
     /// Unprivileged eBPF is disabled by kernel sysctl (`/proc/sys/kernel/unprivileged_bpf_disabled`)
-    DisabledByKernelSysctl {
-        sysctl_value: i32,
-    },
+    DisabledByKernelSysctl { sysctl_value: i32 },
     /// Process lacks `CAP_BPF` or `CAP_SYS_ADMIN` required to load tracing programs
-    PrivilegeRequired {
-        reason: String,
-    },
+    PrivilegeRequired { reason: String },
     /// Kernel BTF debugging information (`/sys/kernel/btf/vmlinux`) is not present
     BtfUnavailable,
     /// Operating system is not Linux or kernel is older than 4.18
-    UnsupportedPlatform {
-        platform: String,
-        details: String,
-    },
+    UnsupportedPlatform { platform: String, details: String },
 }
 
 impl BpfCapabilityStatus {
@@ -38,8 +31,14 @@ impl BpfCapabilityStatus {
 
     pub fn description(&self) -> String {
         match self {
-            Self::Supported { kernel_version, btf_available } => {
-                format!("eBPF tracing fully supported (Kernel: {}, BTF: {})", kernel_version, btf_available)
+            Self::Supported {
+                kernel_version,
+                btf_available,
+            } => {
+                format!(
+                    "eBPF tracing fully supported (Kernel: {}, BTF: {})",
+                    kernel_version, btf_available
+                )
             }
             Self::DisabledByKernelSysctl { sysctl_value } => {
                 format!(
@@ -51,10 +50,14 @@ impl BpfCapabilityStatus {
                 format!("eBPF auditing requires elevated capability: {reason}")
             }
             Self::BtfUnavailable => {
-                "eBPF BTF type metadata (/sys/kernel/btf/vmlinux) unavailable on this kernel.".to_string()
+                "eBPF BTF type metadata (/sys/kernel/btf/vmlinux) unavailable on this kernel."
+                    .to_string()
             }
             Self::UnsupportedPlatform { platform, details } => {
-                format!("eBPF execution auditing unavailable on {}: {}", platform, details)
+                format!(
+                    "eBPF execution auditing unavailable on {}: {}",
+                    platform, details
+                )
             }
         }
     }
@@ -72,7 +75,8 @@ impl BpfProbe {
         {
             BpfCapabilityStatus::UnsupportedPlatform {
                 platform: std::env::consts::OS.to_string(),
-                details: "eBPF kernel-level auditing is only supported on Linux kernels".to_string(),
+                details: "eBPF kernel-level auditing is only supported on Linux kernels"
+                    .to_string(),
             }
         }
 
@@ -93,9 +97,7 @@ impl BpfProbe {
                 // If unprivileged BPF is disabled and process is not root (UID != 0)
                 let uid = unsafe { libc::getuid() };
                 if uid != 0 {
-                    return BpfCapabilityStatus::DisabledByKernelSysctl {
-                        sysctl_value: val,
-                    };
+                    return BpfCapabilityStatus::DisabledByKernelSysctl { sysctl_value: val };
                 }
             }
         }
