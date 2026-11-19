@@ -75,11 +75,19 @@ fn test_bounded_ring_buffer_backpressure_and_overflow_visibility() {
 
     let summary = auditor.summary();
     assert_eq!(summary.total_events_emitted, 20);
-    assert!(summary.total_events_lost > 0);
-    assert!(summary.drop_rate_percentage > 0.0);
+    assert_eq!(summary.total_events_lost, 15);
+    assert_eq!(summary.drop_rate_percentage, 75.0);
 
     // Buffer should remain bounded at capacity
-    assert!(summary.queued_events_count <= 5);
+    assert_eq!(summary.queued_events_count, 5);
+
+    // Overflow visibility: an overflow event must be present in the ring buffer
+    let records = auditor.query_events(&m31a_ebpf::AuditQueryFilter::default());
+    assert!(
+        records
+            .iter()
+            .any(|r| matches!(r.kind, AuditEventKind::RingBufferOverflow { .. }))
+    );
 }
 
 #[test]

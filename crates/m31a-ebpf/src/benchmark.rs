@@ -32,24 +32,32 @@ impl AuditBenchmarker {
         let start = Instant::now();
 
         for i in 0..iterations {
-            let pid = 5000 + (i % 50) as u32;
-            if i % 3 == 0 {
+            let child_pid = 5001 + (i % 50) as u32;
+            if i % 4 == 0 {
+                auditor.ingest_event(AuditEventKind::ProcessExec {
+                    pid: child_pid,
+                    ppid: 5000,
+                    uid: 1000,
+                    binary_path: "/bin/worker".to_string(),
+                    args: vec!["--job".to_string(), i.to_string()],
+                });
+            } else if i % 4 == 1 {
                 auditor.ingest_event(AuditEventKind::FileOpen {
-                    pid,
+                    pid: child_pid,
                     path: format!("/workspace/file_{}.rs", i),
                     flags: 0,
                     read_only: true,
                 });
-            } else if i % 3 == 1 {
+            } else if i % 4 == 2 {
                 auditor.ingest_event(AuditEventKind::NetworkConnect {
-                    pid,
+                    pid: child_pid,
                     destination_ip: "127.0.0.1".to_string(),
                     port: 8080,
                     protocol: "tcp".to_string(),
                 });
             } else {
                 auditor.ingest_event(AuditEventKind::ProcessExit {
-                    pid,
+                    pid: child_pid,
                     ppid: 5000,
                     exit_code: 0,
                     duration_ms: 12,

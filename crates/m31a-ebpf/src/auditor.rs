@@ -175,7 +175,7 @@ impl ExecutionAuditor {
         let emitted = self.ring_buffer.events_emitted();
         let lost = self.ring_buffer.events_lost();
         let drop_rate = if emitted > 0 {
-            (lost as f64 / (emitted + lost) as f64) * 100.0
+            (lost as f64 / emitted as f64) * 100.0
         } else {
             0.0
         };

@@ -119,7 +119,12 @@ impl VisualTddV2Runner {
 
             // 1. Override viewport & DPR in browser
             let _ = session
-                .set_viewport(vp.width, vp.height, Some(vp.device_scale_factor))
+                .set_viewport(
+                    vp.width,
+                    vp.height,
+                    Some(vp.device_scale_factor),
+                    vp.is_mobile,
+                )
                 .await;
 
             // 2. Initial navigation

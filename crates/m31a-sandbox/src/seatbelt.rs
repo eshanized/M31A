@@ -40,7 +40,10 @@ impl SeatbeltSandbox {
     /// Generate Seatbelt SBPL profile based on policy and workspace root
     pub fn generate_profile(policy: SandboxPolicy, workspace_root: &Path) -> Result<String> {
         let workspace_str = workspace_root.to_string_lossy();
-        let workspace_clean = workspace_str.trim_end_matches('/').replace('"', "\\\"");
+        let workspace_clean = workspace_str
+            .trim_end_matches('/')
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"");
 
         let profile = match policy {
             SandboxPolicy::ReadOnly => {
@@ -317,9 +320,9 @@ mod tests {
     #[test]
     fn test_profile_path_escaping() {
         let policy = SandboxPolicy::WorkspaceWrite;
-        let workspace = Path::new("/tmp/path \"with\" quotes");
+        let workspace = Path::new("/tmp/path \"with\" quotes\\and\\backslashes");
         let profile = SeatbeltSandbox::generate_profile(policy, workspace).unwrap();
-        assert!(profile.contains("/tmp/path \\\"with\\\" quotes"));
+        assert!(profile.contains("/tmp/path \\\"with\\\" quotes\\\\and\\\\backslashes"));
     }
 
     #[test]

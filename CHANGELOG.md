@@ -7,16 +7,12 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
-## [Unreleased]
-
----
-
-## [0.3.0] — 2026-11-19
+## [Unreleased] (Target: v0.3.0)
 
 ### Added
 - **Autonomous Visual Regression TDD v2 (Workstream A)**:
   - Multi-resolution viewport matrix testing (`Mobile`, `Tablet`, `Desktop`, `Wide`) with device pixel ratios and CDP emulation.
-  - Automated screenshot comparison combining exact pixel matching and perceptual CIE $\Delta E$ color difference calculation.
+  - Automated screenshot comparison combining exact pixel matching and perceptual Rec. 709 weighted RGB color distance calculation.
   - Visual difference heatmaps highlighting regressions with semi-transparent overlays and highlighted bounding boxes.
   - Dynamic rectangular comparison masks to ignore volatile UI regions (timestamps, randomized content, animations).
   - Cryptographic baseline store (`BaselineStore`) managing SHA-256 golden images with non-overwriting approval workflows.

@@ -217,8 +217,8 @@
       "required": false,
       "owning_crate": "m31a-core",
       "runtime_consumer": "m31a-cli",
-      "sha256": "2429e57cd430fa4e073d41d4641da4794ffe60276df525c9d458ce5e49c208c2",
-      "size_bytes": 49750
+      "sha256": "8e59582f4c04882e2e67e2814749a2b2528556152f84fca15c7cdc4af98a0dbd",
+      "size_bytes": 49740
     }
   ],
   "external_dependencies": [
