@@ -152,7 +152,11 @@ impl WasmRuntime {
         let mut host_ctx = HostContext::new(manifest.clone(), workspace_root, config_json);
         let memory_limit_bytes = (manifest.limits.max_memory_pages as usize)
             .checked_mul(64 * 1024)
-            .ok_or_else(|| WasmError::InvalidManifest("max_memory_pages overflows host address space".to_string()))?;
+            .ok_or_else(|| {
+                WasmError::InvalidManifest(
+                    "max_memory_pages overflows host address space".to_string(),
+                )
+            })?;
         host_ctx.limits = StoreLimitsBuilder::new()
             .memory_size(memory_limit_bytes)
             .instances(1)
