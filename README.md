@@ -74,7 +74,7 @@
 
 **M31A** is a high-performance, sovereign, autonomous agentic coding assistant designed from first principles as an open-source alternative to proprietary AI engineering tools (such as OpenAI Codex CLI, Cursor, and Claude Code).
 
-Engineered in modern **Rust 2024 edition (1.85+)** across a **42-crate modular monorepo**, M31A couples low-latency **NVIDIA NIM** frontier models (Nemotron 3.5, DeepSeek R1 / v4.1 Flash, Codestral, and Llama 3.1) with unified **cross-platform sandboxing** (Linux Bubblewrap, macOS Seatbelt, Windows AppContainer), **kernel-level eBPF execution auditing**, **sandboxed WebAssembly extensions**, **AST semantic blast-radius gating**, **autonomous visual regression TDD v2 via headless Chromium**, and a **4-tier fuzzy multi-file patch engine**.
+Engineered in modern **Rust 2024 edition (1.85+)** across a **42-crate modular monorepo**, M31A couples low-latency **NVIDIA NIM** frontier models (Nemotron 3.5, DeepSeek R1 / v4.1 Flash, Codestral, and Llama 3.1) with Linux Bubblewrap isolation, experimental macOS Seatbelt profile support, userspace audit-event processing (kernel eBPF capture is not integrated), a sandboxed WebAssembly extension foundation, **AST semantic blast-radius gating**, **autonomous visual regression TDD v2 via headless Chromium**, and a **4-tier fuzzy multi-file patch engine**.
 
 Whether running as an interactive full-screen **Ratatui Terminal UI**, executing in **continuous vibe coding auto-healing loops**, evaluating competing architectural designs in a **speculative parallel reality arena**, or serving IDE extensions over **JSON-RPC 2.0 (stdio, UDS, HTTP/SSE)**, M31A delivers zero-babysitter autonomy without compromising security.
 
@@ -775,8 +775,8 @@ crates/
 │   └── m31a-ast/                     # Symbol call-graph analysis & blast-radius scoring
 │
 ├── 5. Security, Sandboxing & Auditing
-│   ├── m31a-sandbox/                 # Cross-platform sandboxing (Bubblewrap, Seatbelt, AppContainer)
-│   ├── m31a-ebpf/                    # Kernel-level eBPF syscall auditing & ring buffer metrics
+│   ├── m31a-sandbox/                 # Linux isolation, experimental Seatbelt; AppContainer disabled
+│   ├── m31a-ebpf/                    # Audit event processing; kernel event capture not yet implemented
 │   ├── m31a-execpolicy/              # Prefix command rules & network destination filters
 │   ├── m31a-guardian/                # Review supervisor & sliding-window circuit breaker
 │   └── m31a-trust/                   # Workspace trust boundary & git hook armor
