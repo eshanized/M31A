@@ -205,8 +205,8 @@
       "required": true,
       "owning_crate": "m31a-core",
       "runtime_consumer": "m31a-cli",
-      "sha256": "8e84faa9d44f8787cfaf93035848f1bcbcfe6ccf6f83a0f368b07ac539f2a41f",
-      "size_bytes": 41590
+      "sha256": "3d931ba7cd0c89640c40a971e4f064cdb837269c162e739aa0eb89259eb3d350",
+      "size_bytes": 42339
     },
     {
       "resource_id": "package-changelog",
@@ -217,8 +217,8 @@
       "required": false,
       "owning_crate": "m31a-core",
       "runtime_consumer": "m31a-cli",
-      "sha256": "f1b59dc8de22cda43704c2933ed599134463f5b103bf9c104977ae10840b0d0b",
-      "size_bytes": 46583
+      "sha256": "8e59582f4c04882e2e67e2814749a2b2528556152f84fca15c7cdc4af98a0dbd",
+      "size_bytes": 49740
     }
   ],
   "external_dependencies": [

@@ -115,3 +115,52 @@ If an autonomous agent repeatedly produces actions that fail security verificati
 When storing API credentials, M31A leverages a memory-locked proxy architecture:
 - Encryption keys and API tokens are locked in RAM with `mlock(2)` to prevent paging to disk.
 - Tokens are automatically scrubbed from memory buffers on deallocation.
+
+---
+
+## 6. Cross-Platform Sandbox Backends (`m31a-sandbox`)
+
+M31A enforces platform-native sandbox boundaries through a unified fail-closed abstraction (`SandboxPlatform`):
+
+### macOS Seatbelt Backend (`sandbox-exec`)
+On macOS hosts, M31A generates dynamic Scheme-based Seatbelt Profiles (`.sb` / SBPL):
+- **Version 1 Profile Header**: `(version 1) (deny default)`
+- **Network Isolation**: When `ReadOnly` or air-gapped execution is requested, network operations (`network-outbound`, `network-inbound`) are explicitly denied. In `WorkspaceWrite` mode, network is selectively permitted if configured by policy.
+- **Filesystem Boundaries**: System binaries (`/usr`, `/bin`, `/System`, `/Library`, `/dev`) are granted read-only access. Write permissions are scoped strictly to the authorized workspace and temporary directories (`/private/tmp`, `/var/folders`).
+- **Path Escaping**: All literal paths are sanitized and escaped against SBPL parenthesis/quote injection attacks.
+- **Fail-Closed Guarantee**: If `sandbox-exec` is missing or fails to compile the profile, command dispatch is terminated immediately with an actionable error.
+
+### Windows AppContainer Isolation Backend
+On Windows hosts, M31A isolates unprivileged commands inside native Windows AppContainers:
+- **Restricted Process Identity**: Processes run with a low-integrity AppContainer token and dedicated container SID.
+- **Explicit DACL Grants**: Ambient access to user profiles, credentials (`%USERPROFILE%\.ssh`, `%USERPROFILE%\.aws`), and other drives is blocked. Writable access is granted exclusively to the active workspace directory using `icacls` grants for the container SID.
+- **Network Isolation**: Outbound network traffic requires explicit capability grants (`internetClient`); in `ReadOnly` isolation mode, all network capabilities are omitted.
+- **Fail-Closed Dispatch**: M31A does not substitute normal Job Objects or standard tokens for an AppContainer. If AppContainer creation fails, the command is aborted fail-closed.
+
+---
+
+## 7. Kernel-Level Observational Auditing (`m31a-ebpf`)
+
+M31A complements userspace sandbox enforcement with Linux kernel-level execution observation:
+
+### Security Boundary: Auditing vs. Enforcement
+> [!IMPORTANT]
+> **Auditing is strictly observational.** `m31a-ebpf` does not act as an alternative security policy engine. Authoritative security enforcement remains the sole responsibility of `m31a-sandbox` (Bubblewrap namespaces, Landlock, Seccomp) and `m31a-execpolicy`. If eBPF tracing is unavailable (e.g., due to `/proc/sys/kernel/unprivileged_bpf_disabled = 2`), sandboxed execution proceeds securely with an explicit `AuditDegraded` status report rather than failing closed.
+
+### Provenance & Lifecycle Tracing
+- **Process Lineage**: Observes `sys_enter_execve`, `sys_enter_clone`, `sys_enter_fork`, and `sys_enter_exit` to construct full child-process trees mapped back to the originating sandbox turn.
+- **Syscall Auditing**: Traces `openat`, `unlinkat`, `connect`, and execution attempts.
+- **Secret Redaction**: Redacts high-entropy API tokens (`nvapi-`, `ghp_`, `sk-`), command flags (`--token=`, `--password=`), and sensitive paths (`.ssh`, `.env`) before recording audit events.
+- **Bounded Ring Buffer Metrics**: Real-time atomic counters track dropped events (`dropped_records`) during kernel ring buffer congestion.
+- **Empirically Measured Overhead**: Sub-microsecond dispatch overhead per audited record (~20-40 ns), verified with reproducible benchmarks.
+
+---
+
+## 8. Sandboxed WebAssembly Extension Runtime (`m31a-wasm`)
+
+Extensions and plugins in M31A are isolated in a memory-safe WebAssembly runtime:
+- **Pure-Rust Deterministic Runtime**: Powered by `wasmi` with zero native JIT code generation risks.
+- **Fuel Metering**: Guest execution is bounded by explicit fuel quotas (e.g. 5,000,000 instructions) preventing infinite loops and denial-of-service attacks.
+- **Linear Memory Sandboxing**: Guest linear memory is strictly bounded (e.g. 16 pages = 1 MiB) with checked read/write bounds enforcement.
+- **Capability Gating**: Ambient filesystem and network access are denied. Guest modules can only invoke host functions explicitly declared in their signed manifest and granted at runtime.
+- **ABI Coexistence**: WebAssembly extensions coexist transparently with native C ABI extensions (`m31a-extension-api`) behind a unified capability model.

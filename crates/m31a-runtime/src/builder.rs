@@ -235,6 +235,10 @@ impl RuntimeBuilder {
         let engine_runtime = Arc::new(RwLock::new(engine_runtime));
         let tools = Arc::new(tools);
 
+        // 15. eBPF execution auditor and WebAssembly extension runtime
+        let auditor = Arc::new(m31a_ebpf::ExecutionAuditor::default());
+        let wasm_runtime = Arc::new(m31a_wasm::WasmRuntime::new());
+
         let services = RuntimeServices {
             provider,
             storage,
@@ -251,6 +255,8 @@ impl RuntimeBuilder {
             features_registry,
             vault,
             engine_runtime,
+            auditor,
+            wasm_runtime,
         };
 
         Ok(M31aRuntime::new_internal(

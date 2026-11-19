@@ -33,14 +33,16 @@ M31A is built to be the premier open-source, sovereign, enterprise-grade autonom
 
 ---
 
-## Phase 3: Multi-Modal Verification & Extended Sandboxing (v0.3.0) — :calendar: Planned
+## Phase 3: Multi-Modal Verification & Extended Sandboxing (v0.3.0) — :white_check_mark: Completed
 
-- [ ] **Autonomous Visual Regression TDD v2**: Multi-resolution screenshot comparison with diff heatmaps and automated layout repair.
-- [ ] **eBPF-Based Execution Auditing**: Kernel-level syscall interception and zero-overhead provenance tracing inside Linux sandboxes.
-- [ ] **Cross-Platform Sandboxing Support**:
-  - macOS Sandbox (`sandbox-exec` / seatbelt profiles).
-  - Windows AppContainer isolation.
-- [ ] **WebAssembly Plugin Architecture**: Portable, sandboxed extension modules written in Rust, Go, or AssemblyScript.
+- [x] **Autonomous Visual Regression TDD v2**: Multi-resolution screenshot comparison with diff heatmaps, region masking, SHA-256 golden baseline management, and automated layout repair.
+- [x] **eBPF-Based Execution Auditing**: Kernel-level syscall observation, child-process provenance tracking, bounded ring buffer metrics, and micro-overhead benchmark measurement.
+- [x] **Cross-Platform Sandboxing Support**:
+  - Linux: Bubblewrap namespace isolation, Landlock filesystem bounds, and Seccomp syscall filtering.
+  - macOS Sandbox: Hardened Seatbelt SBPL profile generation, network isolation, path escaping, and workspace scoping.
+  - Windows: Native AppContainer process isolation, low-integrity capability SIDs, explicit DACL grants, and fail-closed security.
+  - Unified `SandboxPlatform` abstraction with fail-closed policy validation.
+- [x] **WebAssembly Plugin Architecture**: Sandboxed runtime (`wasmi`) with capability gating, deterministic fuel metering, linear memory bounding, and ABI v1 coexistence with native plugins.
 
 ---
 

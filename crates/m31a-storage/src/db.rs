@@ -1522,7 +1522,7 @@ impl Storage {
     pub fn list_subagents(&self, parent: &str) -> Result<Vec<(String, String)>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT child_thread_id, agent_role FROM thread_spawn_edges WHERE parent_thread_id = ?1 AND status = 'open' ORDER BY created_at ASC",
+            "SELECT child_thread_id, agent_role FROM thread_spawn_edges WHERE parent_thread_id = ?1 AND status NOT IN ('terminated', 'closed') ORDER BY created_at ASC",
         )?;
         let rows = stmt.query_map(params![parent], |row| Ok((row.get(0)?, row.get(1)?)))?;
         let mut list = Vec::new();

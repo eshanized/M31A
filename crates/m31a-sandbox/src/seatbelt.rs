@@ -40,7 +40,10 @@ impl SeatbeltSandbox {
     /// Generate Seatbelt SBPL profile based on policy and workspace root
     pub fn generate_profile(policy: SandboxPolicy, workspace_root: &Path) -> Result<String> {
         let workspace_str = workspace_root.to_string_lossy();
-        let workspace_clean = workspace_str.trim_end_matches('/');
+        let workspace_clean = workspace_str
+            .trim_end_matches('/')
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"");
 
         let profile = match policy {
             SandboxPolicy::ReadOnly => {
@@ -104,7 +107,7 @@ impl SeatbeltSandbox {
 ; workspace read access
 (allow file-read* (subpath "{workspace}"))
 (deny file-write*)
-(allow network*)
+(deny network*)
 "#,
                     workspace = workspace_clean
                 )
@@ -308,9 +311,18 @@ mod tests {
         let profile = SeatbeltSandbox::generate_profile(policy, workspace).unwrap();
 
         assert!(profile.contains("(deny file-write*)"));
+        assert!(profile.contains("(deny network*)"));
         assert!(profile.contains("allow file-read* (subpath \"/tmp/test_ro\")"));
         assert!(profile.contains("com.apple.TrustEvaluationAgent"));
         assert!(!profile.contains("allow file-write* (subpath \"/tmp/test_ro\")"));
+    }
+
+    #[test]
+    fn test_profile_path_escaping() {
+        let policy = SandboxPolicy::WorkspaceWrite;
+        let workspace = Path::new("/tmp/path \"with\" quotes\\and\\backslashes");
+        let profile = SeatbeltSandbox::generate_profile(policy, workspace).unwrap();
+        assert!(profile.contains("/tmp/path \\\"with\\\" quotes\\\\and\\\\backslashes"));
     }
 
     #[test]

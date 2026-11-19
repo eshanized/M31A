@@ -17,7 +17,7 @@
     <a href="https://m31a.tonmoyinfrastructure.org/"><img src="https://img.shields.io/badge/Docs-m31a.tonmoyinfrastructure.org-blueviolet.svg?style=flat-square" alt="Documentation" /></a>
     <a href="https://npmjs.com/package/@m31a/sdk"><img src="https://img.shields.io/badge/TypeScript%20SDK-@m31a/sdk-3178c6.svg?style=flat-square&logo=typescript" alt="TypeScript SDK" /></a>
     <a href="https://pypi.org/project/m31a/"><img src="https://img.shields.io/badge/Python%20SDK-m31a-3776AB.svg?style=flat-square&logo=python" alt="Python SDK" /></a>
-    <img src="https://img.shields.io/badge/Workspace-39%20Crates-purple.svg?style=flat-square" alt="39 Crates" />
+    <img src="https://img.shields.io/badge/Workspace-42%20Crates-purple.svg?style=flat-square" alt="42 Crates" />
     <img src="https://img.shields.io/badge/Testing-Zero--Mock%20Enforced-success.svg?style=flat-square" alt="Zero-Mock Enforced" />
   </p>
 </div>
@@ -41,7 +41,7 @@
   <a href="#configuration-reference">Configuration</a> •
   <a href="#sdk-ecosystem-typescript--python">SDKs</a> •
   <a href="#performance--benchmark-metrics">Benchmarks</a> •
-  <a href="#workspace-monorepo-layout-39-crates">39 Crates</a> •
+  <a href="#workspace-monorepo-layout-42-crates">42 Crates</a> •
   <a href="#documentation-index">Documentation</a>
 </p>
 
@@ -74,7 +74,7 @@
 
 **M31A** is a high-performance, sovereign, autonomous agentic coding assistant designed from first principles as an open-source alternative to proprietary AI engineering tools (such as OpenAI Codex CLI, Cursor, and Claude Code).
 
-Engineered in modern **Rust 2024 edition (1.85+)** across a **39-crate modular monorepo**, M31A couples low-latency **NVIDIA NIM** frontier models (Nemotron 3.5, DeepSeek R1 / v4.1 Flash, Codestral, and Llama 3.1) with kernel-level **Linux Bubblewrap (`bwrap`) sandboxing**, **AST semantic blast-radius gating**, **automated visual TDD via headless Chromium**, and a **4-tier fuzzy multi-file patch engine**.
+Engineered in modern **Rust 2024 edition (1.85+)** across a **42-crate modular monorepo**, M31A couples low-latency **NVIDIA NIM** frontier models (Nemotron 3.5, DeepSeek R1 / v4.1 Flash, Codestral, and Llama 3.1) with unified **cross-platform sandboxing** (Linux Bubblewrap, macOS Seatbelt, Windows AppContainer), **kernel-level eBPF execution auditing**, **sandboxed WebAssembly extensions**, **AST semantic blast-radius gating**, **autonomous visual regression TDD v2 via headless Chromium**, and a **4-tier fuzzy multi-file patch engine**.
 
 Whether running as an interactive full-screen **Ratatui Terminal UI**, executing in **continuous vibe coding auto-healing loops**, evaluating competing architectural designs in a **speculative parallel reality arena**, or serving IDE extensions over **JSON-RPC 2.0 (stdio, UDS, HTTP/SSE)**, M31A delivers zero-babysitter autonomy without compromising security.
 
@@ -741,15 +741,16 @@ just bench iterations=5
 
 ---
 
-## 🗂️ Workspace Monorepo Layout (39 Crates)
+## 🗂️ Workspace Monorepo Layout (42 Crates)
 
-The M31A repository is organized into 39 decoupled domain crates across clear architectural boundaries:
+The M31A repository is organized into 42 decoupled domain crates across clear architectural boundaries:
 
 ```
 crates/
-├── 1. Application Binary & Daemon
+├── 1. Application Binary, Runtime & Daemon
 │   ├── m31a-cli/                     # Unified 'm31a' CLI binary (54 subcommands)
-│   └── m31a-app-server/              # JSON-RPC 2.0 daemon (stdio, UDS, HTTP/SSE)
+│   ├── m31a-app-server/              # JSON-RPC 2.0 daemon (stdio, UDS, HTTP/SSE)
+│   └── m31a-runtime/                 # Authoritative session & security orchestrator
 │
 ├── 2. User Interface & Terminal Experience
 │   ├── m31a-tui/                     # Ratatui/Crossterm terminal UI application
@@ -769,22 +770,25 @@ crates/
 │   └── m31a-prompts/                 # System prompt builders & model preamble templates
 │
 ├── 4. Verification & Static Analysis
-│   ├── m31a-verify/                  # Autonomous compiler checks, tests & visual TDD
+│   ├── m31a-verify/                  # Autonomous visual TDD v2, compiler checks & self-healing
 │   ├── m31a-browser/                 # Headless Chromium CDP controller & screenshot engine
 │   └── m31a-ast/                     # Symbol call-graph analysis & blast-radius scoring
 │
-├── 5. Security & Isolation
-│   ├── m31a-sandbox/                 # Linux Bubblewrap isolation & path protection masks
+├── 5. Security, Sandboxing & Auditing
+│   ├── m31a-sandbox/                 # Cross-platform sandboxing (Bubblewrap, Seatbelt, AppContainer)
+│   ├── m31a-ebpf/                    # Kernel-level eBPF syscall auditing & ring buffer metrics
 │   ├── m31a-execpolicy/              # Prefix command rules & network destination filters
 │   ├── m31a-guardian/                # Review supervisor & sliding-window circuit breaker
 │   └── m31a-trust/                   # Workspace trust boundary & git hook armor
 │
-├── 6. Tools, Patching & Runtime
+├── 6. Tools, Patching & Extensions
 │   ├── m31a-tools/                   # 18-tool orchestration suite
 │   ├── m31a-patch/                   # Codex multi-file patch parser & 4-tier fuzzy seek
 │   ├── m31a-code-mode/               # Script execution runtime with @exec pragmas & yields
 │   ├── m31a-shell/                   # Subprocess execution & stream multiplexer
-│   └── m31a-proc/                    # Background process supervisor & dev server manager
+│   ├── m31a-proc/                    # Background process supervisor & dev server manager
+│   ├── m31a-extension-api/           # C ABI dynamic plugin interfaces & manifest schemas
+│   └── m31a-wasm/                    # Sandboxed WebAssembly extension runtime & fuel metering
 │
 └── 7. Core Foundations, Storage & Extensibility
     ├── m31a-core/                    # Configuration, session data structures & skills loader
@@ -793,7 +797,6 @@ crates/
     ├── m31a-compaction/              # Conversation history pruning & context summarization
     ├── m31a-telemetry/               # System & session telemetry metrics
     ├── m31a-watcher/                 # Debounced filesystem change watcher for vibe coding
-    ├── m31a-extension-api/           # Standardized plugin interfaces & manifest schemas
     ├── m31a-hooks/                   # Deterministic lifecycle hooks
     ├── m31a-mcp/                     # Model Context Protocol (MCP) client
     ├── m31a-collaboration-templates/ # Pre-configured multi-agent collaboration setups
@@ -842,16 +845,17 @@ npm test --prefix sdk/typescript
 | [**Getting Started Walkthrough**](docs/GETTING_STARTED.md) | Step-by-step installation, credential configuration, and first session. |
 | [**Terminal User Interface Guide**](docs/TUI_GUIDE.md) | Full guide to keyboard shortcuts, modals, slash commands, and themes. |
 | [**System Architecture**](docs/ARCHITECTURE.md) | Deep dive into turn loops, NVIDIA NIM streaming, tools, and storage. |
+| [**Phase 3 System Architecture**](docs/architecture/PHASE_3_SYSTEM_ARCHITECTURE.md) | Autonomous Visual TDD v2, eBPF Auditing, Cross-Platform Sandboxing & WASM plugins. |
 | [**Autonomous Workflow Architecture**](docs/architecture/AUTONOMOUS_WORKFLOW_ARCHITECTURE.md) | DAG tasks, task kinds (`TaskKind`), phase transitions, and worker leases. |
 | [**Demand-Driven Coordination & Worktrees**](docs/architecture/DEMAND_DRIVEN_COORDINATION.md) | DAG scheduling, Git worktree isolation, dynamic replanning, and verified integration. |
 | [**Speculative Execution Architecture**](docs/architecture/SPECULATIVE_EXECUTION_ARCHITECTURE.md) | Parallel sandbox arenas, scoring heuristics, and branch merging. |
 | [**CLI Command Reference**](docs/CLI_REFERENCE.md) | Comprehensive reference for all 54 subcommands, arguments, and flags. |
 | [**Configuration Guide**](docs/CONFIGURATION.md) | Complete reference for `config.toml`, profiles, and approval presets. |
 | [**App Server & JSON-RPC Protocol**](docs/APP_SERVER_RPC.md) | Specification of 40+ JSON-RPC methods and SSE streaming events. |
-| [**Sandbox & Security Architecture**](docs/SANDBOX_SECURITY.md) | Linux Bubblewrap isolation, read-only masks, ExecPolicy, and Guardian. |
-| [**Extensions, Skills & MCP**](docs/EXTENSIONS_AND_SKILLS.md) | Custom skill creation, YAML frontmatter, and external MCP servers. |
+| [**Sandbox & Security Architecture**](docs/SANDBOX_SECURITY.md) | Linux Bubblewrap isolation, macOS Seatbelt, Windows AppContainer, and eBPF Auditing. |
+| [**Extensions, Skills & MCP**](docs/EXTENSIONS_AND_SKILLS.md) | Custom skill creation, YAML frontmatter, WASM plugins, and external MCP servers. |
 | [**Multi-Agent Swarm & Distributed Mesh**](docs/SWARM_AND_MULTI_AGENT.md) | Swarm coordination, message boards, and distributed task mesh. |
-| [**Crates Directory Catalog**](crates/README.md) | Exhaustive map of all 39 crates in the Cargo workspace. |
+| [**Crates Directory Catalog**](crates/README.md) | Exhaustive map of all 42 crates in the Cargo workspace. |
 | [**SDK Ecosystem Guide**](sdk/README.md) | Multi-language client SDKs for TypeScript and Python. |
 | [**Strategic Roadmap**](ROADMAP.md) | Development roadmap across Phase 1, Phase 2, Phase 3, and Phase 4. |
 | [**Changelog**](CHANGELOG.md) | Version release history and change tracking. |
@@ -862,7 +866,7 @@ npm test --prefix sdk/typescript
 
 - [x] **Phase 1: Baseline Architecture & Release Readiness (v0.1.0 - v0.1.15)**: Modular 39-crate monorepo, NVIDIA NIM frontier models, Ratatui TUI, 4-tier fuzzy patch engine, Bubblewrap sandbox, Vibe coding auto-healing loop, Speculative reality arena, and official TypeScript & Python SDKs.
 - [ ] **Phase 2: IDE Ecosystem & Native Integrations (v0.2.0)**: Official VS Code and Cursor extensions, JetBrains plugin suite, bidirectional Language Server Protocol (LSP) bridge, and cross-session vector-indexed memory graphs.
-- [ ] **Phase 3: Multi-Modal Verification & Extended Sandboxing (v0.3.0)**: Visual regression TDD v2 with diff heatmaps, eBPF-based kernel execution auditing, macOS seatbelt sandboxing, and Windows AppContainer isolation.
+- [x] **Phase 3: Multi-Modal Verification & Extended Sandboxing (v0.3.0)**: Visual regression TDD v2 with diff heatmaps and automated layout repair, eBPF-based kernel execution auditing, macOS Seatbelt sandboxing, Windows AppContainer isolation, and sandboxed WebAssembly extensions.
 - [ ] **Phase 4: Sovereign Repository Stewardship (v1.0.0+)**: Autonomous continuous dependency migrations, formal proof engine integration (Kani, Coq), and enterprise fleet policy federations.
 
 Consult [`ROADMAP.md`](ROADMAP.md) for full roadmap details.

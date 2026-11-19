@@ -1905,6 +1905,38 @@ impl BrowserSession {
             "Screenshot capture requires an active CDP connection. Browser may be in simulated mode or CDP connection lost."
         ))
     }
+
+    /// Sets the dynamic viewport dimensions and device pixel ratio (DPR) via CDP emulation.
+    pub async fn set_viewport(
+        &self,
+        width: u32,
+        height: u32,
+        dpr: Option<f64>,
+        is_mobile: bool,
+    ) -> Result<()> {
+        if self.cmd_tx.is_some() {
+            let scale_factor = dpr.unwrap_or(1.0);
+            self.send_cdp(
+                "Emulation.setDeviceMetricsOverride",
+                Some(serde_json::json!({
+                    "width": width,
+                    "height": height,
+                    "deviceScaleFactor": scale_factor,
+                    "mobile": is_mobile,
+                })),
+            )
+            .await?;
+            return Ok(());
+        }
+
+        if self.is_mock {
+            return Ok(());
+        }
+
+        Err(anyhow::anyhow!(
+            "set_viewport requires an active CDP connection."
+        ))
+    }
     pub async fn get_console_logs(&self) -> Vec<ConsoleMessage> {
         let lock = self.console_logs.lock().unwrap();
         lock.clone()

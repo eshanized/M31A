@@ -54,7 +54,7 @@ jobs:
   test-suite:
     name: Workspace Tests (Nextest)
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4

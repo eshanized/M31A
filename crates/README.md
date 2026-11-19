@@ -1,6 +1,6 @@
 # M31A Crates Workspace
 
-> A welcoming architectural map and developer reference for the 39 modular domain crates comprising the M31A autonomous coding assistant.
+> A welcoming architectural map and developer reference for the 42 modular domain crates comprising the M31A autonomous coding assistant.
 
 ---
 
@@ -8,13 +8,13 @@
 
 If you are exploring the M31A codebase for the first time: **welcome!** 
 
-M31A was engineered from first principles as a modular Rust monorepo in the **Rust 2024 edition (1.85+)**. Rather than building a monolithic binary where UI, networking, sandboxing, and execution are tangled together, we decoupled the system into **39 domain-focused crates**.
+M31A was engineered from first principles as a modular Rust monorepo in the **Rust 2024 edition (1.85+)**. Rather than building a monolithic binary where UI, networking, sandboxing, and execution are tangled together, we decoupled the system into **42 domain-focused crates**.
 
 This architectural separation delivers major developer benefits:
 - **Fast Incremental Builds**: Modifying a TUI widget doesn't trigger recompilation of the Linux sandbox or the SQLite storage engine.
-- **Strict Invariant Boundaries**: Security boundaries (like Linux namespaces in [`m31a-sandbox`](m31a-sandbox)) cannot be bypassed by upper application layers.
+- **Strict Invariant Boundaries**: Security boundaries (like Linux namespaces and Windows AppContainers in [`m31a-sandbox`](m31a-sandbox)) cannot be bypassed by upper application layers.
 - **Independent Testability**: Each crate enforces our **Zero-Mock Policy**, running real tests against real SQLite databases, real Bubblewrap containers, and real Git repositories.
-- **Reusability**: Downstream tools and SDKs can consume specific domain crates (like [`m31a-patch`](m31a-patch) for fuzzy diffing or [`m31a-provider`](m31a-provider) for NVIDIA NIM streaming) without pulling in the entire application.
+- **Reusability**: Downstream tools and SDKs can consume specific domain crates (like [`m31a-patch`](m31a-patch) for fuzzy diffing, [`m31a-wasm`](m31a-wasm) for extension sandboxing, or [`m31a-provider`](m31a-provider) for NVIDIA NIM streaming) without pulling in the entire application.
 
 ---
 
@@ -22,9 +22,10 @@ This architectural separation delivers major developer benefits:
 
 ```mermaid
 flowchart TD
-    subgraph Layer1["1. Application Entrypoint & Protocol Server"]
+    subgraph Layer1["1. Application Entrypoint & Runtime Daemon"]
         CLI["m31a-cli (54 Subcommands)"]
         APP_SERVER["m31a-app-server (JSON-RPC 2.0 Daemon)"]
+        RUNTIME["m31a-runtime (Authoritative Session & Security Orchestrator)"]
     end
 
     subgraph Layer2["2. Interactive Terminal UI & Developer UX"]
@@ -53,13 +54,13 @@ flowchart TD
     end
 
     subgraph Layer5["5. Verification, Browser & Code Analysis"]
-        VERIFY["m31a-verify (Plan Checking, Goal-Backward & Self-Healing)"]
+        VERIFY["m31a-verify (Visual TDD v2, Plan Checking, Goal-Backward & Self-Healing)"]
         BROWSER["m31a-browser (Headless Chromium CDP Controller)"]
         AST["m31a-ast (Symbol Index, Call Graphs & Blast Radius)"]
         WATCHER["m31a-watcher (Debounced Inotify/Kqueue Watcher)"]
     end
 
-    subgraph Layer6["6. Tools, Execution Runtime & Patching"]
+    subgraph Layer6["6. Tools, Execution Runtime & Extensions"]
         TOOLS["m31a-tools (18-Tool Orchestration Suite)"]
         PATCH["m31a-patch (Codex Patch Parser & 4-Tier Fuzzy Seek)"]
         CODE_MODE["m31a-code-mode (Script Pragmas & Yield Runtime)"]
@@ -67,11 +68,13 @@ flowchart TD
         PROC["m31a-proc (Background Process Supervisor)"]
         MCP["m31a-mcp (Model Context Protocol Client)"]
         EXT_API["m31a-extension-api (Stable C ABI Dynamic Plugins)"]
+        WASM["m31a-wasm (Sandboxed WebAssembly Engine & Fuel Limits)"]
         GIT_ATTR["m31a-git-attribution (Co-authored-by Trailer Generator)"]
     end
 
-    subgraph Layer7["7. Defense-in-Depth Security & Policy"]
-        SANDBOX["m31a-sandbox (Linux Bubblewrap & Credential Masks)"]
+    subgraph Layer7["7. Defense-in-Depth Security, Sandboxing & Auditing"]
+        SANDBOX["m31a-sandbox (Bubblewrap, Seatbelt, AppContainer)"]
+        EBPF["m31a-ebpf (Kernel Syscall Auditing & Ring Buffer Metrics)"]
         EXECPOLICY["m31a-execpolicy (Prefix Pattern Rules & Network Filters)"]
         GUARDIAN["m31a-guardian (Supervisor Circuit Breaker)"]
         TRUST["m31a-trust (Workspace Trust Boundary & Git Hook Armor)"]
@@ -79,21 +82,23 @@ flowchart TD
 
     subgraph Layer8["8. Core Foundations & Persistence"]
         CORE["m31a-core (Data Models, Skills, Path Bounds & Vaults)"]
-        STORAGE["m31a-storage (Embedded SQLite Migration 15 & Pub-Sub Board)"]
+        STORAGE["m31a-storage (Embedded SQLite Migration 18 & Pub-Sub Board)"]
         FEATURES["m31a-features (Runtime Feature Flag Registry)"]
         COMPACT["m31a-compaction (Context Window Headroom Compactor)"]
         TELEMETRY["m31a-telemetry (Async Event Pipeline & Audit Logs)"]
     end
 
-    CLI --> TUI & APP_SERVER & ENGINE
+    CLI --> TUI & APP_SERVER & RUNTIME & ENGINE
+    RUNTIME --> ENGINE & STORAGE & SANDBOX & EBPF & WASM
     TUI --> COMPOSER & TERM & FUZZY & DIFF & ANALYTICS
     APP_SERVER --> ENGINE & STORAGE
     ENGINE --> PROVIDER & TOOLS & VERIFY & COLLAB & HOOKS
     PROVIDER --> PROMPTS
     VERIFY --> BROWSER & AST
     WATCHER --> ENGINE
-    TOOLS --> PATCH & CODE_MODE & SHELL & PROC & MCP & EXT_API & GIT_ATTR
+    TOOLS --> PATCH & CODE_MODE & SHELL & PROC & MCP & EXT_API & WASM & GIT_ATTR
     TOOLS --> GUARDIAN --> EXECPOLICY --> SANDBOX
+    SANDBOX -.-> EBPF
     ENGINE --> TRUST
     ENGINE --> CORE & STORAGE & FEATURES & COMPACT & TELEMETRY
 ```
@@ -102,11 +107,12 @@ flowchart TD
 
 ## Crate Directory by Functional Subsystem
 
-### 1. Application Binary & Daemon
+### 1. Application Binary, Runtime & Daemon
 | Crate | Focus & Responsibility | Key Types / Modules |
 | :--- | :--- | :--- |
 | [`m31a-cli`](m31a-cli) | Main entrypoint compiling to `m31a`; parses arguments with `clap` and dispatches 54 subcommands. | `main.rs`, `doctor.rs`, `setup.rs`, `workflow.rs`, `vibe.rs`, `speculate.rs` |
 | [`m31a-app-server`](m31a-app-server) | JSON-RPC 2.0 daemon powering IDE extensions and SDKs over `stdio`, Unix Domain Sockets, and HTTP/SSE. | `protocol.rs`, `connection_multiplexer.rs`, `resource_validator.rs`, `http_server.rs` |
+| [`m31a-runtime`](m31a-runtime) | Authoritative multi-turn session orchestrator, security gatekeeper, and desktop IPC services. | `runtime.rs`, `builder.rs`, `services/`, `session.rs` |
 
 ### 2. Interactive Terminal UI & Developer Experience
 | Crate | Focus & Responsibility | Key Types / Modules |
@@ -133,20 +139,21 @@ flowchart TD
 ### 4. Verification, Browser & Static Analysis
 | Crate | Focus & Responsibility | Key Types / Modules |
 | :--- | :--- | :--- |
-| [`m31a-verify`](m31a-verify) | 8-dimension pre-execution plan analysis, adversarial goal-backward verification, and targeted self-healing diagnostics. | `plan_checker.rs`, `goal_backward.rs`, `visual_tdd.rs`, `self_heal.rs`, `safety.rs` |
-| [`m31a-browser`](m31a-browser) | Headless Chromium CDP controller, semantic accessibility DOM tree extraction, interaction (`@e1`), and screenshots. | `session.rs`, `cdp.rs`, `dom_tree.rs` |
+| [`m31a-verify`](m31a-verify) | Visual TDD v2 (multi-res, heatmaps, masking, repair), 8-dimension pre-execution plan analysis, adversarial goal-backward verification, and targeted self-healing diagnostics. | `visual_tdd_v2/`, `plan_checker.rs`, `goal_backward.rs`, `self_heal.rs`, `safety.rs` |
+| [`m31a-browser`](m31a-browser) | Headless Chromium CDP controller, multi-resolution viewport emulation, semantic accessibility DOM tree extraction, interaction (`@e1`), and screenshots. | `session.rs`, `cdp.rs`, `dom_tree.rs` |
 | [`m31a-ast`](m31a-ast) | AST symbol indexing, transitive call-graph analysis, semantic blast-radius scoring (0-100), and data-flow taint tracking. | `impact.rs`, `index.rs`, `data_flow.rs`, `parser.rs`, `semver.rs` |
 | [`m31a-watcher`](m31a-watcher) | Debounced OS-native filesystem change watcher (`inotify`/`kqueue`) filtering `.gitignore` and powering continuous vibe coding. | `watcher.rs`, `events.rs`, `filter.rs` |
 
-### 5. Security & Isolation
+### 5. Security, Sandboxing & Auditing
 | Crate | Focus & Responsibility | Key Types / Modules |
 | :--- | :--- | :--- |
-| [`m31a-sandbox`](m31a-sandbox) | Linux Bubblewrap container isolation (PID, IPC, UTS, Mount namespaces), root read-only binds, and credential tmpfs masking. | `bwrap_builder.rs`, `runner.rs`, `process_manager.rs`, `seccomp_filter.rs` |
+| [`m31a-sandbox`](m31a-sandbox) | Unified cross-platform isolation (Linux Bubblewrap & Landlock, macOS Seatbelt SBPL, Windows AppContainer) and credential tmpfs masking. | `platform/`, `bwrap_builder.rs`, `seatbelt.rs`, `appcontainer.rs`, `runner.rs` |
+| [`m31a-ebpf`](m31a-ebpf) | Kernel-level syscall observation, child-process provenance tracking, bounded ring buffer metrics, and secret redaction. | `probe.rs`, `auditor.rs`, `correlator.rs`, `ring_buffer.rs`, `benchmark.rs` |
 | [`m31a-execpolicy`](m31a-execpolicy) | Command prefix rules engine, alternative tokens (`PatternToken::Alts`), compound AST decomposition, and network filters. | `policy.rs`, `ast_decomposer.rs`, `connect_policy.rs`, `presets.rs` |
 | [`m31a-guardian`](m31a-guardian) | Out-of-band security supervisor, prompt injection detector, data exfiltration guard, and sliding-window circuit breaker. | `circuit_breaker.rs`, `reviewer.rs`, `prompt_injection_detector.rs`, `data_exfiltration_guard.rs` |
 | [`m31a-trust`](m31a-trust) | Workspace trust boundary enforcement, Git hook security auditor (`GitArmor`), and cryptographic trust store. | `git_armor.rs`, `trust_store.rs`, `capability.rs` |
 
-### 6. Tools, Patching & Runtime
+### 6. Tools, Patching & Extensions
 | Crate | Focus & Responsibility | Key Types / Modules |
 | :--- | :--- | :--- |
 | [`m31a-tools`](m31a-tools) | The complete 18-tool orchestration suite, JSON Schema generators, and parallel read execution dispatcher. | `registry.rs`, `parallel_dispatcher.rs`, `harness.rs`, `dispatch_trace.rs` |
@@ -155,7 +162,8 @@ flowchart TD
 | [`m31a-shell`](m31a-shell) | Stateful pseudo-terminal (PTY) shell sessions preserving CWD and environment across turns with head/tail ring buffers. | `session.rs`, `pty.rs`, `buffer.rs` |
 | [`m31a-proc`](m31a-proc) | Background process supervisor for dev servers, circular output buffers, log streaming (`logs --follow`), and graceful shutdown. | `manager.rs`, `process.rs`, `buffer.rs` |
 | [`m31a-mcp`](m31a-mcp) | Model Context Protocol client managing external stdio, SSE, and WebSocket tool servers. | `client.rs`, `manager.rs`, `transport.rs`, `protocol.rs` |
-| [`m31a-extension-api`](m31a-extension-api) | Stable C ABI vtable function table (`PluginVTableV1`) and dynamic loader (`libloading`) for compiled native dynamic plugins. | `lib.rs` |
+| [`m31a-extension-api`](m31a-extension-api) | Stable C ABI vtable function table (`PluginVTableV1`), dynamic loader (`libloading`), and WebAssembly extension capability traits. | `lib.rs` |
+| [`m31a-wasm`](m31a-wasm) | Sandboxed WebAssembly extension runtime (`wasmi`), capability gating, fuel limits, linear memory boundary I/O, and ABI v1. | `runtime.rs`, `host.rs`, `manifest.rs`, `errors.rs`, `benchmark.rs` |
 | [`m31a-collaboration-templates`](m31a-collaboration-templates) | Pre-configured team orchestration patterns (Pair Programming, Security Audit, Code Review). | `lib.rs` |
 | [`m31a-git-attribution`](m31a-git-attribution) | RFC-compliant Git commit trailer generator appending `Co-authored-by`, session IDs, and model metadata. | `lib.rs` |
 | [`m31a-hooks`](m31a-hooks) | 12-point canonical phase loop lifecycle hooks (`discuss`, `plan`, `execute`, `verify`, `ship`). | `lifecycle.rs`, `config.rs`, `runtime.rs` |
@@ -164,7 +172,7 @@ flowchart TD
 | Crate | Focus & Responsibility | Key Types / Modules |
 | :--- | :--- | :--- |
 | [`m31a-core`](m31a-core) | Foundation primitives, configuration layering, session models, DAG task specifications, and YAML skills loader. | `config.rs`, `workflow.rs`, `session.rs`, `skills.rs`, `file_system_bounds.rs` |
-| [`m31a-storage`](m31a-storage) | Embedded SQLite persistence layer (Migration 15) for threads, turns, checkpoint DAGs, worker leases, and pub-sub boards. | `db.rs`, `workflow_store.rs`, `migrations.rs`, `attachment_store.rs`, `transcript_export.rs` |
+| [`m31a-storage`](m31a-storage) | Embedded SQLite persistence layer (Migration 18) for threads, turns, checkpoint DAGs, worker leases, and pub-sub boards. | `db.rs`, `workflow_store.rs`, `migrations.rs`, `attachment_store.rs`, `transcript_export.rs` |
 | [`m31a-features`](m31a-features) | Runtime feature flag registry and experimental capability toggles (`code_mode`, `guardian_v2`, `unified_exec`). | `lib.rs` |
 | [`m31a-compaction`](m31a-compaction) | Intelligent context window headroom monitor, progressive transcript degradation, and structured summarization. | `monitor.rs`, `degradation.rs`, `lib.rs` |
 | [`m31a-telemetry`](m31a-telemetry) | Asynchronous session telemetry event pipeline, audit trails, and OpenTelemetry OTLP exporters. | `lib.rs` |
@@ -173,7 +181,7 @@ flowchart TD
 
 ## Testing Strategy Across Crates
 
-All 39 crates adhere strictly to the **Zero-Mock Policy**:
+All 42 crates adhere strictly to the **Zero-Mock Policy**:
 - SQLite tests use real in-memory or temporary database instances with live migrations.
 - Sandbox tests verify real Linux namespaces using `bwrap` where supported.
 - Patch tests run on real UTF-8 buffers with Unicode typographic stress tests.

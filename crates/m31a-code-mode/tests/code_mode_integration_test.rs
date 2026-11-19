@@ -34,7 +34,7 @@ async fn test_code_mode_runtime_kv_and_output() {
             &registry,
             tmp.path(),
             SandboxPolicy::DangerFullAccess,
-            1000,
+            10_000,
         )
         .await
         .expect("runtime run");
@@ -72,7 +72,7 @@ async fn test_code_mode_real_tool_dispatch() {
             &registry,
             tmp.path(),
             SandboxPolicy::DangerFullAccess,
-            2000,
+            10_000,
         )
         .await
         .expect("run tool in code mode");

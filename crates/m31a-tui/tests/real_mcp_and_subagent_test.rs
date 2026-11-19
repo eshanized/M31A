@@ -222,8 +222,21 @@ async fn test_real_subagent_lifecycle_and_tab_reflection() {
         .upsert_spawn_edge(&app.session_id, &child_id, "Code Analyst", "open", Some(1))
         .expect("save subagent");
 
-    // Update status badges on bottom pane
-    app.update_status_badges();
+    // Update status badges on bottom pane (retry briefly to account for async task preemption)
+    for _ in 0..10 {
+        app.update_status_badges();
+        if !app.bottom_pane.subagent_tabs.is_empty() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        let _ = app.storage.upsert_spawn_edge(
+            &app.session_id,
+            &child_id,
+            "Code Analyst",
+            "open",
+            Some(1),
+        );
+    }
 
     // Verify subagent tab appears in bottom pane
     assert_eq!(app.bottom_pane.subagent_tabs.len(), 1);

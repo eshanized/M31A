@@ -81,6 +81,10 @@ pub struct SandboxCheck {
     pub isolation_test_passed: bool,
     pub descriptor_pinned_exec: bool,
     pub details: String,
+    #[serde(default)]
+    pub platform_backend: Option<String>,
+    #[serde(default)]
+    pub ebpf_audit_status: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -549,6 +553,9 @@ impl Doctor {
                 .to_string()
         };
 
+        let plat = m31a_sandbox::platform::SandboxPlatform::probe();
+        let ebpf_probe = m31a_ebpf::probe::BpfProbe::probe();
+
         SandboxCheck {
             bwrap_installed,
             bwrap_version,
@@ -556,6 +563,8 @@ impl Doctor {
             isolation_test_passed: isolation_test,
             descriptor_pinned_exec,
             details,
+            platform_backend: Some(format!("{:?} on {}", plat.primary_backend, plat.os)),
+            ebpf_audit_status: Some(ebpf_probe.description()),
         }
     }
 
@@ -983,6 +992,13 @@ impl Doctor {
                 "   Bubblewrap: {} (Install bubblewrap for containerized isolation)",
                 "Not Installed".yellow()
             );
+        }
+
+        if let Some(ref plat) = report.sandbox.platform_backend {
+            println!("   Cross-Platform Engine: {}", plat.cyan());
+        }
+        if let Some(ref ebpf) = report.sandbox.ebpf_audit_status {
+            println!("   eBPF Kernel Auditing: {}", ebpf.yellow());
         }
         println!("   Details: {}", report.sandbox.details.dimmed());
 

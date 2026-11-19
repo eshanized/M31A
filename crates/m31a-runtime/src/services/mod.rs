@@ -44,4 +44,6 @@ pub struct RuntimeServices {
     pub features_registry: Arc<FeatureRegistry>,
     pub vault: Arc<LocalEncryptedVault>,
     pub engine_runtime: Arc<RwLock<Arc<EngineAgentRuntime>>>,
+    pub auditor: Arc<m31a_ebpf::ExecutionAuditor>,
+    pub wasm_runtime: Arc<m31a_wasm::WasmRuntime>,
 }

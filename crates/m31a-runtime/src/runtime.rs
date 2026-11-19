@@ -121,6 +121,21 @@ impl M31aRuntime {
         &self.services
     }
 
+    /// Returns the cross-platform sandbox capability report for the current host environment.
+    pub fn platform_capabilities(&self) -> m31a_sandbox::platform::PlatformCapabilityReport {
+        m31a_sandbox::platform::SandboxPlatform::probe()
+    }
+
+    /// Access the eBPF kernel execution auditor service.
+    pub fn auditor(&self) -> &Arc<m31a_ebpf::ExecutionAuditor> {
+        &self.services.auditor
+    }
+
+    /// Access the sandboxed WebAssembly extension runtime.
+    pub fn wasm_runtime(&self) -> &Arc<m31a_wasm::WasmRuntime> {
+        &self.services.wasm_runtime
+    }
+
     /// Provider client instance.
     pub fn provider(&self) -> Arc<ProviderClient> {
         Arc::clone(&self.services.provider.read().unwrap())

@@ -10,6 +10,7 @@ description = "Plugin/Extension API for M31A"
 anyhow = { workspace = true }
 libloading = "0.8"
 m31a-core = { path = "../m31a-core" }
+m31a-wasm = { path = "../m31a-wasm" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { version = "0.10", features = ["std"] }
