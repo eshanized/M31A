@@ -5,7 +5,7 @@
 **Target Branch:** `master`  
 **Feature Branch:** `feat/phase-3-multimodal-verification-sandbox`  
 **Author:** Principal Systems Architect & Security Engineering Lead  
-**Status:** Approved / In Implementation  
+**Status:** Target architecture; implementation remediation in progress  
 
 ---
 
@@ -14,7 +14,10 @@
 ### 1.1 Context and Vision
 M31A is an enterprise-grade autonomous coding assistant built with Rust 2024. Phase 1 established the baseline 39-crate monorepo, Bubblewrap sandboxing on Linux, fuzzy AST patching, and NVIDIA NIM integration. Phase 2 developed the native desktop application (Tauri 2, React, TypeScript) and the authoritative runtime session engine (`m31a-runtime`).
 
-This document specifies the architecture and implementation for **Phase 3: Multi-Modal Verification & Extended Sandboxing** (`ROADMAP.md` v0.3.0). Phase 3 elevates M31A from a Linux-centric, text-dominated development assistant into a cross-platform, multi-modal, kernel-audited, and sandboxed-extensible autonomous engineering platform.
+This document specifies the intended architecture for **Phase 3: Multi-Modal Verification & Extended Sandboxing** (`ROADMAP.md` v0.3.0).
+
+> [!WARNING]
+> This is an architectural target, not a claim that every capability is currently implemented. Kernel eBPF event capture is absent, Windows AppContainer launch is deliberately disabled, macOS Seatbelt remains legacy/experimental, and visual repair currently consists of guarded primitives rather than a runtime-integrated autonomous repair loop. See `ROADMAP.md` for verified implementation status.
 
 ### 1.2 Phase 2 / Phase 3 Scope Clarification
 A discrepancy exists between `ROADMAP.md` and current repository history:

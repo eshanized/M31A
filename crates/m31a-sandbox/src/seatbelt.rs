@@ -191,8 +191,8 @@ impl SeatbeltSandbox {
 (deny file-write*
 {protected_denies})
 
-; network access
-(allow network*)
+; network is denied until a specific egress policy is wired into this backend
+(deny network*)
 "#,
                     workspace = workspace_clean,
                     protected_denies = protected_denies.trim_end()

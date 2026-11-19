@@ -48,31 +48,26 @@ impl BoundedAuditRingBuffer {
     /// Pushes an event into the ring buffer. If capacity is exhausted,
     /// drops the event and updates loss counters without blocking caller.
     pub fn push(&self, record: AuditRecord) -> bool {
+        // Count every submitted record; the loss rate denominator includes accepted
+        // and rejected submissions.
         self.events_emitted.fetch_add(1, Ordering::Relaxed);
 
-        if let Ok(mut lock) = self.buffer.write() {
-            if lock.len() >= self.capacity {
-                let lost = self.events_lost.fetch_add(1, Ordering::Relaxed) + 1;
-                // If capacity is breached, drop the oldest record to accommodate newest, or drop record
-                lock.pop_front();
-                // Insert overflow notification
-                lock.push_back(AuditRecord::new(
-                    record.turn_id.clone(),
-                    record.sandbox_id.clone(),
-                    AuditEventKind::RingBufferOverflow {
-                        lost_events_count: lost,
-                        buffer_capacity: self.capacity,
-                    },
-                ));
+        let mut lock = match self.buffer.write() {
+            Ok(lock) => lock,
+            Err(_) => {
+                self.events_lost.fetch_add(1, Ordering::Relaxed);
                 return false;
             }
+        };
 
-            lock.push_back(record);
-            true
-        } else {
+        if lock.len() >= self.capacity {
+            // Preserve retained history and discard only this incoming record.
             self.events_lost.fetch_add(1, Ordering::Relaxed);
-            false
+            return false;
         }
+
+        lock.push_back(record);
+        true
     }
 
     /// Drains all currently queued events from the buffer.
@@ -150,13 +145,15 @@ mod tests {
         }
 
         assert_eq!(ring.events_emitted(), 10);
-        assert!(ring.events_lost() > 0);
-        let drained = ring.drain();
-        // Check that at least one overflow record is present in drained buffer
+        assert_eq!(ring.events_lost(), 7);
+        let snapshot = ring.snapshot();
+        assert_eq!(snapshot.len(), 3);
         assert!(
-            drained
+            snapshot
                 .iter()
-                .any(|r| matches!(r.kind, AuditEventKind::RingBufferOverflow { .. }))
+                .all(|r| !matches!(r.kind, AuditEventKind::RingBufferOverflow { .. }))
         );
+        let drained = ring.drain();
+        assert_eq!(drained.len(), 3);
     }
 }

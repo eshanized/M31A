@@ -10,32 +10,25 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased] (Target: v0.3.0)
 
 ### Added
-- **Autonomous Visual Regression TDD v2 (Workstream A)**:
+- **Visual Regression TDD v2 foundation (Workstream A)**:
   - Multi-resolution viewport matrix testing (`Mobile`, `Tablet`, `Desktop`, `Wide`) with device pixel ratios and CDP emulation.
-  - Automated screenshot comparison combining exact pixel matching and perceptual Rec. 709 weighted RGB color distance calculation.
-  - Visual difference heatmaps highlighting regressions with semi-transparent overlays and highlighted bounding boxes.
-  - Dynamic rectangular comparison masks to ignore volatile UI regions (timestamps, randomized content, animations).
-  - Cryptographic baseline store (`BaselineStore`) managing SHA-256 golden images with non-overwriting approval workflows.
-  - Bounded layout repair coordinator (`LayoutRepairCoordinator`) with atomic snapshot checkpoints and rollback on regression.
-  - Structured Markdown and JSON visual regression reports (`VisualRegressionReport`).
-- **eBPF-Based Execution Auditing (Workstream B)**:
-  - New modular domain crate `crates/m31a-ebpf`.
-  - Kernel-level execution observation detecting BTF (`/sys/kernel/btf/vmlinux`) and sysctl permissions (`unprivileged_bpf_disabled`).
-  - Child-process provenance tracking correlating process trees back to sandbox turn IDs.
-  - Bounded lock-free ring buffer with atomic tracking of dropped records under buffer congestion.
-  - Secret redaction engine scrubbing high-entropy tokens, flags (`--token=`, `--password=`), and sensitive paths (`.ssh`, `.env`).
-  - Auditing performance benchmarker measuring sub-microsecond event recording overhead (~20-40 ns per audit event).
-  - Explicit architectural boundary: auditing is strictly observational and never replaces authoritative sandbox enforcement.
-- **Cross-Platform Sandboxing Support (Workstream C)**:
-  - Unified `SandboxPlatform` abstraction across Linux, macOS, and Windows with fail-closed policy enforcement.
-  - Hardened macOS Seatbelt backend generating Scheme-based SBPL profiles with network isolation, read-only system mounts, and path escaping against injection attacks.
-  - Native Windows AppContainer backend creating low-integrity isolated processes, explicit `icacls` DACL workspace grants, and capability SIDs.
-  - Preserved Linux Bubblewrap backend with namespace unsharing, Landlock filesystem limits, and Seccomp filtering.
+  - Exact pixel comparison, Rec. 709 weighted RGB distance, heatmaps, and dynamic comparison masks.
+  - SHA-256 baseline integrity checks, collision-resistant scenario identifiers, and manifest path containment.
+  - Bounded repair diagnostics, explicit approval/attempt guards, and checkpoint/rollback primitives; runtime-integrated autonomous patch application and re-verification remain incomplete.
+- **eBPF Audit Processing foundation (Workstream B)**:
+  - New modular crate `crates/m31a-ebpf` with prerequisite probing, caller-supplied event processing, process correlation, redaction, bounded buffering, and synthetic benchmarks.
+  - Kernel BPF object loading, tracepoint attachment, kernel ring-buffer consumption, and runtime kernel-event integration are not implemented; capability probing reports the event source unavailable instead of claiming kernel auditing support.
+  - Auditing remains observational and does not replace authoritative sandbox enforcement.
+- **Sandbox Platform foundation (Workstream C)**:
+  - Unified `SandboxPlatform` capability reporting and platform abstraction.
+  - Linux Bubblewrap/Landlock/Seccomp implementations remain the active isolation paths where available.
+  - macOS Seatbelt profile generation is experimental and denies network by default; `sandbox-exec` is legacy/deprecation-sensitive and needs native macOS integration validation.
+  - Windows AppContainer launch is disabled because restricted process creation is not implemented. Restricted Windows commands require verified MXC isolation or fail closed.
 - **WebAssembly Plugin Architecture (Workstream D)**:
   - New modular domain crate `crates/m31a-wasm`.
-  - Pure-Rust sandboxed WebAssembly runtime powered by `wasmi` with deterministic fuel metering (e.g. 5M instructions) and bounded linear memory (e.g. 16 pages).
+  - Pure-Rust sandboxed WebAssembly runtime powered by `wasmi` with per-invocation fuel quotas and store-level memory-growth limits.
   - ABI v1 specification with structured manifests (`WasmPluginManifest`) declaring identity, versions, and capabilities.
-  - Capability-gated host environment preventing ambient filesystem or network access without explicit authorization.
+  - Component-aware path grants, canonical workspace containment checks, symlink rejection, and bounded host filesystem reads.
   - Coexistence of WebAssembly modules and native dynamic plugins within `m31a-extension-api`.
 - **Runtime & CLI Integration (Milestone 5)**:
   - Integrated `auditor` and `wasm_runtime` into `RuntimeServices` and `RuntimeBuilder` in `m31a-runtime`.

@@ -6,9 +6,12 @@
 use super::errors::WasmError;
 use super::host::HostContext;
 use super::manifest::WasmPluginManifest;
+use std::io::Read;
 use std::path::PathBuf;
 use tracing::{debug, warn};
-use wasmi::{Caller, Config, Engine, Linker, Memory, Module, Store, TypedFunc};
+use wasmi::{Caller, Config, Engine, Linker, Memory, Module, Store, StoreLimitsBuilder, TypedFunc};
+
+const MAX_HOST_FS_READ_BYTES: usize = 1024 * 1024;
 
 /// A running, sandboxed WebAssembly plugin instance.
 pub struct WasmPluginInstance {
@@ -51,6 +54,11 @@ impl WasmPluginInstance {
                 len: args_bytes.len(),
                 mem_size: self.memory.data(&self.store).len(),
             })?;
+
+        // Fuel is an invocation budget, not a lifetime budget for the instance.
+        self.store
+            .set_fuel(self.manifest.limits.max_fuel)
+            .map_err(|e| WasmError::Internal(anyhow::anyhow!("Failed to reset guest fuel: {e}")))?;
 
         // 2. Call guest entrypoint
         let res_code = entry
@@ -141,8 +149,24 @@ impl WasmRuntime {
         let module = Module::new(&self.engine, wasm_bytes)
             .map_err(|e| WasmError::ModuleValidationFailed(format!("Invalid Wasm module: {e}")))?;
 
-        let host_ctx = HostContext::new(manifest.clone(), workspace_root, config_json);
+        let mut host_ctx = HostContext::new(manifest.clone(), workspace_root, config_json);
+        let memory_limit_bytes = (manifest.limits.max_memory_pages as usize)
+            .checked_mul(64 * 1024)
+            .ok_or_else(|| {
+                WasmError::InvalidManifest(
+                    "max_memory_pages overflows host address space".to_string(),
+                )
+            })?;
+        host_ctx.limits = StoreLimitsBuilder::new()
+            .memory_size(memory_limit_bytes)
+            .instances(1)
+            .memories(1)
+            .tables(16)
+            .build();
         let mut store = Store::new(&self.engine, host_ctx);
+        // Install before module instantiation so declared memories and later memory.grow
+        // operations are subject to the same configured ceiling.
+        store.limiter(|context| &mut context.limits);
 
         // Configure initial fuel budget
         store
@@ -203,17 +227,26 @@ impl WasmRuntime {
                             Err(_) => return -2,
                         };
 
+                        if max_len < 0 || max_len as usize > MAX_HOST_FS_READ_BYTES {
+                            return -5; // Invalid or excessive guest read request
+                        }
+                        let max_len = max_len as usize;
+
                         let validated_path = match caller.data().validate_path(&path_str, false) {
                             Ok(p) => p,
                             Err(_) => return -3, // Unauthorized capability
                         };
 
-                        let content = match std::fs::read(&validated_path) {
-                            Ok(c) => c,
+                        let file = match std::fs::File::open(&validated_path) {
+                            Ok(file) => file,
                             Err(_) => return -4,
                         };
-
-                        if content.len() > max_len as usize {
+                        let mut content = Vec::with_capacity(max_len.min(8192));
+                        let mut bounded_reader = file.take(max_len as u64 + 1);
+                        if bounded_reader.read_to_end(&mut content).is_err() {
+                            return -4;
+                        }
+                        if content.len() > max_len {
                             return -5; // Buffer too small
                         }
 

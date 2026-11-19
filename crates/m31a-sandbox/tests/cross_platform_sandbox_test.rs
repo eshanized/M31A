@@ -27,7 +27,8 @@ fn test_macos_seatbelt_profile_security_invariants() {
     // 2. Workspace-Write Policy: Allow workspace write, but deny sensitive metadata
     let rw_profile = SeatbeltSandbox::generate_profile(SandboxPolicy::WorkspaceWrite, ws).unwrap();
     assert!(rw_profile.contains("allow file-write* (subpath \"/Users/dev/workspace\")"));
-    assert!(rw_profile.contains("(allow network*)"));
+    assert!(rw_profile.contains("(deny network*)"));
+    assert!(!rw_profile.contains("(allow network*)"));
     // Deny masks on sensitive subdirectories
     assert!(rw_profile.contains("/Users/dev/workspace/.git"));
     assert!(rw_profile.contains("/Users/dev/workspace/.ssh"));
@@ -40,6 +41,7 @@ fn test_macos_seatbelt_profile_security_invariants() {
         SeatbeltSandbox::generate_profile(SandboxPolicy::DangerFullAccess, ws).unwrap();
     assert!(full_profile.contains("allow file-write* (subpath \"/\")"));
     assert!(full_profile.contains("allow sysctl-write"));
+    assert!(full_profile.contains("(allow network*)"));
 }
 
 #[test]
@@ -52,6 +54,10 @@ fn test_macos_seatbelt_path_escaping() {
 
 #[test]
 fn test_windows_appcontainer_security_plan_invariants() {
+    assert!(
+        !AppContainerSandbox::is_available(),
+        "AppContainer must remain unavailable until restricted process creation is implemented"
+    );
     let ws = Path::new("C:\\Users\\dev\\workspace");
 
     // 1. ReadOnly Policy: No network capability SIDs, read_only_workspace = true

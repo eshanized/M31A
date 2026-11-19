@@ -32,7 +32,7 @@ impl AuditBenchmarker {
         let start = Instant::now();
 
         for i in 0..iterations {
-            let child_pid = 5001 + (i % 50) as u32;
+            let child_pid = 5001 + ((i / 4) % 50) as u32;
             if i % 4 == 0 {
                 auditor.ingest_event(AuditEventKind::ProcessExec {
                     pid: child_pid,

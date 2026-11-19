@@ -71,6 +71,17 @@ impl ExecutionAuditor {
     /// Ingests a raw event, applies secret redaction, correlates with provenance,
     /// and pushes into the bounded ring buffer.
     pub fn ingest_event(&self, kind: AuditEventKind) {
+        // Capture exiting provenance before removal; never inherit an exiting PID
+        // from its parent, which would reinsert stale identity after process death.
+        let exit_provenance = match &kind {
+            AuditEventKind::ProcessExit { pid, .. } => {
+                let provenance = self.correlator.lookup_pid(*pid);
+                self.correlator.deregister_pid(*pid);
+                provenance
+            }
+            _ => None,
+        };
+
         // Redact secrets
         let redacted_kind = match kind {
             AuditEventKind::ProcessExec {
@@ -102,15 +113,12 @@ impl ExecutionAuditor {
                 ppid,
                 exit_code,
                 duration_ms,
-            } => {
-                self.correlator.deregister_pid(pid);
-                AuditEventKind::ProcessExit {
-                    pid,
-                    ppid,
-                    exit_code,
-                    duration_ms,
-                }
-            }
+            } => AuditEventKind::ProcessExit {
+                pid,
+                ppid,
+                exit_code,
+                duration_ms,
+            },
             other => other,
         };
 
@@ -123,8 +131,8 @@ impl ExecutionAuditor {
                     (None, None)
                 }
             }
-            AuditEventKind::ProcessExit { pid, ppid, .. } => {
-                if let Some(prov) = self.correlator.inherit_or_lookup(*pid, *ppid) {
+            AuditEventKind::ProcessExit { .. } => {
+                if let Some(prov) = exit_provenance {
                     (Some(prov.turn_id), Some(prov.sandbox_id))
                 } else {
                     (None, None)

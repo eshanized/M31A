@@ -74,7 +74,7 @@
 
 **M31A** is a high-performance, sovereign, autonomous agentic coding assistant designed from first principles as an open-source alternative to proprietary AI engineering tools (such as OpenAI Codex CLI, Cursor, and Claude Code).
 
-Engineered in modern **Rust 2024 edition (1.85+)** across a **42-crate modular monorepo**, M31A couples low-latency **NVIDIA NIM** frontier models (Nemotron 3.5, DeepSeek R1 / v4.1 Flash, Codestral, and Llama 3.1) with unified **cross-platform sandboxing** (Linux Bubblewrap, macOS Seatbelt, Windows AppContainer), **kernel-level eBPF execution auditing**, **sandboxed WebAssembly extensions**, **AST semantic blast-radius gating**, **autonomous visual regression TDD v2 via headless Chromium**, and a **4-tier fuzzy multi-file patch engine**.
+Engineered in modern **Rust 2024 edition (1.85+)** across a **42-crate modular monorepo**, M31A couples low-latency **NVIDIA NIM** frontier models (Nemotron 3.5, DeepSeek R1 / v4.1 Flash, Codestral, and Llama 3.1) with Linux Bubblewrap isolation, experimental macOS Seatbelt profile support, userspace audit-event processing (kernel eBPF capture is not integrated), a sandboxed WebAssembly extension foundation, **AST semantic blast-radius gating**, **autonomous visual regression TDD v2 via headless Chromium**, and a **4-tier fuzzy multi-file patch engine**.
 
 Whether running as an interactive full-screen **Ratatui Terminal UI**, executing in **continuous vibe coding auto-healing loops**, evaluating competing architectural designs in a **speculative parallel reality arena**, or serving IDE extensions over **JSON-RPC 2.0 (stdio, UDS, HTTP/SSE)**, M31A delivers zero-babysitter autonomy without compromising security.
 
@@ -775,8 +775,8 @@ crates/
 │   └── m31a-ast/                     # Symbol call-graph analysis & blast-radius scoring
 │
 ├── 5. Security, Sandboxing & Auditing
-│   ├── m31a-sandbox/                 # Cross-platform sandboxing (Bubblewrap, Seatbelt, AppContainer)
-│   ├── m31a-ebpf/                    # Kernel-level eBPF syscall auditing & ring buffer metrics
+│   ├── m31a-sandbox/                 # Linux isolation, experimental Seatbelt; AppContainer disabled
+│   ├── m31a-ebpf/                    # Audit event processing; kernel event capture not yet implemented
 │   ├── m31a-execpolicy/              # Prefix command rules & network destination filters
 │   ├── m31a-guardian/                # Review supervisor & sliding-window circuit breaker
 │   └── m31a-trust/                   # Workspace trust boundary & git hook armor
@@ -852,7 +852,7 @@ npm test --prefix sdk/typescript
 | [**CLI Command Reference**](docs/CLI_REFERENCE.md) | Comprehensive reference for all 54 subcommands, arguments, and flags. |
 | [**Configuration Guide**](docs/CONFIGURATION.md) | Complete reference for `config.toml`, profiles, and approval presets. |
 | [**App Server & JSON-RPC Protocol**](docs/APP_SERVER_RPC.md) | Specification of 40+ JSON-RPC methods and SSE streaming events. |
-| [**Sandbox & Security Architecture**](docs/SANDBOX_SECURITY.md) | Linux Bubblewrap isolation, macOS Seatbelt, Windows AppContainer, and eBPF Auditing. |
+| [**Sandbox & Security Architecture**](docs/SANDBOX_SECURITY.md) | Linux isolation, experimental macOS Seatbelt, disabled Windows AppContainer, and eBPF audit-processing status. |
 | [**Extensions, Skills & MCP**](docs/EXTENSIONS_AND_SKILLS.md) | Custom skill creation, YAML frontmatter, WASM plugins, and external MCP servers. |
 | [**Multi-Agent Swarm & Distributed Mesh**](docs/SWARM_AND_MULTI_AGENT.md) | Swarm coordination, message boards, and distributed task mesh. |
 | [**Crates Directory Catalog**](crates/README.md) | Exhaustive map of all 42 crates in the Cargo workspace. |
@@ -866,7 +866,7 @@ npm test --prefix sdk/typescript
 
 - [x] **Phase 1: Baseline Architecture & Release Readiness (v0.1.0 - v0.1.15)**: Modular 39-crate monorepo, NVIDIA NIM frontier models, Ratatui TUI, 4-tier fuzzy patch engine, Bubblewrap sandbox, Vibe coding auto-healing loop, Speculative reality arena, and official TypeScript & Python SDKs.
 - [ ] **Phase 2: IDE Ecosystem & Native Integrations (v0.2.0)**: Official VS Code and Cursor extensions, JetBrains plugin suite, bidirectional Language Server Protocol (LSP) bridge, and cross-session vector-indexed memory graphs.
-- [x] **Phase 3: Multi-Modal Verification & Extended Sandboxing (v0.3.0)**: Visual regression TDD v2 with diff heatmaps and automated layout repair, eBPF-based kernel execution auditing, macOS Seatbelt sandboxing, Windows AppContainer isolation, and sandboxed WebAssembly extensions.
+- [ ] **Phase 3: Multi-Modal Verification & Extended Sandboxing (v0.3.0)**: Visual comparison and sandboxed WebAssembly foundations are implemented; autonomous repair orchestration, kernel eBPF event capture, production macOS Seatbelt validation, and native Windows AppContainer process creation remain incomplete. See `ROADMAP.md` for current status.
 - [ ] **Phase 4: Sovereign Repository Stewardship (v1.0.0+)**: Autonomous continuous dependency migrations, formal proof engine integration (Kani, Coq), and enterprise fleet policy federations.
 
 Consult [`ROADMAP.md`](ROADMAP.md) for full roadmap details.
