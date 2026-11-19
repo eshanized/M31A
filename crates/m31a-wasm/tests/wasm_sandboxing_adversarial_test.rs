@@ -209,11 +209,7 @@ fn test_unauthorized_filesystem_access_blocked() {
         let external_dir = tempdir().unwrap();
         let external_secret = external_dir.path().join("outside-secret.txt");
         std::fs::write(&external_secret, "outside-workspace-secret").unwrap();
-        std::os::unix::fs::symlink(
-            &external_secret,
-            dir.path().join("allowed-link.txt"),
-        )
-        .unwrap();
+        std::os::unix::fs::symlink(&external_secret, dir.path().join("allowed-link.txt")).unwrap();
     }
 
     let manifest = WasmPluginManifest {
