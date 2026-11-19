@@ -70,7 +70,10 @@ fn test_process_provenance_and_child_tracking() {
         turn_id: Some("turn-999".to_string()),
         ..Default::default()
     });
-    assert!(matches!(exits.last().unwrap().kind, AuditEventKind::ProcessExit { pid: 4002, .. }));
+    assert!(matches!(
+        exits.last().unwrap().kind,
+        AuditEventKind::ProcessExit { pid: 4002, .. }
+    ));
     assert_eq!(exits.last().unwrap().turn_id.as_deref(), Some("turn-999"));
     assert_eq!(auditor.summary().active_processes_tracked, 1);
 }
