@@ -119,7 +119,9 @@ impl BaselineStore {
     fn resolve_manifest_image_path(&self, relative_path: &str) -> Result<Option<PathBuf>> {
         let relative = Path::new(relative_path);
         if relative.is_absolute()
-            || !relative.components().all(|component| matches!(component, Component::Normal(_)))
+            || !relative
+                .components()
+                .all(|component| matches!(component, Component::Normal(_)))
         {
             bail!("Invalid baseline manifest image path: {:?}", relative_path);
         }
@@ -150,7 +152,11 @@ impl BaselineStore {
         manifest
             .records
             .get(&BaselineManifest::make_key(scenario_name, viewport_id))
-            .or_else(|| manifest.records.get(&BaselineManifest::legacy_key(scenario_name, viewport_id)))
+            .or_else(|| {
+                manifest
+                    .records
+                    .get(&BaselineManifest::legacy_key(scenario_name, viewport_id))
+            })
     }
 
     /// Checks the baseline status for a scenario and viewport.
@@ -167,9 +173,11 @@ impl BaselineStore {
 
         let file_path = match self.resolve_manifest_image_path(&record.relative_image_path)? {
             Some(path) => path,
-            None => return Ok(BaselineStatus::FileNotFound {
-                path: self.root_dir.join(&record.relative_image_path),
-            }),
+            None => {
+                return Ok(BaselineStatus::FileNotFound {
+                    path: self.root_dir.join(&record.relative_image_path),
+                });
+            }
         };
 
         let bytes = std::fs::read(&file_path)
@@ -200,10 +208,12 @@ impl BaselineStore {
 
         let file_path = self
             .resolve_manifest_image_path(&record.relative_image_path)?
-            .ok_or_else(|| anyhow::anyhow!(
-                "Baseline file referenced in manifest does not exist on disk: {:?}",
-                record.relative_image_path
-            ))?;
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Baseline file referenced in manifest does not exist on disk: {:?}",
+                    record.relative_image_path
+                )
+            })?;
 
         let bytes = std::fs::read(&file_path)
             .with_context(|| format!("Failed to read baseline image at {:?}", file_path))?;
@@ -244,7 +254,10 @@ impl BaselineStore {
             || vp_id == "."
             || vp_id == ".."
         {
-            bail!("Baseline viewport id is not a safe path component: {:?}", vp_id);
+            bail!(
+                "Baseline viewport id is not a safe path component: {:?}",
+                vp_id
+            );
         }
         let scenario_digest = format!("{:x}", Sha256::digest(scenario_name.as_bytes()));
         let rel_filename = format!("{}/{}.png", scenario_digest, vp_id);
