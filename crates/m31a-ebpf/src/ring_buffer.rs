@@ -100,6 +100,7 @@ impl BoundedAuditRingBuffer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::events::AuditEventKind;
 
     #[test]
     fn test_ring_buffer_push_drain() {

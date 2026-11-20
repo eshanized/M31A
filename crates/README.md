@@ -13,7 +13,7 @@ M31A was engineered from first principles as a modular Rust monorepo in the **Ru
 This architectural separation delivers major developer benefits:
 - **Fast Incremental Builds**: Modifying a TUI widget doesn't trigger recompilation of the Linux sandbox or the SQLite storage engine.
 - **Strict Invariant Boundaries**: Security boundaries (like Linux namespaces and Windows AppContainers in [`m31a-sandbox`](m31a-sandbox)) cannot be bypassed by upper application layers.
-- **Independent Testability**: Each crate enforces our **Zero-Mock Policy**, running real tests against real SQLite databases, real Bubblewrap containers, and real Git repositories.
+- **Independent Testability**: Each crate enforces our **Real-Environment Testing Policy**, running real tests against real SQLite databases, real Bubblewrap containers, real GDB debugger subprocesses, and real Git repositories.
 - **Reusability**: Downstream tools and SDKs can consume specific domain crates (like [`m31a-patch`](m31a-patch) for fuzzy diffing, [`m31a-wasm`](m31a-wasm) for extension sandboxing, or [`m31a-provider`](m31a-provider) for NVIDIA NIM streaming) without pulling in the entire application.
 
 ---
@@ -147,8 +147,8 @@ flowchart TD
 ### 5. Security, Sandboxing & Auditing
 | Crate | Focus & Responsibility | Key Types / Modules |
 | :--- | :--- | :--- |
-| [`m31a-sandbox`](m31a-sandbox) | Unified cross-platform isolation (Linux Bubblewrap & Landlock, macOS Seatbelt SBPL, Windows AppContainer) and credential tmpfs masking. | `platform/`, `bwrap_builder.rs`, `seatbelt.rs`, `appcontainer.rs`, `runner.rs` |
-| [`m31a-ebpf`](m31a-ebpf) | Kernel-level syscall observation, child-process provenance tracking, bounded ring buffer metrics, and secret redaction. | `probe.rs`, `auditor.rs`, `correlator.rs`, `ring_buffer.rs`, `benchmark.rs` |
+| [`m31a-sandbox`](m31a-sandbox) | Unified cross-platform isolation (Linux Bubblewrap & Landlock, macOS Seatbelt SBPL, Windows AppContainer security plan modeling) and credential tmpfs masking. | `platform/`, `bwrap_builder.rs`, `seatbelt.rs`, `appcontainer.rs`, `runner.rs` |
+| [`m31a-ebpf`](m31a-ebpf) | Audit event processing, process provenance tracking, bounded ring buffer metrics, and secret redaction. | `probe.rs`, `auditor.rs`, `correlator.rs`, `ring_buffer.rs`, `benchmark.rs` |
 | [`m31a-execpolicy`](m31a-execpolicy) | Command prefix rules engine, alternative tokens (`PatternToken::Alts`), compound AST decomposition, and network filters. | `policy.rs`, `ast_decomposer.rs`, `connect_policy.rs`, `presets.rs` |
 | [`m31a-guardian`](m31a-guardian) | Out-of-band security supervisor, prompt injection detector, data exfiltration guard, and sliding-window circuit breaker. | `circuit_breaker.rs`, `reviewer.rs`, `prompt_injection_detector.rs`, `data_exfiltration_guard.rs` |
 | [`m31a-trust`](m31a-trust) | Workspace trust boundary enforcement, Git hook security auditor (`GitArmor`), and cryptographic trust store. | `git_armor.rs`, `trust_store.rs`, `capability.rs` |
@@ -181,11 +181,12 @@ flowchart TD
 
 ## Testing Strategy Across Crates
 
-All 42 crates adhere strictly to the **Zero-Mock Policy**:
+All 42 crates adhere to the **Real-Environment Testing Policy** for core engines and tools:
 - SQLite tests use real in-memory or temporary database instances with live migrations.
 - Sandbox tests verify real Linux namespaces using `bwrap` where supported.
 - Patch tests run on real UTF-8 buffers with Unicode typographic stress tests.
-- Provider tests feature live integration suites against `build.nvidia.com`.
+- Tool tests execute real processes (e.g. `gdb` MI, `git init`, `/proc` inspection).
+- Provider and network tests feature live integration suites against `build.nvidia.com` alongside typed fail-closed handling.
 
 ```bash
 # Run all workspace unit and integration tests

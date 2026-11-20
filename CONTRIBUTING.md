@@ -196,7 +196,7 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings
 
 ### Core Architectural Principles
 
-- **No Mocks Policy**: Unit and integration tests should exercise real components, real SQLite in-memory databases, and real filesystem sandboxes wherever feasible. Mocks are restricted solely to offline simulated network endpoints.
+- **Real-Environment Testing Policy**: Unit and integration tests should exercise real components, real SQLite in-memory databases, and real filesystem sandboxes wherever feasible. Mocks are restricted solely to offline simulated network endpoints and test doubles.
 - **Fail-Safe Defaults**: Security checks in `m31a-sandbox`, `m31a-execpolicy`, and `m31a-guardian` default to denying or prompting when ambiguous.
 - **Error Propagation**: Use `thiserror` for library crate error enumerations and `anyhow` for top-level application orchestration. Preserve full causal chains with `.context(...)`.
 

@@ -4,7 +4,7 @@ version.workspace = true
 edition = "2024"
 authors.workspace = true
 license.workspace = true
-description = "Kernel-level eBPF execution auditing, provenance tracing, and ring buffer event accounting for M31A"
+description = "Audit event processing, execution provenance correlation, bounded ring buffer metrics, and secret redaction for M31A"
 
 [dependencies]
 m31a-core = { path = "../m31a-core" }

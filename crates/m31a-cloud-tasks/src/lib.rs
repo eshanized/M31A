@@ -718,6 +718,7 @@ impl CloudTaskDispatcher {
     }
 }
 
+#[cfg(any(test, feature = "mock"))]
 pub type MockCloudTasksClient = LocalFallbackCloudTasksClient;
 
 impl SpawnAgentRequest {

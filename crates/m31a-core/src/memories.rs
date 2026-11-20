@@ -38,33 +38,97 @@ pub trait EmbeddingGenerator: Send + Sync {
     fn dimension(&self) -> usize;
 }
 
-/// Mock embedding generator for tests and deterministic offline use.
+fn fnv1a_hash(data: &[u8]) -> u64 {
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for &byte in data {
+        hash ^= byte as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
+}
+
+/// Deterministic local feature-hashing embedding generator using subword n-grams and token hashing.
+///
+/// Implements signed feature hashing (the hashing trick) over words, word bigrams, and character
+/// 3-grams and 4-grams, weighted by sublinear term frequencies and normalized to unit L2 length.
+/// This enables mathematically grounded, offline semantic similarity without remote API calls.
 #[derive(Debug, Clone)]
-pub struct MockEmbeddingGenerator {
+pub struct LocalHashingEmbeddingGenerator {
     dim: usize,
 }
 
-impl MockEmbeddingGenerator {
+impl LocalHashingEmbeddingGenerator {
     pub fn new(dim: usize) -> Self {
         Self { dim }
     }
 }
 
-impl Default for MockEmbeddingGenerator {
+impl Default for LocalHashingEmbeddingGenerator {
     fn default() -> Self {
-        Self { dim: 8 }
+        Self { dim: 64 }
     }
 }
 
-impl EmbeddingGenerator for MockEmbeddingGenerator {
+impl EmbeddingGenerator for LocalHashingEmbeddingGenerator {
     fn generate_embedding(&self, text: &str) -> Result<Vec<f32>> {
         if self.dim == 0 {
             anyhow::bail!("Embedding dimension cannot be 0");
         }
+
         let mut vec = vec![0.0f32; self.dim];
-        for (i, b) in text.as_bytes().iter().enumerate() {
-            vec[i % self.dim] += (*b as f32) / 255.0 + 0.01;
+        let lower = text.to_lowercase();
+        let words: Vec<&str> = lower
+            .split(|c: char| !c.is_alphanumeric() && c != '_' && c != '-')
+            .filter(|w| !w.is_empty())
+            .collect();
+
+        if words.is_empty() {
+            vec[0] = 1.0;
+            return Ok(vec);
         }
+
+        let mut counts: std::collections::HashMap<u64, usize> = std::collections::HashMap::new();
+
+        // 1. Word unigrams
+        for word in &words {
+            let h = fnv1a_hash(word.as_bytes());
+            *counts.entry(h).or_insert(0) += 1;
+        }
+
+        // 2. Word bigrams
+        for pair in words.windows(2) {
+            let bigram = format!("{}_{}", pair[0], pair[1]);
+            let h = fnv1a_hash(bigram.as_bytes());
+            *counts.entry(h).or_insert(0) += 1;
+        }
+
+        // 3. Subword character 3-grams and 4-grams
+        for word in &words {
+            let chars: Vec<char> = word.chars().collect();
+            if chars.len() >= 3 {
+                for window in chars.windows(3) {
+                    let s: String = window.iter().collect();
+                    let h = fnv1a_hash(s.as_bytes());
+                    *counts.entry(h).or_insert(0) += 1;
+                }
+            }
+            if chars.len() >= 4 {
+                for window in chars.windows(4) {
+                    let s: String = window.iter().collect();
+                    let h = fnv1a_hash(s.as_bytes());
+                    *counts.entry(h).or_insert(0) += 1;
+                }
+            }
+        }
+
+        // Accumulate into dense vector using signed hashing
+        for (hash, count) in counts {
+            let idx = ((hash >> 1) as usize) % self.dim;
+            let sign = if (hash & 1) == 0 { 1.0f32 } else { -1.0f32 };
+            let tf = 1.0 + (count as f32).ln();
+            vec[idx] += sign * tf;
+        }
+
         normalize_vector(&vec)
     }
 
@@ -72,6 +136,9 @@ impl EmbeddingGenerator for MockEmbeddingGenerator {
         self.dim
     }
 }
+
+/// Backwards-compatible alias for deterministic offline usage and test suites.
+pub type MockEmbeddingGenerator = LocalHashingEmbeddingGenerator;
 
 /// HTTP client embedding generator for remote providers (NVIDIA NIM, OpenAI).
 #[derive(Clone)]
@@ -879,5 +946,35 @@ mod tests {
         let (offline_mode, offline_hits) = mgr_offline.search_memories_with_mode("Asynchronous");
         assert_eq!(offline_mode, RetrievalMethod::Lexical);
         assert!(!offline_hits.is_empty());
+    }
+
+    #[test]
+    fn test_local_hashing_embedding_semantic_overlap() {
+        let generator = LocalHashingEmbeddingGenerator::new(64);
+
+        let v1 = generator
+            .generate_embedding("authentication token login service endpoint")
+            .unwrap();
+        let v2 = generator
+            .generate_embedding("auth login token user session service")
+            .unwrap();
+        let v_diff = generator
+            .generate_embedding("strawberry pancake maple syrup breakfast recipe")
+            .unwrap();
+
+        assert_eq!(v1.len(), 64);
+        assert_eq!(v2.len(), 64);
+        assert_eq!(v_diff.len(), 64);
+
+        let sim_similar = calculate_cosine_similarity(&v1, &v2).unwrap();
+        let sim_diff = calculate_cosine_similarity(&v1, &v_diff).unwrap();
+
+        assert!(
+            sim_similar > sim_diff,
+            "Semantically related texts must have higher cosine similarity than unrelated ones (similar: {}, diff: {})",
+            sim_similar,
+            sim_diff
+        );
+        assert!(sim_similar > 0.4, "Expected significant overlap for shared tokens/subwords: {}", sim_similar);
     }
 }

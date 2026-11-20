@@ -18,7 +18,7 @@
     <a href="https://npmjs.com/package/@m31a/sdk"><img src="https://img.shields.io/badge/TypeScript%20SDK-@m31a/sdk-3178c6.svg?style=flat-square&logo=typescript" alt="TypeScript SDK" /></a>
     <a href="https://pypi.org/project/m31a/"><img src="https://img.shields.io/badge/Python%20SDK-m31a-3776AB.svg?style=flat-square&logo=python" alt="Python SDK" /></a>
     <img src="https://img.shields.io/badge/Workspace-42%20Crates-purple.svg?style=flat-square" alt="42 Crates" />
-    <img src="https://img.shields.io/badge/Testing-Zero--Mock%20Enforced-success.svg?style=flat-square" alt="Zero-Mock Enforced" />
+    <img src="https://img.shields.io/badge/Testing-Real--Environment%20Verified-success.svg?style=flat-square" alt="Real-Environment Verified" />
   </p>
 </div>
 
@@ -720,23 +720,23 @@ if __name__ == "__main__":
 
 ## 📊 Performance & Benchmark Metrics
 
-M31A achieves microsecond-scale execution overhead by combining native Rust concurrency, zero-copy buffer serialization, and embedded SQLite caching.
+M31A achieves low millisecond-scale execution overhead by combining native Rust concurrency, zero-copy buffer serialization, and embedded SQLite caching.
 
-Results from official end-to-end full session benchmarks (`benchmark_results.json`):
+Results from official system diagnostic and initialization benchmarks (`benchmark_results.json`):
 
 | Metric | Measured Value | Description |
 | :--- | :--- | :--- |
-| **Total Duration** | `158.99 ms` | 5 full turn execution cycles with state roundtrips. |
-| **Min Latency** | `7.48 ms` | Best-case turn dispatch and IPC response latency. |
-| **Avg Latency** | `31.77 ms` | Mean turn lifecycle latency across test iterations. |
-| **p50 Latency** | `28.53 ms` | 50th percentile turn roundtrip time. |
-| **p95 Latency** | `55.54 ms` | 95th percentile under continuous tool execution load. |
-| **p99 Latency** | `58.56 ms` | 99th percentile maximum bounded latency. |
-| **Throughput** | `31.45 ops/sec` | Sustained session operations per second. |
+| **Total Duration** | `383.11 ms` | 5 complete end-to-end diagnostic iterations across 14 system probes. |
+| **Min Latency** | `57.72 ms` | Best-case system probe, sandbox namespace check, and SQLite verification. |
+| **Avg Latency** | `76.59 ms` | Mean execution time across test iterations. |
+| **p50 Latency** | `79.44 ms` | 50th percentile diagnostic and introspection time. |
+| **p95 Latency** | `89.87 ms` | 95th percentile under full hardware, audio, and git discovery load. |
+| **p99 Latency** | `89.98 ms` | 99th percentile maximum bounded initialization latency. |
+| **Throughput** | `13.05 ops/sec` | Sustained diagnostic sweeps per second. |
 
 To reproduce these benchmarks on your hardware:
 ```bash
-just bench iterations=5
+just bench
 ```
 
 ---
@@ -810,7 +810,7 @@ For detailed crate specifications, consult [`crates/README.md`](crates/README.md
 
 ## 🧪 Testing & Quality Verification
 
-M31A strictly enforces a **Zero-Mock Policy** for workspace testing. Tests run real SQLite databases, real Bubblewrap sandboxes, real git repositories, and real process streams.
+M31A enforces a **Real-Environment Testing Policy** for workspace testing. Engine and tool tests execute against real SQLite databases, real Bubblewrap sandboxes, real git repositories, real GDB debugger sessions, and real Unix domain sockets. Offline client SDK test suites support explicit in-memory transports for deterministic local testing.
 
 ```bash
 # Execute the complete workspace test suite

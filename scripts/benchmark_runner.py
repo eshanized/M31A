@@ -28,7 +28,7 @@ def run_benchmark(benchmark_name, iterations, output_path, command_str):
     script_dir = os.path.dirname(os.path.realpath(__file__))
     workspace_dir = os.path.abspath(os.path.join(script_dir, ".."))
     
-    # If no command provided, find m31a binary in target/release, target/debug, or build dir
+    # If no command provided, configure target command based on benchmark name
     if not command_str:
         candidate_bins = [
             os.path.join(workspace_dir, "target", "release", "m31a"),
@@ -39,11 +39,17 @@ def run_benchmark(benchmark_name, iterations, output_path, command_str):
             if os.path.exists(b) and os.access(b, os.X_OK):
                 m31a_bin = b
                 break
-        
-        if m31a_bin:
-            cmd = [m31a_bin, "--version"]
+
+        if benchmark_name == "bench_cli_startup":
+            if m31a_bin:
+                cmd = [m31a_bin, "--version"]
+            else:
+                cmd = ["cargo", "check", "--manifest-path", os.path.join(workspace_dir, "Cargo.toml")]
         else:
-            cmd = ["cargo", "check", "--manifest-path", os.path.join(workspace_dir, "Cargo.toml")]
+            if m31a_bin:
+                cmd = [m31a_bin, "doctor"]
+            else:
+                cmd = ["cargo", "check", "--manifest-path", os.path.join(workspace_dir, "Cargo.toml")]
     else:
         cmd = command_str.split()
 
@@ -81,6 +87,7 @@ def run_benchmark(benchmark_name, iterations, output_path, command_str):
 
     report = {
         "benchmark": benchmark_name,
+        "command": " ".join(cmd),
         "status": "passed",
         "iterations": count,
         "metrics": {

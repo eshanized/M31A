@@ -302,13 +302,11 @@ impl CuaBackend for SimulatedBackend {
 
         // In simulation, append keys to any currently focused text element
         let mut target_name = "active window".to_string();
-        for elem in [&mut state.root] {
-            if let Some(target) = elem.find_by_index_mut(4) {
-                if let Some(existing) = &mut target.value {
-                    existing.push_str(keys);
-                    target_name = target.name.clone();
-                }
-            }
+        if let Some(target) = state.root.find_by_index_mut(4)
+            && let Some(existing) = &mut target.value
+        {
+            existing.push_str(keys);
+            target_name = target.name.clone();
         }
 
         let next_state_id = format!("state_{}_{}", app_id, uuid::Uuid::new_v4().simple());

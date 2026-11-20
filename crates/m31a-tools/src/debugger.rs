@@ -237,9 +237,8 @@ impl DapClient {
         }
     }
 
-    /// Launches a new debug session for the given binary or script.
-    /// Uses real GDB if available on system and binary exists; otherwise provides
-    /// clean fallback for synthetic test environments.
+    /// Launches a new debug session for the given binary.
+    /// Spawns a real GDB Machine Interface (MI) subprocess and stops at main entry.
     pub fn launch(
         &self,
         session_id: &str,
@@ -255,57 +254,42 @@ impl DapClient {
             cwd.join(program)
         };
 
-        let mut live_gdb = None;
-        let mut status = None;
-        let mut frames = Vec::new();
+        if !prog_path.exists() || !prog_path.is_file() {
+            anyhow::bail!(
+                "Debugger requires an executable binary on disk; cannot launch '{}'",
+                prog_path.display()
+            );
+        }
+
+        let mut gdb = LiveGdbSession::spawn(prog_path.to_str().unwrap_or(program), &args, cwd)
+            .map_err(|e| anyhow::anyhow!("Failed to spawn GDB for '{}': {}", prog_path.display(), e))?;
+
+        // Set initial breakpoint at main to pause at entry
+        let _ = gdb.execute_mi("-break-insert main", false);
+        let run_lines = gdb.execute_mi("-exec-run", true).unwrap_or_default();
+
+        let (reason, frame) = LiveGdbSession::parse_stopped_frame(&run_lines).unwrap_or_else(|| {
+            (
+                "entry".to_string(),
+                StackFrame {
+                    id: 1,
+                    name: "main".to_string(),
+                    source_file: Some(prog_path.clone()),
+                    line: 1,
+                    column: 1,
+                },
+            )
+        });
+
+        let frames = vec![frame.clone()];
         let mut variables = Vec::new();
 
-        // Attempt live GDB launch if binary exists on disk
-        if prog_path.exists() && prog_path.is_file() {
-            if let Ok(mut gdb) = LiveGdbSession::spawn(prog_path.to_str().unwrap_or(program), &args, cwd) {
-                // Set initial breakpoint at main to pause at entry
-                let _ = gdb.execute_mi("-break-insert main", false);
-                let run_lines = gdb.execute_mi("-exec-run", true).unwrap_or_default();
-
-                if let Some((reason, frame)) = LiveGdbSession::parse_stopped_frame(&run_lines) {
-                    frames.push(frame.clone());
-                    status = Some(DebugSessionStatus::Stopped { reason, frame });
-
-                    // Inspect initial variables
-                    if let Ok(var_lines) = gdb.execute_mi("-stack-list-variables --simple-values", false) {
-                        variables = Self::parse_variables(&var_lines);
-                    }
-                }
-                live_gdb = Some(gdb);
-            }
+        // Inspect initial variables from live process
+        if let Ok(var_lines) = gdb.execute_mi("-stack-list-variables --simple-values", false) {
+            variables = Self::parse_variables(&var_lines);
         }
 
-        // If live launch didn't establish status (e.g. offline test or script file), establish structured entry frame
-        let initial_frame = frames.first().cloned().unwrap_or_else(|| StackFrame {
-            id: 1,
-            name: "main".to_string(),
-            source_file: Some(PathBuf::from(program)),
-            line: 1,
-            column: 1,
-        });
-
-        if frames.is_empty() {
-            frames.push(initial_frame.clone());
-        }
-
-        if variables.is_empty() {
-            variables.push(DebugVariable {
-                name: "argc".to_string(),
-                value: "1".to_string(),
-                type_name: "int".to_string(),
-                scope: "local".to_string(),
-            });
-        }
-
-        let final_status = status.unwrap_or_else(|| DebugSessionStatus::Stopped {
-            reason: "entry".to_string(),
-            frame: initial_frame,
-        });
+        let final_status = DebugSessionStatus::Stopped { reason, frame };
 
         let session = DebugSession {
             session_id: session_id.to_string(),
@@ -317,7 +301,7 @@ impl DapClient {
             frames,
             variables,
             next_bp_id: 1,
-            live_gdb,
+            live_gdb: Some(gdb),
         };
 
         sessions.insert(session_id.to_string(), session);
@@ -382,25 +366,21 @@ impl DapClient {
             .get_mut(session_id)
             .ok_or_else(|| anyhow::anyhow!("Debug session '{}' not found", session_id))?;
 
-        if let Some(ref mut gdb) = session.live_gdb {
-            let lines = gdb.execute_mi("-exec-next", true)?;
-            if let Some((reason, frame)) = LiveGdbSession::parse_stopped_frame(&lines) {
-                session.frames = vec![frame.clone()];
-                session.status = DebugSessionStatus::Stopped { reason, frame };
-                return Ok(session.status.clone());
-            }
+        let gdb = session.live_gdb.as_mut().ok_or_else(|| {
+            anyhow::anyhow!("Debug session '{}' has no active live GDB process", session_id)
+        })?;
+
+        let lines = gdb.execute_mi("-exec-next", true)?;
+        if let Some((reason, frame)) = LiveGdbSession::parse_stopped_frame(&lines) {
+            session.frames = vec![frame.clone()];
+            session.status = DebugSessionStatus::Stopped { reason, frame };
+            return Ok(session.status.clone());
+        } else if lines.iter().any(|l: &String| l.contains("exited")) {
+            session.status = DebugSessionStatus::Exited { exit_code: 0 };
+            return Ok(session.status.clone());
         }
 
-        // Fallback progress simulation
-        if let Some(frame) = session.frames.first_mut() {
-            frame.line += 1;
-            session.status = DebugSessionStatus::Stopped {
-                reason: "step_over".to_string(),
-                frame: frame.clone(),
-            };
-        }
-
-        Ok(session.status.clone())
+        anyhow::bail!("step_over failed to advance process: {:?}", lines)
     }
 
     /// Steps into a function call.
@@ -410,31 +390,21 @@ impl DapClient {
             .get_mut(session_id)
             .ok_or_else(|| anyhow::anyhow!("Debug session '{}' not found", session_id))?;
 
-        if let Some(ref mut gdb) = session.live_gdb {
-            let lines = gdb.execute_mi("-exec-step", true)?;
-            if let Some((reason, frame)) = LiveGdbSession::parse_stopped_frame(&lines) {
-                session.frames.insert(0, frame.clone());
-                session.status = DebugSessionStatus::Stopped { reason, frame };
-                return Ok(session.status.clone());
-            }
+        let gdb = session.live_gdb.as_mut().ok_or_else(|| {
+            anyhow::anyhow!("Debug session '{}' has no active live GDB process", session_id)
+        })?;
+
+        let lines = gdb.execute_mi("-exec-step", true)?;
+        if let Some((reason, frame)) = LiveGdbSession::parse_stopped_frame(&lines) {
+            session.frames.insert(0, frame.clone());
+            session.status = DebugSessionStatus::Stopped { reason, frame };
+            return Ok(session.status.clone());
+        } else if lines.iter().any(|l: &String| l.contains("exited")) {
+            session.status = DebugSessionStatus::Exited { exit_code: 0 };
+            return Ok(session.status.clone());
         }
 
-        let current_line = session.frames.first().map(|f| f.line).unwrap_or(1);
-        let new_frame = StackFrame {
-            id: session.frames.len() + 1,
-            name: "callee_function".to_string(),
-            source_file: Some(PathBuf::from(&session.program)),
-            line: current_line + 5,
-            column: 1,
-        };
-
-        session.frames.insert(0, new_frame.clone());
-        session.status = DebugSessionStatus::Stopped {
-            reason: "step_into".to_string(),
-            frame: new_frame,
-        };
-
-        Ok(session.status.clone())
+        anyhow::bail!("step_into failed to advance process: {:?}", lines)
     }
 
     /// Steps out of the current function call.
@@ -444,33 +414,21 @@ impl DapClient {
             .get_mut(session_id)
             .ok_or_else(|| anyhow::anyhow!("Debug session '{}' not found", session_id))?;
 
-        if let Some(ref mut gdb) = session.live_gdb {
-            let lines = gdb.execute_mi("-exec-finish", true)?;
-            if let Some((reason, frame)) = LiveGdbSession::parse_stopped_frame(&lines) {
-                session.frames = vec![frame.clone()];
-                session.status = DebugSessionStatus::Stopped { reason, frame };
-                return Ok(session.status.clone());
-            }
+        let gdb = session.live_gdb.as_mut().ok_or_else(|| {
+            anyhow::anyhow!("Debug session '{}' has no active live GDB process", session_id)
+        })?;
+
+        let lines = gdb.execute_mi("-exec-finish", true)?;
+        if let Some((reason, frame)) = LiveGdbSession::parse_stopped_frame(&lines) {
+            session.frames = vec![frame.clone()];
+            session.status = DebugSessionStatus::Stopped { reason, frame };
+            return Ok(session.status.clone());
+        } else if lines.iter().any(|l: &String| l.contains("exited")) {
+            session.status = DebugSessionStatus::Exited { exit_code: 0 };
+            return Ok(session.status.clone());
         }
 
-        if session.frames.len() > 1 {
-            session.frames.remove(0);
-        }
-
-        let top_frame = session.frames.first().cloned().unwrap_or(StackFrame {
-            id: 1,
-            name: "main".to_string(),
-            source_file: Some(PathBuf::from(&session.program)),
-            line: 1,
-            column: 1,
-        });
-
-        session.status = DebugSessionStatus::Stopped {
-            reason: "step_out".to_string(),
-            frame: top_frame,
-        };
-
-        Ok(session.status.clone())
+        anyhow::bail!("step_out failed to complete frame: {:?}", lines)
     }
 
     /// Continues execution until the next breakpoint or termination.
@@ -480,37 +438,21 @@ impl DapClient {
             .get_mut(session_id)
             .ok_or_else(|| anyhow::anyhow!("Debug session '{}' not found", session_id))?;
 
-        if let Some(ref mut gdb) = session.live_gdb {
-            let lines = gdb.execute_mi("-exec-continue", true)?;
-            if let Some((reason, frame)) = LiveGdbSession::parse_stopped_frame(&lines) {
-                session.frames = vec![frame.clone()];
-                session.status = DebugSessionStatus::Stopped { reason, frame };
-                return Ok(session.status.clone());
-            } else if lines.iter().any(|l| l.contains("exited")) {
-                session.status = DebugSessionStatus::Exited { exit_code: 0 };
-                return Ok(session.status.clone());
-            }
-        }
+        let gdb = session.live_gdb.as_mut().ok_or_else(|| {
+            anyhow::anyhow!("Debug session '{}' has no active live GDB process", session_id)
+        })?;
 
-        if let Some(bp) = session.breakpoints.first_mut() {
-            bp.hit_count += 1;
-            let frame = StackFrame {
-                id: 1,
-                name: "breakpoint_hit".to_string(),
-                source_file: Some(bp.file_path.clone()),
-                line: bp.line,
-                column: 1,
-            };
+        let lines = gdb.execute_mi("-exec-continue", true)?;
+        if let Some((reason, frame)) = LiveGdbSession::parse_stopped_frame(&lines) {
             session.frames = vec![frame.clone()];
-            session.status = DebugSessionStatus::Stopped {
-                reason: "breakpoint".to_string(),
-                frame,
-            };
-        } else {
+            session.status = DebugSessionStatus::Stopped { reason, frame };
+            return Ok(session.status.clone());
+        } else if lines.iter().any(|l: &String| l.contains("exited")) {
             session.status = DebugSessionStatus::Exited { exit_code: 0 };
+            return Ok(session.status.clone());
         }
 
-        Ok(session.status.clone())
+        anyhow::bail!("continue_exec failed: {:?}", lines)
     }
 
     /// Inspects variables in current scope.
@@ -524,14 +466,12 @@ impl DapClient {
             .get_mut(session_id)
             .ok_or_else(|| anyhow::anyhow!("Debug session '{}' not found", session_id))?;
 
-        if let Some(ref mut gdb) = session.live_gdb {
-            if let Ok(lines) = gdb.execute_mi("-stack-list-variables --simple-values", false) {
-                let vars = Self::parse_variables(&lines);
-                if !vars.is_empty() {
-                    session.variables = vars;
-                }
-            }
-        }
+        let gdb = session.live_gdb.as_mut().ok_or_else(|| {
+            anyhow::anyhow!("Debug session '{}' has no active live GDB process", session_id)
+        })?;
+
+        let lines = gdb.execute_mi("-stack-list-variables --simple-values", false)?;
+        session.variables = Self::parse_variables(&lines);
 
         let vars = if let Some(s) = scope {
             session
@@ -554,25 +494,22 @@ impl DapClient {
             .get_mut(session_id)
             .ok_or_else(|| anyhow::anyhow!("Debug session '{}' not found", session_id))?;
 
-        if let Some(ref mut gdb) = session.live_gdb {
-            let cmd = format!("-data-evaluate-expression \"{}\"", expr);
-            if let Ok(lines) = gdb.execute_mi(&cmd, false) {
-                let val_re = Regex::new(r#"^\^done,value="([^"]+)""#).unwrap();
-                for l in lines {
-                    if let Some(caps) = val_re.captures(&l) {
-                        if let Some(val) = caps.get(1) {
-                            return Ok(format!("{} = {}", expr, val.as_str()));
-                        }
-                    }
+        let gdb = session.live_gdb.as_mut().ok_or_else(|| {
+            anyhow::anyhow!("Debug session '{}' has no active live GDB process", session_id)
+        })?;
+
+        let cmd = format!("-data-evaluate-expression \"{}\"", expr);
+        let lines = gdb.execute_mi(&cmd, false)?;
+        let val_re = Regex::new(r#"^\^done,value="([^"]+)""#).unwrap();
+        for l in lines {
+            if let Some(caps) = val_re.captures(&l) {
+                if let Some(val) = caps.get(1) {
+                    return Ok(format!("{} = {}", expr, val.as_str()));
                 }
             }
         }
 
-        if let Some(var) = session.variables.iter().find(|v| v.name == expr) {
-            Ok(format!("{} = {} ({})", var.name, var.value, var.type_name))
-        } else {
-            Ok(format!("evaluated '{}' -> <computed result>", expr))
-        }
+        anyhow::bail!("Failed to evaluate expression '{}' in live process", expr)
     }
 
     /// Terminates an active debug session.
@@ -744,40 +681,68 @@ mod tests {
 
     #[test]
     fn test_dap_lifecycle_and_stepping() {
+        let has_gcc = Command::new("gcc").arg("--version").output().is_ok();
+        let has_gdb = Command::new("gdb").arg("--version").output().is_ok();
+        if !has_gcc || !has_gdb {
+            return;
+        }
+
+        let temp = tempfile::tempdir().unwrap();
+        let c_file = temp.path().join("prog.c");
+        let bin_file = temp.path().join("prog");
+
+        std::fs::write(
+            &c_file,
+            r#"#include <stdio.h>
+int compute(int x) {
+    int y = x * 2;
+    return y;
+}
+int main() {
+    int alpha = 42;
+    int beta = compute(alpha);
+    printf("res: %d\n", beta);
+    return 0;
+}
+"#,
+        )
+        .unwrap();
+
+        let compile_status = Command::new("gcc")
+            .arg("-g")
+            .arg(&c_file)
+            .arg("-o")
+            .arg(&bin_file)
+            .status()
+            .unwrap();
+        assert!(compile_status.success());
+
         let client = DapClient::new();
-        let session_id = "test_sess_1";
+        let session_id = "test_sess_real";
 
         let status = client
-            .launch(session_id, "src/main.rs", vec![], Path::new("."))
-            .unwrap();
+            .launch(session_id, bin_file.to_str().unwrap(), vec![], temp.path())
+            .expect("Real launch must succeed");
         assert!(matches!(status, DebugSessionStatus::Stopped { .. }));
 
-        // Set breakpoint
+        // Set breakpoint at compute function line 4
         let bps = client
-            .set_breakpoints(session_id, Path::new("src/main.rs"), &[42], None)
+            .set_breakpoints(session_id, &c_file, &[4], None)
             .unwrap();
         assert_eq!(bps.len(), 1);
-        assert_eq!(bps[0].line, 42);
+        assert!(bps[0].verified);
 
-        // Step over
+        // Step over line 8 ("int alpha = 42;")
         let stepped = client.step_over(session_id).unwrap();
-        if let DebugSessionStatus::Stopped { frame, .. } = stepped {
-            assert_eq!(frame.line, 2);
-        } else {
-            panic!("Expected stopped state");
-        }
+        assert!(matches!(stepped, DebugSessionStatus::Stopped { .. }));
 
-        // Inspect variables
-        let vars = client.inspect_variables(session_id, None).unwrap();
-        assert!(!vars.is_empty());
+        // Evaluate alpha in live process
+        let eval_res = client.evaluate_expression(session_id, "alpha").unwrap();
+        assert!(eval_res.contains("alpha = 42"));
 
-        // Continue to breakpoint
+        // Continue to breakpoint at compute
         let cont = client.continue_exec(session_id).unwrap();
-        if let DebugSessionStatus::Stopped { frame, .. } = cont {
-            assert_eq!(frame.line, 42);
-        } else {
-            panic!("Expected breakpoint hit");
-        }
+        assert!(matches!(cont, DebugSessionStatus::Stopped { .. }));
 
         // Terminate
         assert!(client.terminate(session_id).is_ok());

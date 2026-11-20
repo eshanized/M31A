@@ -137,7 +137,7 @@ impl WasmPluginManifest {
                         ));
                     }
                 }
-                WasmCapability::RestrictedNetwork { allowed_domains } => {
+                WasmCapability::RestrictedNetwork { allowed_domains }
                     if allowed_domains.is_empty()
                         || allowed_domains.iter().any(|domain| {
                             domain.trim().is_empty()
@@ -145,12 +145,11 @@ impl WasmPluginManifest {
                                 || domain.contains('\\')
                                 || domain.contains('@')
                                 || domain.contains(':')
-                        })
-                    {
-                        return Err(WasmError::InvalidManifest(
-                            "Network capability domains must be non-empty hostnames without ports or URL syntax".to_string(),
-                        ));
-                    }
+                        }) =>
+                {
+                    return Err(WasmError::InvalidManifest(
+                        "Network capability domains must be non-empty hostnames without ports or URL syntax".to_string(),
+                    ));
                 }
                 _ => {}
             }

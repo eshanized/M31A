@@ -1,11 +1,13 @@
-//! Windows AppContainer Process Isolation Sandbox Backend.
+//! Windows AppContainer Sandbox Configuration and Planning Backend.
 //!
-//! Implements production-grade sandboxing using Windows AppContainer profiles:
-//! - Dedicated AppContainer SID with low integrity level
-//! - Explicit DACL file system access grants restricted to the workspace tree
-//! - Capability-gated network access (e.g. `internetClient` granted only when policy allows)
-//! - Sensitive Windows system folders, Registry, and user profiles denied by default
-//! - Process tree lifecycle management and deterministic profile teardown via `DeleteAppContainerProfile`
+//! Models security plans and explicit file system ACL grants for Windows AppContainer profiles:
+//! - Dedicated AppContainer SID with low integrity level calculation
+//! - Explicit DACL file system access grant formatting restricted to workspace trees
+//! - Capability-gated network access planning (e.g. `internetClient` granted only when policy allows)
+//! - Sensitive Windows system folders and user profiles modeled for denial
+//!
+//! Note: Process execution under AppContainer is disabled in this userspace build pending
+//! restricted process token creation and fails-closed.
 
 use anyhow::{Result, bail};
 use m31a_core::config::SandboxPolicy;

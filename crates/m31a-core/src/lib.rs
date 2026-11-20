@@ -218,9 +218,9 @@ pub use keyring_store::{
 };
 pub use lru_cache::{AsyncLruCache, LruStats};
 pub use memories::{
-    EmbeddingGenerator, HttpEmbeddingGenerator, MemoryItem, MemoryManager, MemoryRecord,
-    MockEmbeddingGenerator, RetrievalMethod, ScoredMemoryItem, calculate_cosine_similarity,
-    normalize_vector,
+    EmbeddingGenerator, HttpEmbeddingGenerator, LocalHashingEmbeddingGenerator, MemoryItem,
+    MemoryManager, MemoryRecord, MockEmbeddingGenerator, RetrievalMethod, ScoredMemoryItem,
+    calculate_cosine_similarity, normalize_vector,
 };
 pub use message_board_client::{
     BoardNotification, BoardPostInfo, BoardThreadSummary, ChannelInfo, RemoteAgentMessageBoard,

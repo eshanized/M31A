@@ -1,6 +1,8 @@
 //! CUA Session Manager with lease controls, state_id tracking, and replay safety.
 
-use crate::backend::{CuaBackend, SimulatedBackend};
+use crate::backend::CuaBackend;
+#[allow(unused_imports)]
+use crate::backend::SimulatedBackend;
 use crate::error::CuaError;
 use crate::model::{ActionResult, AppInfo, AppState, ElementAction, MouseAction};
 use std::collections::HashSet;
@@ -17,7 +19,14 @@ pub struct CuaSessionManager {
 
 impl Default for CuaSessionManager {
     fn default() -> Self {
-        Self::new(Arc::new(SimulatedBackend::default()))
+        #[cfg(target_os = "linux")]
+        {
+            Self::new(Arc::new(crate::linux::LinuxNativeBackend::new()))
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            Self::new(Arc::new(SimulatedBackend::default()))
+        }
     }
 }
 
@@ -90,11 +99,11 @@ impl CuaSessionManager {
         state_id: &str,
     ) -> Result<ActionResult, CuaError> {
         let result = self.backend.send_keys(app_id, keys, state_id).await?;
-        if result.success {
-            if let Some(new_id) = &result.new_state_id {
-                let mut current_id = self.active_state_id.write().await;
-                *current_id = Some(new_id.clone());
-            }
+        if result.success
+            && let Some(new_id) = &result.new_state_id
+        {
+            let mut current_id = self.active_state_id.write().await;
+            *current_id = Some(new_id.clone());
         }
         Ok(result)
     }
