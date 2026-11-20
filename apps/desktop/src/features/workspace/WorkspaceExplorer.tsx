@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../stores/AppContext';
 import type { WorkspaceFileEntryDto } from '../../types/ipc';
+import { DocumentPreviewPanel } from '../documents/DocumentPreviewPanel';
 
 export const WorkspaceExplorer: React.FC = () => {
   const {
@@ -88,6 +89,12 @@ export const WorkspaceExplorer: React.FC = () => {
     await navigator.clipboard.writeText(previewFileContent);
     setCopiedPreview(true);
     setTimeout(() => setCopiedPreview(false), 2000);
+  };
+
+  const isOfficeDocument = (path: string | null): boolean => {
+    if (!path) return false;
+    const ext = path.split('.').pop()?.toLowerCase();
+    return ext === 'docx' || ext === 'xlsx' || ext === 'xls' || ext === 'pdf';
   };
 
   const filteredFiles = workspaceFiles.filter((f) =>
@@ -263,74 +270,91 @@ export const WorkspaceExplorer: React.FC = () => {
 
       {/* Embedded File Preview Panel if active */}
       {previewFilePath && (
-        <div
-          style={{
-            borderTop: '1px solid var(--border-primary)',
-            maxHeight: '40%',
-            display: 'flex',
-            flexDirection: 'column',
-            backgroundColor: '#0a0d12',
-          }}
-        >
+        isOfficeDocument(previewFilePath) ? (
           <div
             style={{
-              padding: '6px 10px',
+              borderTop: '1px solid var(--border-primary)',
+              height: '50%',
               display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              borderBottom: '1px solid var(--border-muted)',
-              fontSize: '11px',
+              flexDirection: 'column',
+              backgroundColor: '#0a0d12',
             }}
           >
-            <span
-              style={{
-                fontFamily: 'var(--font-mono)',
-                color: 'var(--accent-blue)',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}
-              title={previewFilePath}
-            >
-              {previewFilePath.split(/[\\/]/).pop()}
-            </span>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-              <button
-                type="button"
-                onClick={handleCopyPreview}
-                className="btn btn-sm"
-                style={{ padding: '2px 5px', fontSize: '10px' }}
-                title="Copy content"
-              >
-                {copiedPreview ? <Check size={11} color="var(--accent-green)" /> : <Copy size={11} />}
-              </button>
-              <button
-                type="button"
-                onClick={() => void previewFile(null)}
-                className="btn btn-sm"
-                style={{ padding: '2px 4px', background: 'transparent', border: 'none' }}
-                title="Close preview"
-              >
-                <X size={12} />
-              </button>
-            </div>
+            <DocumentPreviewPanel
+              filePath={previewFilePath}
+              onClose={() => void previewFile(null)}
+            />
           </div>
-          <pre
+        ) : (
+          <div
             style={{
-              flex: 1,
-              overflow: 'auto',
-              padding: '8px',
-              margin: 0,
-              fontSize: '11px',
-              fontFamily: 'var(--font-mono)',
-              lineHeight: 1.4,
-              color: 'var(--text-primary)',
-              whiteSpace: 'pre',
+              borderTop: '1px solid var(--border-primary)',
+              maxHeight: '40%',
+              display: 'flex',
+              flexDirection: 'column',
+              backgroundColor: '#0a0d12',
             }}
           >
-            {previewFileContent || 'Loading...'}
-          </pre>
-        </div>
+            <div
+              style={{
+                padding: '6px 10px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                borderBottom: '1px solid var(--border-muted)',
+                fontSize: '11px',
+              }}
+            >
+              <span
+                style={{
+                  fontFamily: 'var(--font-mono)',
+                  color: 'var(--accent-blue)',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+                title={previewFilePath}
+              >
+                {previewFilePath.split(/[\\/]/).pop()}
+              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <button
+                  type="button"
+                  onClick={handleCopyPreview}
+                  className="btn btn-sm"
+                  style={{ padding: '2px 5px', fontSize: '10px' }}
+                  title="Copy content"
+                >
+                  {copiedPreview ? <Check size={11} color="var(--accent-green)" /> : <Copy size={11} />}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void previewFile(null)}
+                  className="btn btn-sm"
+                  style={{ padding: '2px 4px', background: 'transparent', border: 'none' }}
+                  title="Close preview"
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            </div>
+            <pre
+              style={{
+                flex: 1,
+                overflow: 'auto',
+                padding: '8px',
+                margin: 0,
+                fontSize: '11px',
+                fontFamily: 'var(--font-mono)',
+                lineHeight: 1.4,
+                color: 'var(--text-primary)',
+                whiteSpace: 'pre',
+              }}
+            >
+              {previewFileContent || 'Loading...'}
+            </pre>
+          </div>
+        )
       )}
     </div>
   );

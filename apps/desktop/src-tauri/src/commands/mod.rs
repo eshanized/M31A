@@ -17,6 +17,9 @@ use std::collections::HashMap;
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 
+pub mod documents;
+pub use documents::{preview_docx_document, preview_pdf_document, preview_xlsx_spreadsheet};
+
 // =============================================================================
 // DTOs
 // =============================================================================

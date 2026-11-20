@@ -7,6 +7,7 @@
 pub mod agent_runtime;
 pub mod browser;
 pub mod catalog_selector;
+pub mod cua;
 pub mod debugger;
 pub mod dispatch_trace;
 pub mod edit;
@@ -67,6 +68,11 @@ pub use browser::{
     execute_browser_network_for_session, execute_browser_screenshot,
     execute_browser_screenshot_for_session, execute_browser_snapshot,
     execute_browser_snapshot_for_session, execute_browser_type, execute_browser_type_for_session,
+};
+pub use cua::{
+    CuaActionArgs, CuaGetStateArgs, CuaKeyArgs, CuaMouseArgs, execute_cua_action,
+    execute_cua_get_state, execute_cua_key, execute_cua_list_apps, execute_cua_mouse,
+    global_cua_manager,
 };
 pub use debugger::{
     Breakpoint, DapClient, DebugBreakpointArgs, DebugBreakpointResult, DebugInspectArgs,

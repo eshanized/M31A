@@ -84,6 +84,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             commands::export_session_transcript,
             commands::list_registered_tools,
             commands::get_runtime_config,
+            commands::documents::preview_docx_document,
+            commands::documents::preview_xlsx_spreadsheet,
+            commands::documents::preview_pdf_document,
         ])
         .build(tauri::generate_context!())?;
 

@@ -18,6 +18,7 @@ m31a-ast = { path = "../m31a-ast" }
 m31a-trust = { path = "../m31a-trust" }
 m31a-proc = { path = "../m31a-proc" }
 m31a-browser = { path = "../m31a-browser" }
+m31a-cua = { path = "../m31a-cua" }
 m31a-image-generation = { path = "../m31a-image-generation" }
 m31a-web-search = { path = "../m31a-web-search" }
 m31a-git-attribution = { path = "../m31a-git-attribution" }

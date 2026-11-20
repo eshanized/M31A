@@ -1095,6 +1095,82 @@ impl ToolRegistry {
             ToolDefinition {
                 tool_type: "function".to_string(),
                 function: FunctionDefinition {
+                    name: "cua_list_apps".to_string(),
+                    description: "Enumerate running desktop applications and active window titles for accessibility automation.".to_string(),
+                    parameters: json!({
+                        "type": "object",
+                        "properties": {}
+                    }),
+                },
+            },
+            ToolDefinition {
+                tool_type: "function".to_string(),
+                function: FunctionDefinition {
+                    name: "cua_get_state".to_string(),
+                    description: "Capture the semantic accessibility tree (roles, labels, values, bounds, and actions) of an active or background desktop application.".to_string(),
+                    parameters: json!({
+                        "type": "object",
+                        "properties": {
+                            "app_id": { "type": "string", "description": "Optional application ID. Omit to target the active/focused application." },
+                            "capture_background": { "type": "boolean", "description": "Whether to capture background windows without stealing system focus. Default false." }
+                        }
+                    }),
+                },
+            },
+            ToolDefinition {
+                tool_type: "function".to_string(),
+                function: FunctionDefinition {
+                    name: "cua_action".to_string(),
+                    description: "Dispatch a semantic action (click, double_click, right_click, set_value, select, toggle) to an accessible element by its tree index. Validates state_id to prevent stale or conflicting mutations.".to_string(),
+                    parameters: json!({
+                        "type": "object",
+                        "properties": {
+                            "app_id": { "type": "string", "description": "Target application ID." },
+                            "target_index": { "type": "integer", "description": "Zero-based index of the element in the accessibility tree." },
+                            "action_type": { "type": "string", "description": "Action type: click, double_click, right_click, set_value, select, toggle." },
+                            "value": { "type": "string", "description": "Value to set if action_type is set_value." },
+                            "state_id": { "type": "string", "description": "The state_id returned from the last cua_get_state call to verify state freshness." }
+                        },
+                        "required": ["app_id", "target_index", "action_type", "state_id"]
+                    }),
+                },
+            },
+            ToolDefinition {
+                tool_type: "function".to_string(),
+                function: FunctionDefinition {
+                    name: "cua_key".to_string(),
+                    description: "Dispatch keystrokes or shortcut key combinations to the target application with state_id validation.".to_string(),
+                    parameters: json!({
+                        "type": "object",
+                        "properties": {
+                            "app_id": { "type": "string", "description": "Target application ID." },
+                            "keys": { "type": "string", "description": "Keys, text, or keyboard shortcuts to send." },
+                            "state_id": { "type": "string", "description": "The state_id returned from cua_get_state." }
+                        },
+                        "required": ["app_id", "keys", "state_id"]
+                    }),
+                },
+            },
+            ToolDefinition {
+                tool_type: "function".to_string(),
+                function: FunctionDefinition {
+                    name: "cua_mouse".to_string(),
+                    description: "Fallback coordinate-based mouse interaction (click, double_click, move, drag, scroll) for canvas or non-standard UI surfaces.".to_string(),
+                    parameters: json!({
+                        "type": "object",
+                        "properties": {
+                            "action": { "type": "string", "description": "Mouse action: click, double_click, move, drag, scroll." },
+                            "x": { "type": "integer", "description": "Screen coordinate X." },
+                            "y": { "type": "integer", "description": "Screen coordinate Y." },
+                            "button": { "type": "string", "description": "Mouse button: left, right, middle. Default left." }
+                        },
+                        "required": ["action", "x", "y"]
+                    }),
+                },
+            },
+            ToolDefinition {
+                tool_type: "function".to_string(),
+                function: FunctionDefinition {
                     name: "verify_visual_state".to_string(),
                     description: "Execute autonomous Visual TDD against a web frontend: validates DOM presence, text matches, computed CSS styles, console errors, and network failures with screenshot artifact capture.".to_string(),
                     parameters: json!({
@@ -3845,6 +3921,38 @@ impl ToolRegistry {
                     .context("Failed to deserialize 'browser_evaluate' tool arguments")?;
                 let session_id = self.session_id.as_deref().unwrap_or("default");
                 crate::browser::execute_browser_evaluate_for_session(session_id, &eval_args).await
+            }
+            "cua_list_apps" => {
+                crate::cua::execute_cua_list_apps().await
+            }
+            "cua_get_state" => {
+                let state_args: crate::cua::CuaGetStateArgs = serde_json::from_value(args.clone())
+                    .context("Failed to deserialize 'cua_get_state' tool arguments")?;
+                crate::cua::execute_cua_get_state(&state_args).await
+            }
+            "cua_action" => {
+                if policy == SandboxPolicy::ReadOnly {
+                    return Err(anyhow!("Cannot execute CUA action: Sandbox policy is Read-Only"));
+                }
+                let action_args: crate::cua::CuaActionArgs = serde_json::from_value(args.clone())
+                    .context("Failed to deserialize 'cua_action' tool arguments")?;
+                crate::cua::execute_cua_action(&action_args).await
+            }
+            "cua_key" => {
+                if policy == SandboxPolicy::ReadOnly {
+                    return Err(anyhow!("Cannot send keystrokes: Sandbox policy is Read-Only"));
+                }
+                let key_args: crate::cua::CuaKeyArgs = serde_json::from_value(args.clone())
+                    .context("Failed to deserialize 'cua_key' tool arguments")?;
+                crate::cua::execute_cua_key(&key_args).await
+            }
+            "cua_mouse" => {
+                if policy == SandboxPolicy::ReadOnly {
+                    return Err(anyhow!("Cannot dispatch mouse: Sandbox policy is Read-Only"));
+                }
+                let mouse_args: crate::cua::CuaMouseArgs = serde_json::from_value(args.clone())
+                    .context("Failed to deserialize 'cua_mouse' tool arguments")?;
+                crate::cua::execute_cua_mouse(&mouse_args).await
             }
             "verify_visual_state" => {
                 let visual_args: crate::vibe_tools::VerifyVisualStateArgs =

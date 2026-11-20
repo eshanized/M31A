@@ -44,6 +44,7 @@ members = [
     "crates/m31a-cli",
     "crates/m31a-ebpf",
     "crates/m31a-wasm",
+    "crates/m31a-cua",
     "apps/desktop/src-tauri",
     "examples/distributed_task_mesh",
 ]

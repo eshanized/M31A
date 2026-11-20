@@ -18,6 +18,9 @@ import type {
   TurnHandleDto,
   WorkspaceFileEntryDto,
   WorkspaceInfoDto,
+  DocxPreviewPayloadDto,
+  XlsxPreviewPayloadDto,
+  PdfPreviewPayloadDto,
 } from '../types/ipc';
 
 export const ipc = {
@@ -128,6 +131,18 @@ export const ipc = {
 
   async readWorkspaceFilePreview(path: string): Promise<string> {
     return invoke<string>('read_workspace_file_preview', { path });
+  },
+
+  async previewDocxDocument(path: string): Promise<DocxPreviewPayloadDto> {
+    return invoke<DocxPreviewPayloadDto>('preview_docx_document', { path });
+  },
+
+  async previewXlsxSpreadsheet(path: string): Promise<XlsxPreviewPayloadDto> {
+    return invoke<XlsxPreviewPayloadDto>('preview_xlsx_spreadsheet', { path });
+  },
+
+  async previewPdfDocument(path: string): Promise<PdfPreviewPayloadDto> {
+    return invoke<PdfPreviewPayloadDto>('preview_pdf_document', { path });
   },
 
   // Extended Session Actions

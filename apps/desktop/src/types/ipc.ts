@@ -127,6 +127,48 @@ export interface ToolDefinitionDto {
   parameters_schema?: string | null;
 }
 
+export interface DocxParagraphDto {
+  text: string;
+  style?: string | null;
+  is_heading: boolean;
+}
+
+export interface DocxTableDto {
+  rows: string[][];
+}
+
+export type DocxBlockDto =
+  | { kind: 'paragraph'; data: DocxParagraphDto }
+  | { kind: 'table'; data: DocxTableDto };
+
+export interface DocxPreviewPayloadDto {
+  file_name: string;
+  blocks: DocxBlockDto[];
+  total_paragraphs: number;
+  total_words: number;
+}
+
+export interface XlsxSheetDto {
+  name: string;
+  rows: string[][];
+  max_columns: number;
+}
+
+export interface XlsxPreviewPayloadDto {
+  file_name: string;
+  sheets: XlsxSheetDto[];
+  active_sheet_index: number;
+}
+
+export interface PdfPreviewPayloadDto {
+  file_name: string;
+  page_count: number;
+  title?: string | null;
+  author?: string | null;
+  file_size_bytes: number;
+  text_preview: string;
+}
+
 export interface RuntimeConfigDto {
   model: string;
   api_base: string;
