@@ -29,3 +29,5 @@ benchmark*.json
 
 .agents/
 skills-lock.json
+.gravitas
+*.deb
