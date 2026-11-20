@@ -248,9 +248,9 @@ impl BaselineStore {
         }
         let vp_id = viewport.id();
         if vp_id.is_empty()
-            || !vp_id
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'@'))
+            || !vp_id.bytes().all(|byte| {
+                byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'@')
+            })
             || vp_id == "."
             || vp_id == ".."
         {
