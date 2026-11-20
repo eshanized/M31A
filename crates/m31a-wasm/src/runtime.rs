@@ -21,6 +21,14 @@ pub struct WasmPluginInstance {
     entry_tool_call: Option<TypedFunc<(i32, i32, i32, i32), i32>>,
 }
 
+impl std::fmt::Debug for WasmPluginInstance {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WasmPluginInstance")
+            .field("manifest", &self.manifest)
+            .finish()
+    }
+}
+
 impl WasmPluginInstance {
     pub fn manifest(&self) -> &WasmPluginManifest {
         &self.manifest

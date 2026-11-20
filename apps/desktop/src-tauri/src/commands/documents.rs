@@ -150,7 +150,6 @@ fn extract_text_from_runs(xml: &str) -> String {
 
 fn parse_docx_paragraph_xml(xml: &str) -> DocxParagraph {
     let mut style = None;
-    let is_heading;
 
     // Style extraction
     if let Some(style_start) = xml.find("<w:pStyle w:val=\"") {
@@ -161,7 +160,7 @@ fn parse_docx_paragraph_xml(xml: &str) -> DocxParagraph {
         }
     }
 
-    is_heading = style
+    let is_heading = style
         .as_ref()
         .map(|s| s.to_lowercase().contains("heading") || s.to_lowercase().contains("title"))
         .unwrap_or(false);
@@ -327,10 +326,10 @@ fn parse_xlsx_sheet_xml(xml: &str, shared_strings: &[String]) -> (Vec<Vec<String
                         if let Some(v_end) = c_slice[content_start..].find("</v>") {
                             let val_str = &c_slice[content_start..content_start + v_end];
                             if is_shared_string {
-                                if let Ok(idx) = val_str.parse::<usize>() {
-                                    if let Some(shared_val) = shared_strings.get(idx) {
-                                        cell_value = shared_val.clone();
-                                    }
+                                if let Ok(idx) = val_str.parse::<usize>()
+                                    && let Some(shared_val) = shared_strings.get(idx)
+                                {
+                                    cell_value = shared_val.clone();
                                 }
                             } else {
                                 cell_value = val_str.to_string();

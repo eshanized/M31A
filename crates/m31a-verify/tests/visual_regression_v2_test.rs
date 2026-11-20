@@ -192,12 +192,15 @@ fn test_bounded_layout_repair_loop_enforces_limits() {
 
     coordinator.create_checkpoint(&css_file).unwrap();
 
-    // Attempt 0 and 1 are permitted
-    assert!(coordinator.assert_can_attempt(0).is_ok());
-    assert!(coordinator.assert_can_attempt(1).is_ok());
+    // Attempt 0 and 1 are permitted when approval is granted
+    assert!(coordinator.assert_can_attempt(0, true).is_ok());
+    assert!(coordinator.assert_can_attempt(1, true).is_ok());
+
+    // Without approval, fails closed
+    assert!(coordinator.assert_can_attempt(0, false).is_err());
 
     // Attempt 2 exceeds max_attempts (2) -> fails closed
-    assert!(coordinator.assert_can_attempt(2).is_err());
+    assert!(coordinator.assert_can_attempt(2, true).is_err());
 
     // Modify file
     std::fs::write(&css_file, "body { broken: true; }").unwrap();
