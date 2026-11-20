@@ -107,20 +107,43 @@ impl RuntimeRegistrationClient {
         Ok(bytes)
     }
 
-    /// Simulates or executes the instance registration exchange.
+    /// Executes the real instance registration exchange over HTTP POST.
     pub async fn register(
         &self,
         request: &RuntimeRegistrationRequest,
     ) -> Result<RuntimeRegistrationResponse> {
-        let _payload = self.validate_payload(request)?;
+        let payload = self.validate_payload(request)?;
 
-        // Return a valid deterministic bootstrap response for local/offline execution
-        let now = chrono::Utc::now().timestamp();
-        Ok(RuntimeRegistrationResponse {
-            token: format!("inst_tok_{}", uuid::Uuid::new_v4().simple()),
-            expires_at: now + 86400, // 24 hour token TTL
-            assigned_node: "node_local_01".to_string(),
-        })
+        let client = reqwest::Client::builder()
+            .timeout(self.timeout)
+            .build()
+            .context("Failed to construct HTTP client for agent registration")?;
+
+        let response = client
+            .post(&self.endpoint)
+            .header("Content-Type", "application/json")
+            .header("User-Agent", "m31a-runtime/1.0")
+            .body(payload)
+            .send()
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to reach registration endpoint at '{}': {}", self.endpoint, e))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let text = response.text().await.unwrap_or_default();
+            anyhow::bail!(
+                "Upstream registration rejected with HTTP {}: {}",
+                status,
+                text
+            );
+        }
+
+        let reg_response: RuntimeRegistrationResponse = response
+            .json()
+            .await
+            .context("Failed to parse registration response JSON from upstream server")?;
+
+        Ok(reg_response)
     }
 }
 
@@ -149,7 +172,38 @@ mod tests {
 
     #[tokio::test]
     async fn test_registration_lifecycle() {
-        let client = RuntimeRegistrationClient::new("https://api.m31a.org/agent/register").unwrap();
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let url = format!("http://127.0.0.1:{}/agent/register", port);
+
+        // Spawn mock upstream server accepting 1 real HTTP POST request
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut buf = [0u8; 4096];
+            let n = socket.read(&mut buf).await.unwrap();
+            let req_str = String::from_utf8_lossy(&buf[..n]);
+            assert!(req_str.starts_with("POST /agent/register HTTP/1.1"));
+            assert!(req_str.contains("user-agent: m31a-runtime/1.0"));
+            assert!(req_str.contains("content-type: application/json"));
+
+            let response_body = serde_json::json!({
+                "token": "inst_tok_real_test_12345",
+                "expires_at": 1799999999i64,
+                "assigned_node": "node_cluster_alpha"
+            });
+            let body_str = response_body.to_string();
+            let resp = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body_str.len(),
+                body_str
+            );
+            socket.write_all(resp.as_bytes()).await.unwrap();
+        });
+
+        let client = RuntimeRegistrationClient::new(&url).unwrap();
 
         let req = RuntimeRegistrationRequest {
             instance_id: "agent_runner_1".to_string(),
@@ -162,10 +216,25 @@ mod tests {
         let resp = client
             .register(&req)
             .await
-            .expect("registration must succeed");
-        assert!(resp.token.starts_with("inst_tok_"));
-        assert!(resp.expires_at > 0);
-        assert_eq!(resp.assigned_node, "node_local_01");
+            .expect("real HTTP registration must succeed");
+        assert_eq!(resp.token, "inst_tok_real_test_12345");
+        assert_eq!(resp.expires_at, 1799999999);
+        assert_eq!(resp.assigned_node, "node_cluster_alpha");
+    }
+
+    #[tokio::test]
+    async fn test_registration_network_failure_handling() {
+        // Test connection to unreachable port
+        let client = RuntimeRegistrationClient::new("http://127.0.0.1:59999/agent/register").unwrap();
+        let req = RuntimeRegistrationRequest {
+            instance_id: "agent_runner_fail".to_string(),
+            agent_role: "coder".to_string(),
+            public_key: "key".to_string(),
+            capabilities: vec![],
+            metadata: HashMap::new(),
+        };
+        let err = client.register(&req).await.unwrap_err();
+        assert!(err.to_string().contains("Failed to reach registration endpoint"));
     }
 
     #[test]

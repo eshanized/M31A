@@ -5,11 +5,15 @@
 
 pub mod backend;
 pub mod error;
+#[cfg(target_os = "linux")]
+pub mod linux;
 pub mod model;
 pub mod session;
 
 pub use backend::{CuaBackend, SimulatedBackend};
 pub use error::CuaError;
+#[cfg(target_os = "linux")]
+pub use linux::LinuxNativeBackend;
 pub use model::{
     AccessibleElement, ActionResult, AppInfo, AppState, ElementAction, ElementRole, MouseAction,
     Rect, WindowInfo,

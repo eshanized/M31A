@@ -11,9 +11,17 @@ use std::sync::{Arc, OnceLock};
 
 static GLOBAL_CUA_MANAGER: OnceLock<CuaSessionManager> = OnceLock::new();
 
-/// Returns the global CUA session manager initialized with the default backend.
+/// Returns the global CUA session manager initialized with the active platform backend.
+/// Uses native Linux backend on Linux by default; falls back to simulated backend
+/// if explicitly requested via `M31A_SIMULATED_CUA=1`.
 pub fn global_cua_manager() -> &'static CuaSessionManager {
     GLOBAL_CUA_MANAGER.get_or_init(|| {
+        #[cfg(target_os = "linux")]
+        {
+            if std::env::var("M31A_SIMULATED_CUA").as_deref() != Ok("1") {
+                return CuaSessionManager::new(Arc::new(m31a_cua::LinuxNativeBackend::new()));
+            }
+        }
         CuaSessionManager::new(Arc::new(SimulatedBackend::default()))
     })
 }

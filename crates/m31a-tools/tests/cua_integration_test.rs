@@ -4,6 +4,9 @@ use tempfile::tempdir;
 
 #[tokio::test]
 async fn test_cua_tools_execution_via_registry() {
+    unsafe {
+        std::env::set_var("M31A_SIMULATED_CUA", "1");
+    }
     let tmp = tempdir().unwrap();
     let cwd = tmp.path();
     let registry = ToolRegistry::new();

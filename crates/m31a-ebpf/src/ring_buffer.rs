@@ -3,7 +3,7 @@
 //! Provides lock-free or low-contention bounded buffering for high-throughput
 //! kernel execution events. Tracks dropped events and buffer overflow metrics.
 
-use super::events::{AuditEventKind, AuditRecord};
+use super::events::AuditRecord;
 use std::collections::VecDeque;
 use std::sync::RwLock;
 use std::sync::atomic::{AtomicU64, Ordering};

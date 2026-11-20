@@ -182,3 +182,25 @@ async fn test_send_keys_and_mouse_action() {
         .unwrap();
     assert!(mouse_res.success);
 }
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn test_linux_native_backend_real_process_enumeration() {
+    use m31a_cua::LinuxNativeBackend;
+
+    let backend = Arc::new(LinuxNativeBackend::new());
+    let session = CuaSessionManager::new(backend);
+
+    let apps = session.list_apps().await.expect("Native list_apps failed");
+    assert!(!apps.is_empty(), "Must discover at least one desktop or shell process");
+
+    let active_app = apps.iter().find(|a| a.is_active).or_else(|| apps.first()).unwrap();
+    let state = session
+        .get_app_state(Some(&active_app.id), false)
+        .await
+        .expect("Native get_app_state failed");
+
+    assert!(!state.app_name.is_empty());
+    assert!(!state.state_id.is_empty());
+    assert_eq!(state.root.role, ElementRole::Window);
+}

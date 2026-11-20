@@ -104,17 +104,42 @@ impl PullRequestManager {
             });
         }
 
-        // Fallback: mock / template issue
-        Ok(IssueDetails {
-            number: issue_number,
-            title: format!("Issue #{} on {}/{}", issue_number, owner, repo),
-            body: format!("Automated retrieval for issue #{}", issue_number),
-            labels: vec!["bug".to_string()],
-            url: Some(format!(
-                "https://github.com/{}/{}/issues/{}",
-                owner, repo, issue_number
-            )),
-        })
+        // 3. Check for local issue file in repository (.github/issues or .m31a/issues)
+        let local_json = repo_root.join(format!(".github/issues/{}.json", issue_number));
+        let local_md = repo_root.join(format!(".github/issues/{}.md", issue_number));
+        let m31a_json = repo_root.join(format!(".m31a/issues/{}.json", issue_number));
+
+        if local_json.exists() {
+            if let Ok(content) = fs::read_to_string(&local_json) {
+                if let Ok(details) = serde_json::from_str::<IssueDetails>(&content) {
+                    return Ok(details);
+                }
+            }
+        }
+        if m31a_json.exists() {
+            if let Ok(content) = fs::read_to_string(&m31a_json) {
+                if let Ok(details) = serde_json::from_str::<IssueDetails>(&content) {
+                    return Ok(details);
+                }
+            }
+        }
+        if local_md.exists() {
+            if let Ok(content) = fs::read_to_string(&local_md) {
+                let first_line = content.lines().next().unwrap_or("").trim().trim_start_matches('#').trim();
+                return Ok(IssueDetails {
+                    number: issue_number,
+                    title: if first_line.is_empty() { format!("Issue #{}", issue_number) } else { first_line.to_string() },
+                    body: content,
+                    labels: vec![],
+                    url: Some(local_md.to_string_lossy().to_string()),
+                });
+            }
+        }
+
+        anyhow::bail!(
+            "Failed to retrieve issue #{} for {}/{}: GitHub API and gh CLI failed or are unauthorized, and no local issue file found at .github/issues/{}.json",
+            issue_number, owner, repo, issue_number
+        );
     }
 
     /// Creates or packages a reviewable pull request.

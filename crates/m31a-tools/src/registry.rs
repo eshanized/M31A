@@ -7313,6 +7313,9 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let cwd = temp.path();
         std::fs::create_dir_all(cwd.join(".git")).unwrap();
+        let issues_dir = cwd.join(".github/issues");
+        std::fs::create_dir_all(&issues_dir).unwrap();
+        std::fs::write(issues_dir.join("101.md"), "# Issue #101: Test Bug\nAutomated issue reproduction").unwrap();
 
         // 1. fetch_issue
         let issue_res = registry
