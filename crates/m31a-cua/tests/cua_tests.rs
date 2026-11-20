@@ -192,9 +192,16 @@ async fn test_linux_native_backend_real_process_enumeration() {
     let session = CuaSessionManager::new(backend);
 
     let apps = session.list_apps().await.expect("Native list_apps failed");
-    assert!(!apps.is_empty(), "Must discover at least one desktop or shell process");
+    assert!(
+        !apps.is_empty(),
+        "Must discover at least one desktop or shell process"
+    );
 
-    let active_app = apps.iter().find(|a| a.is_active).or_else(|| apps.first()).unwrap();
+    let active_app = apps
+        .iter()
+        .find(|a| a.is_active)
+        .or_else(|| apps.first())
+        .unwrap();
     let state = session
         .get_app_state(Some(&active_app.id), false)
         .await

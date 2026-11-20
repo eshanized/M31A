@@ -2,10 +2,8 @@
 //!
 //! Exposes `cua_list_apps`, `cua_get_state`, `cua_action`, `cua_key`, and `cua_mouse`.
 
-use anyhow::{anyhow, Result};
-use m31a_cua::{
-    CuaSessionManager, ElementAction, MouseAction, SimulatedBackend,
-};
+use anyhow::{Result, anyhow};
+use m31a_cua::{CuaSessionManager, ElementAction, MouseAction, SimulatedBackend};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, OnceLock};
 
@@ -91,12 +89,7 @@ pub async fn execute_cua_action(args: &CuaActionArgs) -> Result<String> {
     };
 
     let result = manager
-        .perform_action(
-            &args.app_id,
-            args.target_index,
-            action,
-            &args.state_id,
-        )
+        .perform_action(&args.app_id, args.target_index, action, &args.state_id)
         .await
         .map_err(|e| anyhow!("{e}"))?;
 
@@ -125,10 +118,7 @@ pub async fn execute_cua_mouse(args: &CuaMouseArgs) -> Result<String> {
             to_x: args.x,
             to_y: args.y,
         },
-        "scroll" => MouseAction::Scroll {
-            dx: 0,
-            dy: args.y,
-        },
+        "scroll" => MouseAction::Scroll { dx: 0, dy: args.y },
         other => MouseAction::Click {
             button: other.to_string(),
         },

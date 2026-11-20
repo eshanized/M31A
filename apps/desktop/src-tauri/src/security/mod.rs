@@ -197,7 +197,10 @@ mod tests {
 
         // Traversal attempt to escape root
         let outside = tempdir().unwrap();
-        let escape_relative = format!("../{}", outside.path().file_name().unwrap().to_str().unwrap());
+        let escape_relative = format!(
+            "../{}",
+            outside.path().file_name().unwrap().to_str().unwrap()
+        );
         let res = validate_and_canonicalize_child_path(temp.path(), &escape_relative);
         assert!(res.is_err());
     }

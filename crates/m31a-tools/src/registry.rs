@@ -3922,9 +3922,7 @@ impl ToolRegistry {
                 let session_id = self.session_id.as_deref().unwrap_or("default");
                 crate::browser::execute_browser_evaluate_for_session(session_id, &eval_args).await
             }
-            "cua_list_apps" => {
-                crate::cua::execute_cua_list_apps().await
-            }
+            "cua_list_apps" => crate::cua::execute_cua_list_apps().await,
             "cua_get_state" => {
                 let state_args: crate::cua::CuaGetStateArgs = serde_json::from_value(args.clone())
                     .context("Failed to deserialize 'cua_get_state' tool arguments")?;
@@ -3932,15 +3930,20 @@ impl ToolRegistry {
             }
             "cua_action" => {
                 if policy == SandboxPolicy::ReadOnly {
-                    return Err(anyhow!("Cannot execute CUA action: Sandbox policy is Read-Only"));
+                    return Err(anyhow!(
+                        "Cannot execute CUA action: Sandbox policy is Read-Only"
+                    ));
                 }
-                let action_args: crate::cua::CuaActionArgs = serde_json::from_value(args.clone())
-                    .context("Failed to deserialize 'cua_action' tool arguments")?;
+                let action_args: crate::cua::CuaActionArgs =
+                    serde_json::from_value(args.clone())
+                        .context("Failed to deserialize 'cua_action' tool arguments")?;
                 crate::cua::execute_cua_action(&action_args).await
             }
             "cua_key" => {
                 if policy == SandboxPolicy::ReadOnly {
-                    return Err(anyhow!("Cannot send keystrokes: Sandbox policy is Read-Only"));
+                    return Err(anyhow!(
+                        "Cannot send keystrokes: Sandbox policy is Read-Only"
+                    ));
                 }
                 let key_args: crate::cua::CuaKeyArgs = serde_json::from_value(args.clone())
                     .context("Failed to deserialize 'cua_key' tool arguments")?;
@@ -3948,7 +3951,9 @@ impl ToolRegistry {
             }
             "cua_mouse" => {
                 if policy == SandboxPolicy::ReadOnly {
-                    return Err(anyhow!("Cannot dispatch mouse: Sandbox policy is Read-Only"));
+                    return Err(anyhow!(
+                        "Cannot dispatch mouse: Sandbox policy is Read-Only"
+                    ));
                 }
                 let mouse_args: crate::cua::CuaMouseArgs = serde_json::from_value(args.clone())
                     .context("Failed to deserialize 'cua_mouse' tool arguments")?;
@@ -7315,7 +7320,11 @@ mod tests {
         std::fs::create_dir_all(cwd.join(".git")).unwrap();
         let issues_dir = cwd.join(".github/issues");
         std::fs::create_dir_all(&issues_dir).unwrap();
-        std::fs::write(issues_dir.join("101.md"), "# Issue #101: Test Bug\nAutomated issue reproduction").unwrap();
+        std::fs::write(
+            issues_dir.join("101.md"),
+            "# Issue #101: Test Bug\nAutomated issue reproduction",
+        )
+        .unwrap();
 
         // 1. fetch_issue
         let issue_res = registry

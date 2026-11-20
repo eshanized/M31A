@@ -51,7 +51,10 @@ impl CuaSessionManager {
         app_id: Option<&str>,
         capture_background: bool,
     ) -> Result<AppState, CuaError> {
-        let state = self.backend.get_app_state(app_id, capture_background).await?;
+        let state = self
+            .backend
+            .get_app_state(app_id, capture_background)
+            .await?;
         let mut current_id = self.active_state_id.write().await;
         *current_id = Some(state.state_id.clone());
         Ok(state)

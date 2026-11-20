@@ -695,8 +695,8 @@ pub async fn pick_workspace_directory(
         let canonical = validate_and_canonicalize_workspace_path(&path_buf.display().to_string())
             .map_err(|e| e.to_string())?;
         let trust_store = state.runtime().trust_store();
-        let is_trusted = verify_workspace_trust(&trust_store, &canonical, false)
-            .map_err(|e| e.to_string())?;
+        let is_trusted =
+            verify_workspace_trust(&trust_store, &canonical, false).map_err(|e| e.to_string())?;
         state.set_active_workspace(canonical.clone());
         Ok(Some(WorkspaceInfoDto {
             path: canonical.display().to_string(),
@@ -752,17 +752,19 @@ pub async fn list_workspace_files(
             name,
             path: relative_path,
             is_dir: file_type.is_dir(),
-            size: if file_type.is_dir() { 0 } else { metadata.len() },
+            size: if file_type.is_dir() {
+                0
+            } else {
+                metadata.len()
+            },
             modified_at,
         });
     }
 
-    entries.sort_by(|a, b| {
-        match (a.is_dir, b.is_dir) {
-            (true, false) => std::cmp::Ordering::Less,
-            (false, true) => std::cmp::Ordering::Greater,
-            _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
-        }
+    entries.sort_by(|a, b| match (a.is_dir, b.is_dir) {
+        (true, false) => std::cmp::Ordering::Less,
+        (false, true) => std::cmp::Ordering::Greater,
+        _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
     });
 
     Ok(entries)
@@ -829,7 +831,9 @@ pub async fn delete_session(
     session_id: String,
 ) -> Result<(), String> {
     let storage = state.runtime().storage();
-    storage.delete_thread(&session_id).map_err(|e| e.to_string())?;
+    storage
+        .delete_thread(&session_id)
+        .map_err(|e| e.to_string())?;
 
     if state.active_session_id().as_deref() == Some(&session_id) {
         state.set_active_session_id(None);
@@ -846,7 +850,9 @@ pub async fn fork_session(
 ) -> Result<SessionSummaryDto, String> {
     let title = new_title.unwrap_or_else(|| "Forked Session".to_string());
     let storage = state.runtime().storage();
-    let thread = storage.fork_thread(&session_id, &title).map_err(|e| e.to_string())?;
+    let thread = storage
+        .fork_thread(&session_id, &title)
+        .map_err(|e| e.to_string())?;
     let active_model = state.runtime().active_model();
 
     state.set_active_session_id(Some(thread.id.clone()));
@@ -873,9 +879,7 @@ pub async fn export_session_transcript(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("Session '{session_id}' not found"))?;
 
-    let messages = storage
-        .list_items(&session_id)
-        .map_err(|e| e.to_string())?;
+    let messages = storage.list_items(&session_id).map_err(|e| e.to_string())?;
 
     let mut doc = format!(
         "# M31A Session Transcript: {}\n\n- **Session ID:** `{}`\n- **Model:** `{}`\n- **Workspace:** `{}`\n- **Created:** {}\n\n---\n\n",

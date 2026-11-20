@@ -4,7 +4,9 @@ use thiserror::Error;
 
 #[derive(Error, Debug, Clone, PartialEq, Eq)]
 pub enum CuaError {
-    #[error("State mismatch: expected state_id '{expected}', but active state is '{actual}'. UI may have mutated.")]
+    #[error(
+        "State mismatch: expected state_id '{expected}', but active state is '{actual}'. UI may have mutated."
+    )]
     StateMismatch { expected: String, actual: String },
 
     #[error("Action execution failed: {message} (action_sent: {action_sent})")]

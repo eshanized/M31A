@@ -4,12 +4,12 @@
 //! and active GUI display sessions (Wayland / X11). Dispatches real input events
 //! via native desktop tools (`wtype` / `xdotool`).
 
+use crate::backend::CuaBackend;
 use crate::error::CuaError;
 use crate::model::{
     AccessibleElement, ActionResult, AppInfo, AppState, ElementAction, ElementRole, MouseAction,
     Rect, WindowInfo,
 };
-use crate::backend::CuaBackend;
 use async_trait::async_trait;
 use std::collections::HashSet;
 use std::fs;
@@ -151,7 +151,11 @@ impl CuaBackend for LinuxNativeBackend {
                 .ok_or_else(|| CuaError::AppNotFound("active".to_string()))?
         };
 
-        let state_id = format!("state_{}_{}", target_app.pid, chrono::Utc::now().timestamp());
+        let state_id = format!(
+            "state_{}_{}",
+            target_app.pid,
+            chrono::Utc::now().timestamp()
+        );
         let window_title = target_app
             .windows
             .first()
@@ -166,19 +170,21 @@ impl CuaBackend for LinuxNativeBackend {
             value: None,
             bounds: Some(Rect::new(0, 0, 1920, 1080)),
             states: vec!["visible".to_string(), "active".to_string()],
-            actions: vec!["close".to_string(), "minimize".to_string(), "maximize".to_string()],
-            children: vec![
-                AccessibleElement {
-                    index: 1,
-                    role: ElementRole::Panel,
-                    name: "ClientArea".to_string(),
-                    value: None,
-                    bounds: Some(Rect::new(0, 30, 1920, 1050)),
-                    states: vec!["visible".to_string()],
-                    actions: vec!["click".to_string()],
-                    children: vec![],
-                }
+            actions: vec![
+                "close".to_string(),
+                "minimize".to_string(),
+                "maximize".to_string(),
             ],
+            children: vec![AccessibleElement {
+                index: 1,
+                role: ElementRole::Panel,
+                name: "ClientArea".to_string(),
+                value: None,
+                bounds: Some(Rect::new(0, 30, 1920, 1050)),
+                states: vec!["visible".to_string()],
+                actions: vec!["click".to_string()],
+                children: vec![],
+            }],
         };
 
         Ok(AppState {
@@ -229,7 +235,9 @@ impl CuaBackend for LinuxNativeBackend {
         // Try Wayland wtype tool if available
         if Path::new("/usr/bin/wtype").exists() {
             let res = Command::new("wtype").arg(keys).status();
-            if let Ok(s) = res && s.success() {
+            if let Ok(s) = res
+                && s.success()
+            {
                 dispatched = true;
             }
         }

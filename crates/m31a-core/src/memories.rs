@@ -975,6 +975,10 @@ mod tests {
             sim_similar,
             sim_diff
         );
-        assert!(sim_similar > 0.4, "Expected significant overlap for shared tokens/subwords: {}", sim_similar);
+        assert!(
+            sim_similar > 0.4,
+            "Expected significant overlap for shared tokens/subwords: {}",
+            sim_similar
+        );
     }
 }

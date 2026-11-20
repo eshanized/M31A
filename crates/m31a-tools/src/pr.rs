@@ -125,10 +125,20 @@ impl PullRequestManager {
         }
         if local_md.exists() {
             if let Ok(content) = fs::read_to_string(&local_md) {
-                let first_line = content.lines().next().unwrap_or("").trim().trim_start_matches('#').trim();
+                let first_line = content
+                    .lines()
+                    .next()
+                    .unwrap_or("")
+                    .trim()
+                    .trim_start_matches('#')
+                    .trim();
                 return Ok(IssueDetails {
                     number: issue_number,
-                    title: if first_line.is_empty() { format!("Issue #{}", issue_number) } else { first_line.to_string() },
+                    title: if first_line.is_empty() {
+                        format!("Issue #{}", issue_number)
+                    } else {
+                        first_line.to_string()
+                    },
                     body: content,
                     labels: vec![],
                     url: Some(local_md.to_string_lossy().to_string()),
@@ -138,7 +148,10 @@ impl PullRequestManager {
 
         anyhow::bail!(
             "Failed to retrieve issue #{} for {}/{}: GitHub API and gh CLI failed or are unauthorized, and no local issue file found at .github/issues/{}.json",
-            issue_number, owner, repo, issue_number
+            issue_number,
+            owner,
+            repo,
+            issue_number
         );
     }
 

@@ -126,7 +126,13 @@ impl RuntimeRegistrationClient {
             .body(payload)
             .send()
             .await
-            .map_err(|e| anyhow::anyhow!("Failed to reach registration endpoint at '{}': {}", self.endpoint, e))?;
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "Failed to reach registration endpoint at '{}': {}",
+                    self.endpoint,
+                    e
+                )
+            })?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -225,7 +231,8 @@ mod tests {
     #[tokio::test]
     async fn test_registration_network_failure_handling() {
         // Test connection to unreachable port
-        let client = RuntimeRegistrationClient::new("http://127.0.0.1:59999/agent/register").unwrap();
+        let client =
+            RuntimeRegistrationClient::new("http://127.0.0.1:59999/agent/register").unwrap();
         let req = RuntimeRegistrationRequest {
             instance_id: "agent_runner_fail".to_string(),
             agent_role: "coder".to_string(),
@@ -234,7 +241,10 @@ mod tests {
             metadata: HashMap::new(),
         };
         let err = client.register(&req).await.unwrap_err();
-        assert!(err.to_string().contains("Failed to reach registration endpoint"));
+        assert!(
+            err.to_string()
+                .contains("Failed to reach registration endpoint")
+        );
     }
 
     #[test]

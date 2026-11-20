@@ -13,12 +13,7 @@ async fn test_cua_tools_execution_via_registry() {
 
     // 1. cua_list_apps
     let list_res = registry
-        .execute(
-            "cua_list_apps",
-            "{}",
-            cwd,
-            SandboxPolicy::WorkspaceWrite,
-        )
+        .execute("cua_list_apps", "{}", cwd, SandboxPolicy::WorkspaceWrite)
         .await
         .expect("Failed to execute cua_list_apps");
 

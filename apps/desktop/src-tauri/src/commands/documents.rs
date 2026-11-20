@@ -59,8 +59,8 @@ pub struct PdfPreviewPayload {
 /// Helper function to parse OpenXML DOCX archive into structured paragraphs and tables.
 pub fn parse_docx_file(file_path: &Path) -> Result<DocxPreviewPayload, String> {
     let file = File::open(file_path).map_err(|e| format!("Failed to open DOCX file: {e}"))?;
-    let mut archive =
-        zip::ZipArchive::new(BufReader::new(file)).map_err(|e| format!("Invalid DOCX zip archive: {e}"))?;
+    let mut archive = zip::ZipArchive::new(BufReader::new(file))
+        .map_err(|e| format!("Invalid DOCX zip archive: {e}"))?;
 
     let mut doc_xml_content = String::new();
     {
@@ -212,8 +212,8 @@ fn parse_docx_table_xml(xml: &str) -> DocxTable {
 /// Helper function to parse OpenXML XLSX archive into tabular sheets and cells.
 pub fn parse_xlsx_file(file_path: &Path) -> Result<XlsxPreviewPayload, String> {
     let file = File::open(file_path).map_err(|e| format!("Failed to open XLSX file: {e}"))?;
-    let mut archive =
-        zip::ZipArchive::new(BufReader::new(file)).map_err(|e| format!("Invalid XLSX zip archive: {e}"))?;
+    let mut archive = zip::ZipArchive::new(BufReader::new(file))
+        .map_err(|e| format!("Invalid XLSX zip archive: {e}"))?;
 
     // 1. Read shared strings if present
     let mut shared_strings = Vec::new();

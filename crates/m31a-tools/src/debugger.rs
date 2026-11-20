@@ -78,9 +78,9 @@ impl LiveGdbSession {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
-        let mut child = cmd
-            .spawn()
-            .with_context(|| format!("Failed to spawn real GDB process for target '{}'", program))?;
+        let mut child = cmd.spawn().with_context(|| {
+            format!("Failed to spawn real GDB process for target '{}'", program)
+        })?;
 
         let stdin = child
             .stdin
@@ -135,7 +135,11 @@ impl LiveGdbSession {
             let trimmed = raw_line.trim().to_string();
             raw_line.clear();
             if trimmed == "(gdb)" {
-                if is_exec && !lines.iter().any(|l: &String| l.starts_with("*stopped") || l.starts_with("^error")) {
+                if is_exec
+                    && !lines
+                        .iter()
+                        .any(|l: &String| l.starts_with("*stopped") || l.starts_with("^error"))
+                {
                     continue;
                 }
                 break;
@@ -161,7 +165,11 @@ impl LiveGdbSession {
             if line.starts_with("*stopped") {
                 found_stopped = true;
                 if let Some(caps) = stop_re.captures(line) {
-                    reason = caps.get(1).map(|m| m.as_str()).unwrap_or("stopped").to_string();
+                    reason = caps
+                        .get(1)
+                        .map(|m| m.as_str())
+                        .unwrap_or("stopped")
+                        .to_string();
                 }
                 frame_text = line.clone();
                 break;
@@ -262,24 +270,27 @@ impl DapClient {
         }
 
         let mut gdb = LiveGdbSession::spawn(prog_path.to_str().unwrap_or(program), &args, cwd)
-            .map_err(|e| anyhow::anyhow!("Failed to spawn GDB for '{}': {}", prog_path.display(), e))?;
+            .map_err(|e| {
+                anyhow::anyhow!("Failed to spawn GDB for '{}': {}", prog_path.display(), e)
+            })?;
 
         // Set initial breakpoint at main to pause at entry
         let _ = gdb.execute_mi("-break-insert main", false);
         let run_lines = gdb.execute_mi("-exec-run", true).unwrap_or_default();
 
-        let (reason, frame) = LiveGdbSession::parse_stopped_frame(&run_lines).unwrap_or_else(|| {
-            (
-                "entry".to_string(),
-                StackFrame {
-                    id: 1,
-                    name: "main".to_string(),
-                    source_file: Some(prog_path.clone()),
-                    line: 1,
-                    column: 1,
-                },
-            )
-        });
+        let (reason, frame) =
+            LiveGdbSession::parse_stopped_frame(&run_lines).unwrap_or_else(|| {
+                (
+                    "entry".to_string(),
+                    StackFrame {
+                        id: 1,
+                        name: "main".to_string(),
+                        source_file: Some(prog_path.clone()),
+                        line: 1,
+                        column: 1,
+                    },
+                )
+            });
 
         let frames = vec![frame.clone()];
         let mut variables = Vec::new();
@@ -330,12 +341,9 @@ impl DapClient {
             // If real GDB session is active, insert real breakpoint
             if let Some(ref mut gdb) = session.live_gdb {
                 let cmd = match condition {
-                    Some(ref cond) => format!(
-                        "-break-insert -c \"{}\" {}:{}",
-                        cond,
-                        file.display(),
-                        line
-                    ),
+                    Some(ref cond) => {
+                        format!("-break-insert -c \"{}\" {}:{}", cond, file.display(), line)
+                    }
                     None => format!("-break-insert {}:{}", file.display(), line),
                 };
                 if let Ok(resp) = gdb.execute_mi(&cmd, false) {
@@ -367,7 +375,10 @@ impl DapClient {
             .ok_or_else(|| anyhow::anyhow!("Debug session '{}' not found", session_id))?;
 
         let gdb = session.live_gdb.as_mut().ok_or_else(|| {
-            anyhow::anyhow!("Debug session '{}' has no active live GDB process", session_id)
+            anyhow::anyhow!(
+                "Debug session '{}' has no active live GDB process",
+                session_id
+            )
         })?;
 
         let lines = gdb.execute_mi("-exec-next", true)?;
@@ -391,7 +402,10 @@ impl DapClient {
             .ok_or_else(|| anyhow::anyhow!("Debug session '{}' not found", session_id))?;
 
         let gdb = session.live_gdb.as_mut().ok_or_else(|| {
-            anyhow::anyhow!("Debug session '{}' has no active live GDB process", session_id)
+            anyhow::anyhow!(
+                "Debug session '{}' has no active live GDB process",
+                session_id
+            )
         })?;
 
         let lines = gdb.execute_mi("-exec-step", true)?;
@@ -415,7 +429,10 @@ impl DapClient {
             .ok_or_else(|| anyhow::anyhow!("Debug session '{}' not found", session_id))?;
 
         let gdb = session.live_gdb.as_mut().ok_or_else(|| {
-            anyhow::anyhow!("Debug session '{}' has no active live GDB process", session_id)
+            anyhow::anyhow!(
+                "Debug session '{}' has no active live GDB process",
+                session_id
+            )
         })?;
 
         let lines = gdb.execute_mi("-exec-finish", true)?;
@@ -439,7 +456,10 @@ impl DapClient {
             .ok_or_else(|| anyhow::anyhow!("Debug session '{}' not found", session_id))?;
 
         let gdb = session.live_gdb.as_mut().ok_or_else(|| {
-            anyhow::anyhow!("Debug session '{}' has no active live GDB process", session_id)
+            anyhow::anyhow!(
+                "Debug session '{}' has no active live GDB process",
+                session_id
+            )
         })?;
 
         let lines = gdb.execute_mi("-exec-continue", true)?;
@@ -467,7 +487,10 @@ impl DapClient {
             .ok_or_else(|| anyhow::anyhow!("Debug session '{}' not found", session_id))?;
 
         let gdb = session.live_gdb.as_mut().ok_or_else(|| {
-            anyhow::anyhow!("Debug session '{}' has no active live GDB process", session_id)
+            anyhow::anyhow!(
+                "Debug session '{}' has no active live GDB process",
+                session_id
+            )
         })?;
 
         let lines = gdb.execute_mi("-stack-list-variables --simple-values", false)?;
@@ -495,7 +518,10 @@ impl DapClient {
             .ok_or_else(|| anyhow::anyhow!("Debug session '{}' not found", session_id))?;
 
         let gdb = session.live_gdb.as_mut().ok_or_else(|| {
-            anyhow::anyhow!("Debug session '{}' has no active live GDB process", session_id)
+            anyhow::anyhow!(
+                "Debug session '{}' has no active live GDB process",
+                session_id
+            )
         })?;
 
         let cmd = format!("-data-evaluate-expression \"{}\"", expr);
@@ -800,7 +826,11 @@ int main() {
         let eval_res = client
             .evaluate_expression(sess_id, "alpha")
             .expect("Live variable evaluation");
-        assert!(eval_res.contains("alpha = 42") || eval_res.contains("42"), "eval_res was: {}", eval_res);
+        assert!(
+            eval_res.contains("alpha = 42") || eval_res.contains("42"),
+            "eval_res was: {}",
+            eval_res
+        );
 
         // Terminate real session
         client.terminate(sess_id).expect("Clean GDB termination");

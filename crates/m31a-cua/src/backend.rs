@@ -105,7 +105,11 @@ impl SimulatedBackend {
             value: None,
             bounds: Some(Rect::new(50, 50, 1024, 768)),
             states: vec!["active".to_string(), "resizable".to_string()],
-            actions: vec!["close".to_string(), "minimize".to_string(), "maximize".to_string()],
+            actions: vec![
+                "close".to_string(),
+                "minimize".to_string(),
+                "maximize".to_string(),
+            ],
             children: vec![
                 AccessibleElement {
                     index: 1,
