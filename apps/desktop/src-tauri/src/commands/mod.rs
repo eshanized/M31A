@@ -47,6 +47,32 @@ pub struct WorkspaceInfoDto {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkspaceFileEntryDto {
+    pub name: String,
+    pub path: String,
+    pub is_dir: bool,
+    pub size: u64,
+    pub modified_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolDefinitionDto {
+    pub name: String,
+    pub description: String,
+    pub parameters_schema: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuntimeConfigDto {
+    pub model: String,
+    pub api_base: String,
+    pub sandbox_policy: String,
+    pub approval_policy: String,
+    pub active_features: Vec<String>,
+    pub dangerously_bypass: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelInfoDto {
     pub id: String,
     pub name: String,
@@ -649,4 +675,273 @@ pub async fn respond_question(
         .runtime()
         .respond_question(&question_id, answers)
         .map_err(|e| e.to_string())
+}
+
+// =============================================================================
+// Workspace Exploration & Dialog Commands
+// =============================================================================
+
+#[tauri::command]
+pub async fn pick_workspace_directory(
+    app: AppHandle,
+    state: State<'_, DesktopState>,
+) -> Result<Option<WorkspaceInfoDto>, String> {
+    let picked = app.dialog().file().blocking_pick_folder();
+    if let Some(folder_path) = picked {
+        let path_buf = folder_path.into_path().map_err(|e| e.to_string())?;
+        let canonical = validate_and_canonicalize_workspace_path(&path_buf.display().to_string())
+            .map_err(|e| e.to_string())?;
+        let trust_store = state.runtime().trust_store();
+        let is_trusted = verify_workspace_trust(&trust_store, &canonical, false)
+            .map_err(|e| e.to_string())?;
+        state.set_active_workspace(canonical.clone());
+        Ok(Some(WorkspaceInfoDto {
+            path: canonical.display().to_string(),
+            is_trusted,
+            exists: true,
+        }))
+    } else {
+        Ok(None)
+    }
+}
+
+#[tauri::command]
+pub async fn list_workspace_files(
+    state: State<'_, DesktopState>,
+    subpath: Option<String>,
+) -> Result<Vec<WorkspaceFileEntryDto>, String> {
+    let workspace = state.active_workspace();
+    let target_dir = match subpath {
+        Some(ref rel) if !rel.trim().is_empty() => {
+            crate::security::validate_and_canonicalize_child_path(&workspace, rel)
+                .map_err(|e| e.to_string())?
+        }
+        _ => workspace.clone(),
+    };
+
+    if !target_dir.is_dir() {
+        return Err(format!("'{}' is not a directory", target_dir.display()));
+    }
+
+    let mut entries = Vec::new();
+    let read_dir = std::fs::read_dir(&target_dir).map_err(|e| e.to_string())?;
+
+    for entry_res in read_dir {
+        let entry = entry_res.map_err(|e| e.to_string())?;
+        let file_type = entry.file_type().map_err(|e| e.to_string())?;
+        let metadata = entry.metadata().map_err(|e| e.to_string())?;
+        let name = entry.file_name().to_string_lossy().to_string();
+
+        let full_path = entry.path();
+        let relative_path = full_path
+            .strip_prefix(&workspace)
+            .unwrap_or(&full_path)
+            .to_string_lossy()
+            .to_string();
+
+        let modified_at = metadata.modified().ok().and_then(|t| {
+            t.duration_since(std::time::UNIX_EPOCH)
+                .ok()
+                .map(|d| d.as_secs() as i64)
+        });
+
+        entries.push(WorkspaceFileEntryDto {
+            name,
+            path: relative_path,
+            is_dir: file_type.is_dir(),
+            size: if file_type.is_dir() { 0 } else { metadata.len() },
+            modified_at,
+        });
+    }
+
+    entries.sort_by(|a, b| {
+        match (a.is_dir, b.is_dir) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+        }
+    });
+
+    Ok(entries)
+}
+
+#[tauri::command]
+pub async fn read_workspace_file_preview(
+    state: State<'_, DesktopState>,
+    path: String,
+) -> Result<String, String> {
+    let workspace = state.active_workspace();
+    let file_path = crate::security::validate_and_canonicalize_child_path(&workspace, &path)
+        .map_err(|e| e.to_string())?;
+
+    if !file_path.is_file() {
+        return Err(format!("'{}' is not a regular file", file_path.display()));
+    }
+
+    let metadata = std::fs::metadata(&file_path).map_err(|e| e.to_string())?;
+    if metadata.len() > 1024 * 100 {
+        use std::io::Read;
+        let mut f = std::fs::File::open(&file_path).map_err(|e| e.to_string())?;
+        let mut buffer = vec![0u8; 1024 * 100];
+        let bytes_read = f.read(&mut buffer).map_err(|e| e.to_string())?;
+        let s = String::from_utf8_lossy(&buffer[..bytes_read]).to_string();
+        Ok(format!("{s}\n\n... [truncated at 100KB preview] ..."))
+    } else {
+        std::fs::read_to_string(&file_path).map_err(|e| e.to_string())
+    }
+}
+
+// =============================================================================
+// Extended Session Management
+// =============================================================================
+
+#[tauri::command]
+pub async fn rename_session(
+    state: State<'_, DesktopState>,
+    session_id: String,
+    new_title: String,
+) -> Result<(), String> {
+    let trimmed = new_title.trim();
+    if trimmed.is_empty() {
+        return Err("Session title cannot be empty".to_string());
+    }
+
+    let storage = state.runtime().storage();
+    let conn = storage.connection();
+    let conn_guard = conn.lock().map_err(|e| e.to_string())?;
+    let now = chrono::Utc::now().timestamp();
+    conn_guard
+        .execute(
+            "UPDATE threads SET title = ?1, updated_at = ?2 WHERE id = ?3",
+            rusqlite::params![trimmed, now, session_id],
+        )
+        .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn delete_session(
+    state: State<'_, DesktopState>,
+    session_id: String,
+) -> Result<(), String> {
+    let storage = state.runtime().storage();
+    storage.delete_thread(&session_id).map_err(|e| e.to_string())?;
+
+    if state.active_session_id().as_deref() == Some(&session_id) {
+        state.set_active_session_id(None);
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn fork_session(
+    state: State<'_, DesktopState>,
+    session_id: String,
+    new_title: Option<String>,
+) -> Result<SessionSummaryDto, String> {
+    let title = new_title.unwrap_or_else(|| "Forked Session".to_string());
+    let storage = state.runtime().storage();
+    let thread = storage.fork_thread(&session_id, &title).map_err(|e| e.to_string())?;
+    let active_model = state.runtime().active_model();
+
+    state.set_active_session_id(Some(thread.id.clone()));
+
+    Ok(SessionSummaryDto {
+        id: thread.id,
+        title: thread.title,
+        model: active_model,
+        cwd: thread.cwd,
+        created_at: thread.created_at,
+        updated_at: thread.updated_at,
+        is_active: true,
+    })
+}
+
+#[tauri::command]
+pub async fn export_session_transcript(
+    state: State<'_, DesktopState>,
+    session_id: String,
+) -> Result<String, String> {
+    let storage = state.runtime().storage();
+    let thread = storage
+        .get_thread(&session_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("Session '{session_id}' not found"))?;
+
+    let messages = storage
+        .list_items(&session_id)
+        .map_err(|e| e.to_string())?;
+
+    let mut doc = format!(
+        "# M31A Session Transcript: {}\n\n- **Session ID:** `{}`\n- **Model:** `{}`\n- **Workspace:** `{}`\n- **Created:** {}\n\n---\n\n",
+        thread.title,
+        thread.id,
+        thread.model,
+        thread.cwd,
+        chrono::DateTime::from_timestamp(thread.created_at, 0)
+            .map(|dt| dt.to_rfc3339())
+            .unwrap_or_else(|| "Unknown".to_string())
+    );
+
+    for (item_type, content, _) in messages {
+        match item_type.as_str() {
+            "user" | "user_message" | "user_queued" => {
+                doc.push_str("### 👤 User\n\n");
+                doc.push_str(&content);
+                doc.push_str("\n\n---\n\n");
+            }
+            "assistant" | "assistant_message" | "agent_response" => {
+                doc.push_str("### 🤖 M31A Assistant\n\n");
+                doc.push_str(&content);
+                doc.push_str("\n\n---\n\n");
+            }
+            _ => {}
+        }
+    }
+
+    Ok(doc)
+}
+
+// =============================================================================
+// Tool Catalog & System Configuration
+// =============================================================================
+
+#[tauri::command]
+pub async fn list_registered_tools(
+    state: State<'_, DesktopState>,
+) -> Result<Vec<ToolDefinitionDto>, String> {
+    let tools = state.runtime().tools().definitions();
+    Ok(tools
+        .into_iter()
+        .map(|t| ToolDefinitionDto {
+            name: t.function.name,
+            description: t.function.description,
+            parameters_schema: serde_json::to_string_pretty(&t.function.parameters).ok(),
+        })
+        .collect())
+}
+
+#[tauri::command]
+pub async fn get_runtime_config(
+    state: State<'_, DesktopState>,
+) -> Result<RuntimeConfigDto, String> {
+    let runtime = state.runtime();
+    let cfg = runtime.config();
+    let features: Vec<String> = runtime
+        .features_registry()
+        .active_features()
+        .into_iter()
+        .map(|k| k.as_str().to_string())
+        .collect();
+
+    Ok(RuntimeConfigDto {
+        model: cfg.core.model.clone(),
+        api_base: cfg.core.api_base.clone(),
+        sandbox_policy: format!("{:?}", cfg.core.sandbox),
+        approval_policy: format!("{:?}", cfg.core.approval),
+        active_features: features,
+        dangerously_bypass: cfg.core.dangerously_bypass,
+    })
 }

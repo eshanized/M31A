@@ -13,7 +13,26 @@ pub mod state;
 use tauri::Manager;
 use tracing::info;
 
+#[cfg(target_os = "linux")]
+fn ensure_webkit_environment() {
+    let link_target = std::path::Path::new("/var/tmp/webkit2gtk");
+    if !link_target.exists() {
+        if link_target.is_symlink() {
+            let _ = std::fs::remove_file(link_target);
+        }
+        if let Ok(home) = std::env::var("HOME") {
+            let user_webkit = std::path::PathBuf::from(home).join(".local/usr/lib/webkit2gtk-4.1");
+            if user_webkit.exists() {
+                let _ = std::os::unix::fs::symlink(&user_webkit, link_target);
+            }
+        }
+    }
+}
+
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(target_os = "linux")]
+    ensure_webkit_environment();
+
     // Initialize tracing subscriber for desktop host logs if not already active.
     let _ = tracing_subscriber::fmt()
         .with_env_filter(
@@ -56,6 +75,15 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             commands::get_pending_interactions,
             commands::respond_approval,
             commands::respond_question,
+            commands::pick_workspace_directory,
+            commands::list_workspace_files,
+            commands::read_workspace_file_preview,
+            commands::rename_session,
+            commands::delete_session,
+            commands::fork_session,
+            commands::export_session_transcript,
+            commands::list_registered_tools,
+            commands::get_runtime_config,
         ])
         .build(tauri::generate_context!())?;
 

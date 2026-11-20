@@ -167,4 +167,64 @@ describe('Tauri IPC Client', () => {
       answers: ['Option A', 'Option B'],
     });
   });
+
+  it('invokes workspace exploration commands', async () => {
+    const mockFiles = [
+      { name: 'src', path: 'src', is_dir: true, size: 0 },
+      { name: 'Cargo.toml', path: 'Cargo.toml', is_dir: false, size: 120 },
+    ];
+    vi.mocked(invoke).mockResolvedValueOnce(mockFiles);
+    expect(await ipc.listWorkspaceFiles('src')).toEqual(mockFiles);
+    expect(invoke).toHaveBeenCalledWith('list_workspace_files', { subpath: 'src' });
+
+    vi.mocked(invoke).mockResolvedValueOnce('file contents');
+    expect(await ipc.readWorkspaceFilePreview('src/main.rs')).toBe('file contents');
+    expect(invoke).toHaveBeenCalledWith('read_workspace_file_preview', { path: 'src/main.rs' });
+  });
+
+  it('invokes session lifecycle operations: rename, delete, fork, export', async () => {
+    vi.mocked(invoke).mockResolvedValueOnce(undefined);
+    await ipc.renameSession('sess-1', 'Renamed Title');
+    expect(invoke).toHaveBeenCalledWith('rename_session', { sessionId: 'sess-1', newTitle: 'Renamed Title' });
+
+    vi.mocked(invoke).mockResolvedValueOnce(undefined);
+    await ipc.deleteSession('sess-1');
+    expect(invoke).toHaveBeenCalledWith('delete_session', { sessionId: 'sess-1' });
+
+    const forked = {
+      id: 'sess-2',
+      title: 'Forked Title',
+      model: 'model-a',
+      cwd: '/workspace',
+      created_at: 1000,
+      updated_at: 1000,
+      is_active: true,
+    };
+    vi.mocked(invoke).mockResolvedValueOnce(forked);
+    expect(await ipc.forkSession('sess-1', 'Forked Title')).toEqual(forked);
+    expect(invoke).toHaveBeenCalledWith('fork_session', { sessionId: 'sess-1', newTitle: 'Forked Title' });
+
+    vi.mocked(invoke).mockResolvedValueOnce('# Transcript');
+    expect(await ipc.exportSessionTranscript('sess-1')).toBe('# Transcript');
+    expect(invoke).toHaveBeenCalledWith('export_session_transcript', { sessionId: 'sess-1' });
+  });
+
+  it('invokes tool catalog and config commands', async () => {
+    const mockTools = [{ name: 'read_file', description: 'Reads file', parameters_schema: null }];
+    vi.mocked(invoke).mockResolvedValueOnce(mockTools);
+    expect(await ipc.listRegisteredTools()).toEqual(mockTools);
+    expect(invoke).toHaveBeenCalledWith('list_registered_tools');
+
+    const mockConfig = {
+      model: 'test-model',
+      api_base: 'https://test',
+      sandbox_policy: 'WorkspaceWrite',
+      approval_policy: 'OnRequest',
+      active_features: ['guardian'],
+      dangerously_bypass: false,
+    };
+    vi.mocked(invoke).mockResolvedValueOnce(mockConfig);
+    expect(await ipc.getRuntimeConfig()).toEqual(mockConfig);
+    expect(invoke).toHaveBeenCalledWith('get_runtime_config');
+  });
 });

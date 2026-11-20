@@ -1,11 +1,14 @@
 import React, { useState } from 'react';
 import {
   Folder,
+  FolderPlus,
   ShieldCheck,
   ShieldAlert,
   Sliders,
   Sidebar as SidebarIcon,
   Cpu,
+  CheckCircle,
+  GitCompare,
 } from 'lucide-react';
 import { useApp } from '../../stores/AppContext';
 
@@ -26,6 +29,8 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
     activeModel,
     switchModel,
     authorizeCurrentWorkspace,
+    pickWorkspaceFolder,
+    submitTurn,
     runtimeStatus,
     isRuntimeReady,
     runningTurnId,
@@ -93,7 +98,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
             fontFamily: 'var(--font-mono)',
             fontWeight: 600,
             color: 'var(--text-primary)',
-            maxWidth: '300px',
+            maxWidth: '240px',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
@@ -101,6 +106,16 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
         >
           {getWorkspaceBasename(workspaceInfo?.path)}
         </span>
+
+        <button
+          type="button"
+          onClick={() => void pickWorkspaceFolder()}
+          className="btn btn-sm"
+          style={{ padding: '2px 6px', fontSize: '11px', gap: '4px' }}
+          title="Open a different workspace folder..."
+        >
+          <FolderPlus size={11} /> Open...
+        </button>
 
         {workspaceInfo && (
           workspaceInfo.is_trusted ? (
@@ -155,7 +170,32 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
       </div>
 
       {/* Spacer */}
-      <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '10px' }}>
+      <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '8px' }}>
+        {/* Quick Toolbar Actions */}
+        <button
+          type="button"
+          onClick={() => void submitTurn('Run complete workspace verification checks (fmt, clippy, check, tests).')}
+          disabled={!isRuntimeReady || isTurnBusy}
+          className="btn btn-sm"
+          style={{ padding: '3px 8px', fontSize: '11px', gap: '4px' }}
+          title="Run cargo check/tests in workspace"
+        >
+          <CheckCircle size={12} color="var(--accent-green)" /> Verify
+        </button>
+
+        <button
+          type="button"
+          onClick={() => void submitTurn('Review current git diff and summarize changes made in the workspace.')}
+          disabled={!isRuntimeReady || isTurnBusy}
+          className="btn btn-sm"
+          style={{ padding: '3px 8px', fontSize: '11px', gap: '4px' }}
+          title="Review workspace git diff"
+        >
+          <GitCompare size={12} color="var(--accent-blue)" /> Diff
+        </button>
+
+        <div style={{ width: '1px', height: '18px', backgroundColor: 'var(--border-primary)', margin: '0 4px' }} />
+
         {/* Model Selector */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px' }}>
           <Cpu size={13} color="var(--text-secondary)" />

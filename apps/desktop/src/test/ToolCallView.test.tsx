@@ -65,7 +65,7 @@ describe('ToolCallView Component', () => {
     fireEvent.click(toggle);
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByText('Arguments:')).toBeInTheDocument();
-    expect(screen.getByText('{"cmd": "cargo test"}')).toBeInTheDocument();
+    expect(screen.getByText(/cargo test/)).toBeInTheDocument();
     expect(screen.getByText('Output:')).toBeInTheDocument();
     expect(screen.getByText('test result: ok')).toBeInTheDocument();
 

@@ -23,9 +23,12 @@ import type {
   ModelInfoDto,
   PendingApprovalDto,
   PendingQuestionDto,
+  RuntimeConfigDto,
   RuntimeStatusDto,
   SessionDetailsDto,
   SessionSummaryDto,
+  ToolDefinitionDto,
+  WorkspaceFileEntryDto,
   WorkspaceInfoDto,
 } from '../types/ipc';
 import type { RuntimeEvent } from '../types/events';
@@ -57,6 +60,15 @@ export interface AppContextValue {
   activeModel: string;
   isRuntimeReady: boolean;
   runtimeError: string | null;
+  runtimeConfig: RuntimeConfigDto | null;
+  registeredTools: ToolDefinitionDto[];
+
+  // Workspace Exploration
+  workspaceFiles: WorkspaceFileEntryDto[];
+  isLoadingWorkspaceFiles: boolean;
+  activeSidebarTab: 'sessions' | 'files';
+  previewFilePath: string | null;
+  previewFileContent: string | null;
 
   // Session State
   sessions: SessionSummaryDto[];
@@ -78,9 +90,17 @@ export interface AppContextValue {
   refreshRuntime: () => Promise<void>;
   switchModel: (modelId: string) => Promise<void>;
   selectWorkspace: (path: string) => Promise<void>;
+  pickWorkspaceFolder: () => Promise<void>;
+  fetchWorkspaceFiles: (subpath?: string) => Promise<void>;
+  previewFile: (path: string | null) => Promise<void>;
+  setActiveSidebarTab: (tab: 'sessions' | 'files') => void;
   authorizeCurrentWorkspace: () => Promise<void>;
   selectSession: (sessionId: string) => Promise<void>;
   createNewSession: (title?: string) => Promise<string | null>;
+  renameSession: (sessionId: string, newTitle: string) => Promise<void>;
+  deleteSession: (sessionId: string) => Promise<void>;
+  forkSession: (sessionId: string, newTitle?: string) => Promise<string | null>;
+  exportSession: (sessionId: string) => Promise<string>;
   submitTurn: (prompt: string) => Promise<boolean>;
   cancelActiveTurn: () => Promise<void>;
   steerActiveTurn: (message: string) => Promise<void>;
@@ -91,6 +111,8 @@ export interface AppContextValue {
     reason?: string
   ) => Promise<void>;
   resolveQuestion: (questionId: string, answers: string[]) => Promise<void>;
+  fetchRegisteredTools: () => Promise<void>;
+  fetchRuntimeConfig: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -133,6 +155,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   const [pendingQuestions, setPendingQuestions] = useState<
     PendingQuestionDto[]
   >([]);
+
+  // Workspace Exploration State
+  const [workspaceFiles, setWorkspaceFiles] = useState<WorkspaceFileEntryDto[]>(
+    []
+  );
+  const [isLoadingWorkspaceFiles, setIsLoadingWorkspaceFiles] =
+    useState<boolean>(false);
+  const [activeSidebarTab, setActiveSidebarTab] = useState<'sessions' | 'files'>(
+    'sessions'
+  );
+  const [previewFilePath, setPreviewFilePath] = useState<string | null>(null);
+  const [previewFileContent, setPreviewFileContent] = useState<string | null>(
+    null
+  );
+
+  // Tools & Config State
+  const [registeredTools, setRegisteredTools] = useState<ToolDefinitionDto[]>([]);
+  const [runtimeConfig, setRuntimeConfig] = useState<RuntimeConfigDto | null>(
+    null
+  );
 
   // Ref to track latest state inside event listener callback
   const activeSessionIdRef = useRef<string | null>(null);
@@ -178,8 +220,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   const refreshPendingInteractions = useCallback(async () => {
     try {
       const pending = await ipc.getPendingInteractions();
-      setPendingApprovals(pending.approvals);
-      setPendingQuestions(pending.questions);
+      setPendingApprovals(pending?.approvals ?? []);
+      setPendingQuestions(pending?.questions ?? []);
     } catch (err) {
       console.error('Failed to reconcile pending runtime interactions:', err);
     }
@@ -262,6 +304,127 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       throw err;
     }
   }, [workspaceInfo?.path]);
+
+  const fetchWorkspaceFiles = useCallback(async (subpath?: string) => {
+    try {
+      setIsLoadingWorkspaceFiles(true);
+      const files = await ipc.listWorkspaceFiles(subpath);
+      setWorkspaceFiles(files);
+    } catch (err) {
+      console.error('Failed to list workspace files:', err);
+    } finally {
+      setIsLoadingWorkspaceFiles(false);
+    }
+  }, []);
+
+  const previewFile = useCallback(async (path: string | null) => {
+    if (!path) {
+      setPreviewFilePath(null);
+      setPreviewFileContent(null);
+      return;
+    }
+    try {
+      setPreviewFilePath(path);
+      const content = await ipc.readWorkspaceFilePreview(path);
+      setPreviewFileContent(content);
+    } catch (err) {
+      console.error(`Failed to preview file ${path}:`, err);
+      setPreviewFileContent(`Error loading preview: ${String(err)}`);
+    }
+  }, []);
+
+  const pickWorkspaceFolder = useCallback(async () => {
+    try {
+      const picked = await ipc.pickWorkspaceDirectory();
+      if (picked) {
+        setWorkspaceInfo(picked);
+        await fetchWorkspaceFiles();
+      }
+    } catch (err) {
+      console.error('Failed to pick workspace directory:', err);
+    }
+  }, [fetchWorkspaceFiles]);
+
+  const renameSession = useCallback(
+    async (sessionId: string, newTitle: string) => {
+      try {
+        await ipc.renameSession(sessionId, newTitle);
+        await refreshSessions();
+        if (activeSessionDetails?.id === sessionId) {
+          setActiveSessionDetails((prev) =>
+            prev ? { ...prev, title: newTitle } : null
+          );
+        }
+      } catch (err) {
+        console.error(`Failed to rename session ${sessionId}:`, err);
+        throw err;
+      }
+    },
+    [activeSessionDetails?.id, refreshSessions]
+  );
+
+  const deleteSession = useCallback(
+    async (sessionId: string) => {
+      try {
+        await ipc.deleteSession(sessionId);
+        await refreshSessions();
+        if (activeSessionId === sessionId) {
+          setActiveSessionId(null);
+          setActiveSessionDetails(null);
+          setMessages([]);
+        }
+      } catch (err) {
+        console.error(`Failed to delete session ${sessionId}:`, err);
+        throw err;
+      }
+    },
+    [activeSessionId, refreshSessions]
+  );
+
+  const forkSession = useCallback(
+    async (sessionId: string, newTitle?: string): Promise<string | null> => {
+      try {
+        const forked = await ipc.forkSession(sessionId, newTitle);
+        await refreshSessions();
+        await selectSession(forked.id);
+        return forked.id;
+      } catch (err) {
+        console.error(`Failed to fork session ${sessionId}:`, err);
+        return null;
+      }
+    },
+    [refreshSessions, selectSession]
+  );
+
+  const exportSession = useCallback(
+    async (sessionId: string): Promise<string> => {
+      try {
+        return await ipc.exportSessionTranscript(sessionId);
+      } catch (err) {
+        console.error(`Failed to export session ${sessionId}:`, err);
+        throw err;
+      }
+    },
+    []
+  );
+
+  const fetchRegisteredTools = useCallback(async () => {
+    try {
+      const tools = await ipc.listRegisteredTools();
+      setRegisteredTools(tools);
+    } catch (err) {
+      console.error('Failed to fetch registered tools:', err);
+    }
+  }, []);
+
+  const fetchRuntimeConfig = useCallback(async () => {
+    try {
+      const cfg = await ipc.getRuntimeConfig();
+      setRuntimeConfig(cfg);
+    } catch (err) {
+      console.error('Failed to fetch runtime config:', err);
+    }
+  }, []);
 
   // Handle Runtime Event Bridge Stream
   const handleRuntimeEvent = useCallback((event: RuntimeEvent) => {
@@ -607,6 +770,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   useEffect(() => {
     refreshRuntime();
     refreshSessions();
+    fetchWorkspaceFiles();
+    fetchRegisteredTools();
+    fetchRuntimeConfig();
 
     const eventsSubscription = subscribeToRuntimeEvents(handleRuntimeEvent);
     const gapsSubscription = subscribeToRuntimeEventGaps((skipped) => {
@@ -633,6 +799,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   }, [
     refreshRuntime,
     refreshSessions,
+    fetchWorkspaceFiles,
+    fetchRegisteredTools,
+    fetchRuntimeConfig,
     refreshPendingInteractions,
     handleRuntimeEvent,
   ]);
@@ -650,6 +819,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         activeModel,
         isRuntimeReady,
         runtimeError,
+        runtimeConfig,
+        registeredTools,
+        workspaceFiles,
+        isLoadingWorkspaceFiles,
+        activeSidebarTab,
+        previewFilePath,
+        previewFileContent,
         sessions,
         activeSessionId,
         activeSessionDetails,
@@ -663,15 +839,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         refreshRuntime,
         switchModel,
         selectWorkspace,
+        pickWorkspaceFolder,
+        fetchWorkspaceFiles,
+        previewFile,
+        setActiveSidebarTab,
         authorizeCurrentWorkspace,
         selectSession,
         createNewSession,
+        renameSession,
+        deleteSession,
+        forkSession,
+        exportSession,
         submitTurn,
         cancelActiveTurn,
         steerActiveTurn,
         setCollaborationMode,
         resolveApproval,
         resolveQuestion,
+        fetchRegisteredTools,
+        fetchRuntimeConfig,
       }}
     >
       {children}

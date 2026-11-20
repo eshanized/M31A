@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { Terminal, Shield, Cpu } from 'lucide-react';
+import { Terminal, Shield, Cpu, GitBranch, Compass } from 'lucide-react';
 import { useApp } from '../../stores/AppContext';
 import { MessageItem } from './MessageItem';
 
@@ -64,9 +64,9 @@ export const ChatTimeline: React.FC = () => {
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
             gap: '12px',
-            maxWidth: '680px',
+            maxWidth: '720px',
             width: '100%',
           }}
         >
@@ -76,7 +76,7 @@ export const ChatTimeline: React.FC = () => {
             disabled={!isRuntimeReady}
             className="btn"
             style={{
-              padding: '12px',
+              padding: '12px 14px',
               textAlign: 'left',
               display: 'flex',
               flexDirection: 'column',
@@ -89,7 +89,7 @@ export const ChatTimeline: React.FC = () => {
               <Shield size={14} color="var(--accent-green)" /> Workspace Inspection
             </div>
             <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
-              Inspect repo structure and check active branch/status.
+              Inspect repo structure and check active branch and uncommitted status.
             </div>
           </button>
 
@@ -99,7 +99,7 @@ export const ChatTimeline: React.FC = () => {
             disabled={!isRuntimeReady}
             className="btn"
             style={{
-              padding: '12px',
+              padding: '12px 14px',
               textAlign: 'left',
               display: 'flex',
               flexDirection: 'column',
@@ -112,7 +112,53 @@ export const ChatTimeline: React.FC = () => {
               <Cpu size={14} color="var(--accent-blue)" /> Verify Workspace
             </div>
             <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
-              Run cargo check, tests, or linters in the active workspace.
+              Run cargo check, unit tests, or project linters in the active workspace.
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => submitTurn('Check git status and summarize recent git diffs.')}
+            disabled={!isRuntimeReady}
+            className="btn"
+            style={{
+              padding: '12px 14px',
+              textAlign: 'left',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'flex-start',
+              gap: '4px',
+              height: 'auto',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 600 }}>
+              <GitBranch size={14} color="var(--accent-orange)" /> Git Diff & Review
+            </div>
+            <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+              Inspect git working tree, uncommitted modifications, and staged commits.
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => submitTurn('Analyze architecture and outline an implementation plan.')}
+            disabled={!isRuntimeReady}
+            className="btn"
+            style={{
+              padding: '12px 14px',
+              textAlign: 'left',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'flex-start',
+              gap: '4px',
+              height: 'auto',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 600 }}>
+              <Compass size={14} color="#a371f7" /> Architecture & Plan
+            </div>
+            <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+              Synthesize workspace codebase architecture and formulate a staged plan.
             </div>
           </button>
         </div>

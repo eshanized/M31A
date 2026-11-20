@@ -51,3 +51,16 @@ bench name="bench_full_session" iterations="5":
 # Create distributable M31A release artifacts using cargo-dist
 package:
     cargo dist build --artifacts=host
+
+# Run the M31A desktop application in development mode
+desktop-dev:
+    cd apps/desktop && npm run tauri dev
+
+# Build the release M31A desktop application
+desktop-build:
+    cd apps/desktop && npm run build
+    cargo build --release -p m31a-desktop
+
+# Run the release M31A desktop application
+desktop: desktop-build
+    ./target/release/m31a-desktop

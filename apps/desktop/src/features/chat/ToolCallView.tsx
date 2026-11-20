@@ -5,6 +5,16 @@ import type { ToolCallItem } from '../../stores/AppContext';
 export const ToolCallView: React.FC<{ toolCall: ToolCallItem }> = ({ toolCall }) => {
   const [isExpanded, setIsExpanded] = useState(false);
 
+  const formatJsonString = (raw?: string) => {
+    if (!raw) return '';
+    try {
+      const parsed = JSON.parse(raw);
+      return JSON.stringify(parsed, null, 2);
+    } catch {
+      return raw;
+    }
+  };
+
   return (
     <div
       style={{
@@ -113,7 +123,7 @@ export const ToolCallView: React.FC<{ toolCall: ToolCallItem }> = ({ toolCall })
                   wordBreak: 'break-all',
                 }}
               >
-                {toolCall.arguments}
+                {formatJsonString(toolCall.arguments)}
               </pre>
             </div>
           )}

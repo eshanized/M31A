@@ -25,6 +25,9 @@ pub enum SecurityError {
     #[error("Workspace at '{0}' is untrusted and access was denied")]
     UntrustedWorkspace(String),
 
+    #[error("Path '{0}' traverses outside workspace boundary '{1}'")]
+    PathTraversal(String, String),
+
     #[error("Trust store lock is poisoned")]
     LockPoisoned,
 }
@@ -49,6 +52,36 @@ pub fn validate_and_canonicalize_workspace_path(raw_path: &str) -> Result<PathBu
     if !canonical.is_dir() {
         return Err(SecurityError::NotADirectory(
             canonical.display().to_string(),
+        ));
+    }
+
+    Ok(canonical)
+}
+
+/// Validates that a subpath resides strictly inside `workspace_root`.
+pub fn validate_and_canonicalize_child_path(
+    workspace_root: &Path,
+    subpath: &str,
+) -> Result<PathBuf, SecurityError> {
+    let trimmed = subpath.trim();
+    let target = if trimmed.is_empty() || trimmed == "." {
+        workspace_root.to_path_buf()
+    } else {
+        workspace_root.join(trimmed)
+    };
+
+    let canonical = target.canonicalize().map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            SecurityError::NotFound(trimmed.to_string())
+        } else {
+            SecurityError::CanonicalizationFailed(trimmed.to_string(), error)
+        }
+    })?;
+
+    if !canonical.starts_with(workspace_root) {
+        return Err(SecurityError::PathTraversal(
+            canonical.display().to_string(),
+            workspace_root.display().to_string(),
         ));
     }
 
@@ -149,5 +182,23 @@ mod tests {
             validate_and_canonicalize_workspace_path(file_path.to_str().unwrap()),
             Err(SecurityError::NotADirectory(_))
         ));
+    }
+
+    #[test]
+    fn test_validate_and_canonicalize_child_path_accepts_valid_and_rejects_traversal() {
+        let temp = tempdir().unwrap();
+        let child_dir = temp.path().join("src");
+        std::fs::create_dir(&child_dir).unwrap();
+        let child_file = child_dir.join("main.rs");
+        std::fs::write(&child_file, "fn main() {}").unwrap();
+
+        let canonical = validate_and_canonicalize_child_path(temp.path(), "src/main.rs").unwrap();
+        assert_eq!(canonical, child_file.canonicalize().unwrap());
+
+        // Traversal attempt to escape root
+        let outside = tempdir().unwrap();
+        let escape_relative = format!("../{}", outside.path().file_name().unwrap().to_str().unwrap());
+        let res = validate_and_canonicalize_child_path(temp.path(), &escape_relative);
+        assert!(res.is_err());
     }
 }

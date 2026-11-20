@@ -8,12 +8,15 @@ import type {
   EnvironmentInfoDto,
   ModelInfoDto,
   PendingInteractionsDto,
+  RuntimeConfigDto,
   RuntimeStatusDto,
   SessionDetailsDto,
   SessionSummaryDto,
   ShutdownReportDto,
   SubmitTurnPayload,
+  ToolDefinitionDto,
   TurnHandleDto,
+  WorkspaceFileEntryDto,
   WorkspaceInfoDto,
 } from '../types/ipc';
 
@@ -112,5 +115,47 @@ export const ipc = {
       questionId,
       answers,
     });
+  },
+
+  // Workspace Exploration
+  async pickWorkspaceDirectory(): Promise<WorkspaceInfoDto | null> {
+    return invoke<WorkspaceInfoDto | null>('pick_workspace_directory');
+  },
+
+  async listWorkspaceFiles(subpath?: string): Promise<WorkspaceFileEntryDto[]> {
+    return invoke<WorkspaceFileEntryDto[]>('list_workspace_files', { subpath });
+  },
+
+  async readWorkspaceFilePreview(path: string): Promise<string> {
+    return invoke<string>('read_workspace_file_preview', { path });
+  },
+
+  // Extended Session Actions
+  async renameSession(sessionId: string, newTitle: string): Promise<void> {
+    return invoke<void>('rename_session', { sessionId, newTitle });
+  },
+
+  async deleteSession(sessionId: string): Promise<void> {
+    return invoke<void>('delete_session', { sessionId });
+  },
+
+  async forkSession(
+    sessionId: string,
+    newTitle?: string
+  ): Promise<SessionSummaryDto> {
+    return invoke<SessionSummaryDto>('fork_session', { sessionId, newTitle });
+  },
+
+  async exportSessionTranscript(sessionId: string): Promise<string> {
+    return invoke<string>('export_session_transcript', { sessionId });
+  },
+
+  // Tool Catalog & System Configuration
+  async listRegisteredTools(): Promise<ToolDefinitionDto[]> {
+    return invoke<ToolDefinitionDto[]>('list_registered_tools');
+  },
+
+  async getRuntimeConfig(): Promise<RuntimeConfigDto> {
+    return invoke<RuntimeConfigDto>('get_runtime_config');
   },
 };

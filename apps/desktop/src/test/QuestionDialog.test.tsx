@@ -29,6 +29,9 @@ describe('QuestionDialog Component', () => {
       }
       if (cmd === 'list_available_models') return [];
       if (cmd === 'list_sessions') return [];
+      if (cmd === 'get_pending_interactions') {
+        return { approvals: [], questions: [] };
+      }
       if (cmd === 'respond_question') return undefined;
       return null;
     });

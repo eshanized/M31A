@@ -112,3 +112,26 @@ export interface ShutdownReportDto {
   mcp_servers_stopped: number;
   timestamp: string;
 }
+
+export interface WorkspaceFileEntryDto {
+  name: string;
+  path: string;
+  is_dir: boolean;
+  size: number;
+  modified_at?: number | null;
+}
+
+export interface ToolDefinitionDto {
+  name: string;
+  description: string;
+  parameters_schema?: string | null;
+}
+
+export interface RuntimeConfigDto {
+  model: string;
+  api_base: string;
+  sandbox_policy: string;
+  approval_policy: string;
+  active_features: string[];
+  dangerously_bypass: boolean;
+}
