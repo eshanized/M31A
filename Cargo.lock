@@ -2982,8 +2982,10 @@ name = "m31a-desktop"
 version = "0.1.15"
 dependencies = [
  "chrono",
+ "m31a-composer",
  "m31a-core",
  "m31a-elicitation",
+ "m31a-fuzzy",
  "m31a-provider",
  "m31a-runtime",
  "m31a-trust",

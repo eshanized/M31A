@@ -966,3 +966,63 @@ pub async fn get_runtime_config(
         dangerously_bypass: cfg.core.dangerously_bypass,
     })
 }
+
+// =============================================================================
+// Agentic Coder Features: Slash Commands & Workspace Mentions
+// =============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileMentionMatchDto {
+    pub path: String,
+    pub filename: String,
+    pub is_dir: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SlashCommandDto {
+    pub name: String,
+    pub description: String,
+    pub usage: String,
+    pub category: String,
+    pub subcommands: Vec<String>,
+}
+
+#[tauri::command]
+pub async fn search_workspace_files(
+    state: State<'_, DesktopState>,
+    query: String,
+) -> Result<Vec<FileMentionMatchDto>, String> {
+    let workspace = state.active_workspace();
+    let all_files = m31a_fuzzy::WorkspaceScanner::collect_workspace_files_cached(&workspace, 500);
+    let matched = m31a_fuzzy::WorkspaceScanner::search(&query, &all_files);
+    let results = matched
+        .into_iter()
+        .take(25)
+        .map(|c| {
+            let filename = std::path::Path::new(&c.insert_text)
+                .file_name()
+                .map(|f| f.to_string_lossy().to_string())
+                .unwrap_or_else(|| c.display_name.clone());
+            FileMentionMatchDto {
+                path: c.insert_text,
+                filename,
+                is_dir: matches!(c.candidate_type, m31a_fuzzy::CandidateType::Directory),
+            }
+        })
+        .collect();
+    Ok(results)
+}
+
+#[tauri::command]
+pub async fn list_slash_commands() -> Result<Vec<SlashCommandDto>, String> {
+    Ok(m31a_composer::slash::CANONICAL_SLASH_COMMANDS
+        .iter()
+        .map(|cmd| SlashCommandDto {
+            name: cmd.name.to_string(),
+            description: cmd.description.to_string(),
+            usage: cmd.usage.to_string(),
+            category: cmd.category.to_string(),
+            subcommands: cmd.subcommands.iter().map(|s| s.to_string()).collect(),
+        })
+        .collect())
+}

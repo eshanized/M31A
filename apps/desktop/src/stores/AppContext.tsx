@@ -30,6 +30,8 @@ import type {
   ToolDefinitionDto,
   WorkspaceFileEntryDto,
   WorkspaceInfoDto,
+  FileMentionMatchDto,
+  SlashCommandDto,
 } from '../types/ipc';
 import type { RuntimeEvent } from '../types/events';
 
@@ -114,6 +116,8 @@ export interface AppContextValue {
   resolveQuestion: (questionId: string, answers: string[]) => Promise<void>;
   fetchRegisteredTools: () => Promise<void>;
   fetchRuntimeConfig: () => Promise<void>;
+  slashCommands: SlashCommandDto[];
+  searchMentionFiles: (query: string) => Promise<FileMentionMatchDto[]>;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -176,6 +180,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
   const [runtimeConfig, setRuntimeConfig] = useState<RuntimeConfigDto | null>(
     null
   );
+  const [slashCommands, setSlashCommands] = useState<SlashCommandDto[]>([]);
 
   // Ref to track latest state inside event listener callback
   const activeSessionIdRef = useRef<string | null>(null);
@@ -428,6 +433,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       console.error('Failed to fetch runtime config:', err);
     }
   }, []);
+
+  const fetchSlashCommands = useCallback(async () => {
+    try {
+      const cmds = await ipc.listSlashCommands();
+      setSlashCommands(cmds);
+    } catch (err) {
+      console.error('Failed to fetch slash commands:', err);
+    }
+  }, []);
+
+  const searchMentionFiles = useCallback(
+    async (query: string): Promise<FileMentionMatchDto[]> => {
+      try {
+        return await ipc.searchWorkspaceFiles(query);
+      } catch (err) {
+        console.error('Failed to search workspace files for mentions:', err);
+        return [];
+      }
+    },
+    []
+  );
 
   // Handle Runtime Event Bridge Stream
   const handleRuntimeEvent = useCallback((event: RuntimeEvent) => {
@@ -781,6 +807,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     fetchWorkspaceFiles();
     fetchRegisteredTools();
     fetchRuntimeConfig();
+    fetchSlashCommands();
 
     const eventsSubscription = subscribeToRuntimeEvents(handleRuntimeEvent);
     const gapsSubscription = subscribeToRuntimeEventGaps((skipped) => {
@@ -810,6 +837,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     fetchWorkspaceFiles,
     fetchRegisteredTools,
     fetchRuntimeConfig,
+    fetchSlashCommands,
     refreshPendingInteractions,
     handleRuntimeEvent,
   ]);
@@ -867,6 +895,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         resolveQuestion,
         fetchRegisteredTools,
         fetchRuntimeConfig,
+        slashCommands,
+        searchMentionFiles,
       }}
     >
       {children}

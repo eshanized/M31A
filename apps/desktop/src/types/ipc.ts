@@ -177,3 +177,17 @@ export interface RuntimeConfigDto {
   active_features: string[];
   dangerously_bypass: boolean;
 }
+
+export interface FileMentionMatchDto {
+  path: string;
+  filename: string;
+  is_dir: boolean;
+}
+
+export interface SlashCommandDto {
+  name: string;
+  description: string;
+  usage: string;
+  category: string;
+  subcommands: string[];
+}

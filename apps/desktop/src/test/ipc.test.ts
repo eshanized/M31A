@@ -227,4 +227,36 @@ describe('Tauri IPC Client', () => {
     expect(await ipc.getRuntimeConfig()).toEqual(mockConfig);
     expect(invoke).toHaveBeenCalledWith('get_runtime_config');
   });
+
+  it('invokes search_workspace_files and list_slash_commands for composer autocomplete', async () => {
+    const mockFiles = [
+      { path: 'src/main.rs', filename: 'main.rs', is_dir: false },
+      { path: 'src/lib', filename: 'lib', is_dir: true },
+    ];
+    vi.mocked(invoke).mockResolvedValueOnce(mockFiles);
+    const files = await ipc.searchWorkspaceFiles('main');
+    expect(invoke).toHaveBeenCalledWith('search_workspace_files', { query: 'main' });
+    expect(files).toEqual(mockFiles);
+
+    const mockCommands = [
+      {
+        name: '/help',
+        description: 'Show help',
+        usage: '/help',
+        category: 'Core',
+        subcommands: [],
+      },
+      {
+        name: '/plan',
+        description: 'Plan mode',
+        usage: '/plan',
+        category: 'Mode',
+        subcommands: [],
+      },
+    ];
+    vi.mocked(invoke).mockResolvedValueOnce(mockCommands);
+    const commands = await ipc.listSlashCommands();
+    expect(invoke).toHaveBeenCalledWith('list_slash_commands');
+    expect(commands).toEqual(mockCommands);
+  });
 });

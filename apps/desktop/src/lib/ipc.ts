@@ -21,6 +21,8 @@ import type {
   DocxPreviewPayloadDto,
   XlsxPreviewPayloadDto,
   PdfPreviewPayloadDto,
+  FileMentionMatchDto,
+  SlashCommandDto,
 } from '../types/ipc';
 
 export const ipc = {
@@ -172,5 +174,14 @@ export const ipc = {
 
   async getRuntimeConfig(): Promise<RuntimeConfigDto> {
     return invoke<RuntimeConfigDto>('get_runtime_config');
+  },
+
+  // Agentic Coder: Mentions & Slash Commands
+  async searchWorkspaceFiles(query: string): Promise<FileMentionMatchDto[]> {
+    return invoke<FileMentionMatchDto[]>('search_workspace_files', { query });
+  },
+
+  async listSlashCommands(): Promise<SlashCommandDto[]> {
+    return invoke<SlashCommandDto[]>('list_slash_commands');
   },
 };

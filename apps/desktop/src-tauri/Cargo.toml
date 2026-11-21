@@ -42,6 +42,8 @@ m31a-runtime = { path = "../../../crates/m31a-runtime" }
 m31a-provider = { path = "../../../crates/m31a-provider" }
 m31a-elicitation = { path = "../../../crates/m31a-elicitation" }
 m31a-trust = { path = "../../../crates/m31a-trust" }
+m31a-fuzzy = { path = "../../../crates/m31a-fuzzy" }
+m31a-composer = { path = "../../../crates/m31a-composer" }
 
 [dev-dependencies]
 tempfile = { workspace = true }
