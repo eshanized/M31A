@@ -371,9 +371,23 @@ pub async fn list_sessions(
     let storage = state.runtime().storage();
     let threads = storage.list_threads(100).map_err(|e| e.to_string())?;
     let active_id = state.active_session_id();
+    let active_workspace = state.active_workspace();
+    let canonical_active =
+        validate_and_canonicalize_workspace_path(&active_workspace.display().to_string()).ok();
 
     let dtos = threads
         .into_iter()
+        .filter(|t| {
+            if let Some(ref active) = canonical_active {
+                if let Ok(session_ws) = validate_and_canonicalize_workspace_path(&t.cwd) {
+                    session_ws == *active
+                } else {
+                    false
+                }
+            } else {
+                true
+            }
+        })
         .map(|t| SessionSummaryDto {
             id: t.id.clone(),
             title: t.title,

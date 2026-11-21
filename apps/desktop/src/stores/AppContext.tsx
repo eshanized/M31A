@@ -105,6 +105,7 @@ export interface AppContextValue {
   cancelActiveTurn: () => Promise<void>;
   steerActiveTurn: (message: string) => Promise<void>;
   setCollaborationMode: (mode: 'default' | 'plan' | 'review') => void;
+  clearMessages: () => void;
   resolveApproval: (
     requestId: string,
     approved: boolean,
@@ -288,11 +289,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     try {
       const ws = await ipc.setWorkspace(path);
       setWorkspaceInfo(ws);
+      await refreshSessions();
     } catch (err) {
       console.error('Failed to set workspace:', err);
       throw err;
     }
-  }, []);
+  }, [refreshSessions]);
 
   const authorizeCurrentWorkspace = useCallback(async () => {
     if (!workspaceInfo?.path) return;
@@ -339,11 +341,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       if (picked) {
         setWorkspaceInfo(picked);
         await fetchWorkspaceFiles();
+        await refreshSessions();
       }
     } catch (err) {
       console.error('Failed to pick workspace directory:', err);
     }
-  }, [fetchWorkspaceFiles]);
+  }, [fetchWorkspaceFiles, refreshSessions]);
 
   const renameSession = useCallback(
     async (sessionId: string, newTitle: string) => {
@@ -649,13 +652,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
 
       case 'workspace_changed': {
         ipc.getActiveWorkspace().then(setWorkspaceInfo).catch(console.error);
+        void refreshSessions();
         break;
       }
 
       default:
         break;
     }
-  }, []);
+  }, [refreshSessions]);
 
   // Submit Turn to Runtime
   const submitTurn = useCallback(
@@ -735,6 +739,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     },
     [activeSessionId, runningTurnId]
   );
+
+  const clearMessages = useCallback(() => {
+    setMessages([]);
+  }, []);
 
   const resolveApproval = useCallback(
     async (requestId: string, approved: boolean, reason?: string) => {
@@ -854,6 +862,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         cancelActiveTurn,
         steerActiveTurn,
         setCollaborationMode,
+        clearMessages,
         resolveApproval,
         resolveQuestion,
         fetchRegisteredTools,

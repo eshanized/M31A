@@ -21,6 +21,7 @@ export const Composer: React.FC = () => {
     isSubmittingTurn,
     collaborationMode,
     setCollaborationMode,
+    clearMessages,
     isRuntimeReady,
   } = useApp();
 
@@ -40,6 +41,39 @@ export const Composer: React.FC = () => {
   const handleSubmit = async () => {
     const trimmed = input.trim();
     if (!trimmed || isBusy || !isRuntimeReady) return;
+
+    if (trimmed === '/clear') {
+      clearMessages();
+      setInput('');
+      if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto';
+      }
+      return;
+    }
+    if (trimmed === '/plan') {
+      setCollaborationMode('plan');
+      setInput('');
+      if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto';
+      }
+      return;
+    }
+    if (trimmed === '/review') {
+      setCollaborationMode('review');
+      setInput('');
+      if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto';
+      }
+      return;
+    }
+    if (trimmed === '/default') {
+      setCollaborationMode('default');
+      setInput('');
+      if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto';
+      }
+      return;
+    }
 
     const submitted = await submitTurn(trimmed);
     if (submitted) {
