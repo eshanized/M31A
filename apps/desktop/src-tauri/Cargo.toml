@@ -36,7 +36,7 @@ tracing-subscriber = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 thiserror = { workspace = true }
-zip = { version = "2.2", default-features = false, features = ["deflate"] }
+zip = { version = "9.7", default-features = false, features = ["deflate"] }
 m31a-core = { path = "../../../crates/m31a-core" }
 m31a-runtime = { path = "../../../crates/m31a-runtime" }
 m31a-provider = { path = "../../../crates/m31a-provider" }
