@@ -87,7 +87,7 @@ if (!image.length) {
 
 if (!argv.s) {
   execSync('npm install', { stdio: 'inherit' });
-  execSync('npm run build --workspaces', { stdio: 'inherit' });
+  execSync('npm run build', { stdio: 'inherit' });
 }
 
 console.log('packing @m31a/cli ...');

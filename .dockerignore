@@ -7,6 +7,19 @@ node_modules
 # Package-level node_modules - reinstalled inside container
 packages/*/node_modules
 
+# Generated build outputs - rebuilt inside container
+bundle
+dist
+release-assets
+packages/*/dist
+packages/*/tsconfig.tsbuildinfo
+
+# Test suites and fixtures - not needed in runtime image
+evals
+integration-tests
+memory-tests
+perf-tests
+
 # Development and IDE files
 .github
 .vscode

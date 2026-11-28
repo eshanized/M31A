@@ -118,6 +118,9 @@
   "bin": {
     "m31a": "bundle/m31a.js"
   },
+  "config": {
+    "sandboxImageUri": "ghcr.io/eshanized/m31a-sandbox:0.2.0"
+  },
   "files": [
     "bundle/",
     "README.md",

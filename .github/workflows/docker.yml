@@ -1,0 +1,87 @@
+name: 'Docker Sandbox'
+
+on:
+  push:
+    branches:
+      - 'master'
+    paths:
+      - 'Dockerfile'
+      - '.dockerignore'
+      - '.github/workflows/docker.yml'
+  workflow_call:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Docker image tag override (defaults to package.json version or git tag)'
+        required: false
+        default: ''
+        type: 'string'
+      push_latest:
+        description: 'Also tag and push :latest'
+        required: false
+        type: 'boolean'
+        default: true
+
+permissions:
+  contents: 'read'
+  packages: 'write'
+
+jobs:
+  docker:
+    name: 'Build & Push Sandbox Image'
+    runs-on: 'ubuntu-latest'
+    steps:
+      - name: 'Checkout'
+        uses: 'actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8' # ratchet:actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: 'Resolve image metadata'
+        id: 'meta'
+        env:
+          EVENT_NAME: '${{ github.event_name }}'
+          REF_NAME: '${{ github.ref_name }}'
+          INPUT_TAG: '${{ github.event.inputs.tag }}'
+          PUSH_LATEST: '${{ github.event.inputs.push_latest }}'
+        run: |
+          if [[ -n "${INPUT_TAG}" ]]; then
+            IMAGE_TAG="${INPUT_TAG#v}"
+          elif [[ "${EVENT_NAME}" == "push" && "${REF_NAME}" == v* ]]; then
+            IMAGE_TAG="${REF_NAME#v}"
+          else
+            IMAGE_TAG="$(node -p "require('./package.json').version")"
+          fi
+          IMAGE_NAME="ghcr.io/${GITHUB_REPOSITORY,,}-sandbox"
+          TAGS="${IMAGE_NAME}:${IMAGE_TAG}"
+          if [[ ("${EVENT_NAME}" != "workflow_dispatch" || "${PUSH_LATEST}" == "true") && "${IMAGE_TAG}" != *-* ]]; then
+            TAGS="${TAGS},${IMAGE_NAME}:latest"
+          fi
+          echo "version=${IMAGE_TAG}" >> "${GITHUB_OUTPUT}"
+          echo "image=${IMAGE_NAME}" >> "${GITHUB_OUTPUT}"
+          echo "tags=${TAGS}" >> "${GITHUB_OUTPUT}"
+
+      - name: 'Set up Docker Buildx'
+        uses: 'docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435' # ratchet:docker/setup-buildx-action@v3
+
+      - name: 'Log in to GitHub Container Registry'
+        uses: 'docker/login-action@184bdaa0721073962dff0199f1fb9940f07167d1' # ratchet:docker/login-action@v3
+        with:
+          registry: 'ghcr.io'
+          username: '${{ github.actor }}'
+          password: '${{ secrets.GITHUB_TOKEN }}'
+
+      - name: 'Build and push sandbox image'
+        uses: 'docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83' # ratchet:docker/build-push-action@v6
+        with:
+          context: '.'
+          file: './Dockerfile'
+          push: true
+          tags: '${{ steps.meta.outputs.tags }}'
+          build-args: |
+            CLI_VERSION_ARG=${{ steps.meta.outputs.version }}
+            GIT_COMMIT=${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ steps.meta.outputs.version }}
+          cache-from: 'type=gha'
+          cache-to: 'type=gha,mode=max'

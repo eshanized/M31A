@@ -34,6 +34,7 @@ on:
 permissions:
   contents: 'write'
   id-token: 'write'
+  packages: 'write'
 
 defaults:
   run:
@@ -148,3 +149,11 @@ jobs:
         with:
           name: 'release-${{ steps.meta.outputs.tag }}'
           path: 'release-assets/*'
+
+  docker:
+    name: 'Publish Sandbox Image'
+    if: "${{ github.event_name == 'push' || github.event.inputs.dry_run != true }}"
+    uses: './.github/workflows/docker.yml'
+    permissions:
+      contents: 'read'
+      packages: 'write'

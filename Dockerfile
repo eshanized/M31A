@@ -1,5 +1,5 @@
 # ---- Stage 1: Builder ----
-FROM docker.io/library/node:20-slim AS builder
+FROM docker.io/library/node:22-slim AS builder
 
 # Install git (needed by generate-git-commit-info.js script)
 RUN apt-get update && apt-get install -y --no-install-recommends git \
@@ -25,18 +25,21 @@ COPY tsconfig*.json ./
 COPY eslint.config.js ./
 COPY scripts/ ./scripts/
 COPY esbuild.config.js ./
+COPY README.md LICENSE ./
 
 # Pass git commit hash as build arg instead of copying entire .git directory
 ARG GIT_COMMIT=unknown
 ENV GIT_COMMIT=$GIT_COMMIT
 
-# Build and pack artifacts
+# Build, bundle, and pack self-contained CLI tarball
 RUN HUSKY=0 npm run build && \
-    npm pack -w packages/core --pack-destination packages/core/dist/ && \
-    npm pack -w packages/cli --pack-destination packages/cli/dist/
+    HUSKY=0 npm run bundle && \
+    node scripts/prepare-npm-release.js && \
+    mkdir -p /tmp/dist-npm && \
+    npm pack ./dist/npm-release/m31a --pack-destination /tmp/dist-npm
 
 # ---- Stage 2: Runtime ----
-FROM docker.io/library/node:20-slim
+FROM docker.io/library/node:22-slim
 
 ARG SANDBOX_NAME="m31a-sandbox"
 ARG CLI_VERSION_ARG
@@ -97,15 +100,10 @@ RUN mkdir -p /home/node/.m31a \
 # switch to non-root user node
 USER node
 
-# install m31a with workspace overrides applied and clean up
-COPY --chown=node:node package.json /tmp/root-package.json
-COPY --chown=node:node packages/cli/dist/m31a-cli-*.tgz /tmp/m31a.tgz
-COPY --chown=node:node packages/core/dist/m31a-core-*.tgz /tmp/m31a-core.tgz
-RUN node -e "const fs=require('node:fs'); const root=JSON.parse(fs.readFileSync('/tmp/root-package.json','utf8')); fs.writeFileSync('/usr/local/share/npm-global/lib/package.json', JSON.stringify({name:'m31a-sandbox-global',private:true,dependencies:{'@m31a/core':'file:/tmp/m31a-core.tgz','@m31a/cli':'file:/tmp/m31a.tgz'},overrides:{...(root.overrides||{}),'@m31a/core':'file:/tmp/m31a-core.tgz'}}, null, 2));" \
-  && npm install --prefix /usr/local/share/npm-global/lib --omit=dev --no-audit --no-fund \
-  && ln -sf ../lib/node_modules/.bin/m31a /usr/local/share/npm-global/bin/m31a \
-  && rm -f /usr/local/share/npm-global/lib/package.json /usr/local/share/npm-global/lib/package-lock.json /tmp/root-package.json /tmp/m31a.tgz /tmp/m31a-core.tgz \
-  && node -e "const fs=require('node:fs'); JSON.parse(fs.readFileSync('/usr/local/share/npm-global/lib/node_modules/@m31a/cli/package.json','utf8')); JSON.parse(fs.readFileSync('/usr/local/share/npm-global/lib/node_modules/@m31a/core/package.json','utf8'));" \
+# install m31a globally from the built self-contained tarball and clean up
+COPY --from=builder --chown=node:node /tmp/dist-npm/m31a-*.tgz /tmp/m31a.tgz
+RUN npm install -g /tmp/m31a.tgz --omit=dev --no-audit --no-fund \
+  && rm -f /tmp/m31a.tgz \
   && m31a --version > /dev/null \
   && npm cache clean --force \
   && rm -rf /home/node/.npm

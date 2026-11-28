@@ -57,6 +57,7 @@ const publishPkg = {
   bin: {
     m31a: 'bundle/m31a.js',
   },
+  ...(rootPkg.config ? { config: rootPkg.config } : {}),
   files: ['bundle/', 'README.md', 'LICENSE'],
   optionalDependencies,
 };
