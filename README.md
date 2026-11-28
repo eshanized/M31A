@@ -4,7 +4,7 @@
 
 # M31A
 
-[![Version](https://img.shields.io/npm/v/@m31a/cli)](https://www.npmjs.com/package/@m31a/cli)
+[![Version](https://img.shields.io/npm/v/m31a)](https://www.npmjs.com/package/m31a)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/eshanized/M31A/blob/master/LICENSE)
 
 **M31A** (`m31a`) is an open-source, MIT-licensed agentic coding terminal built
@@ -19,13 +19,13 @@ interactive TUI workflows.
 ### Run without installing
 
 ```bash
-npx @m31a/cli
+npx m31a
 ```
 
 ### Install globally
 
 ```bash
-npm install -g @m31a/cli
+npm install -g m31a
 ```
 
 ## Authentication (NVIDIA NIM)

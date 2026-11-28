@@ -54,10 +54,9 @@ jobs:
       - name: 'Set up Node.js'
         uses: 'actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020' # ratchet:actions/setup-node@v4
         with:
-          node-version-file: '.nvmrc'
+          node-version: '22'
           cache: 'npm'
           registry-url: "${{ vars.NPM_REGISTRY_URL || 'https://registry.npmjs.org' }}"
-          scope: "${{ vars.NPM_REGISTRY_SCOPE || '@m31a' }}"
 
       - name: 'Install dependencies'
         run: 'npm ci'
@@ -101,21 +100,15 @@ jobs:
           echo "Bundle reported version: ${VERSION_OUT}"
 
       - name: 'Prepare release artifacts'
+        env:
+          RELEASE_TAG: '${{ steps.meta.outputs.tag }}'
         run: |
           mkdir -p release-assets
-          npm run prepare:package
-          npm pack --pack-destination release-assets
-          npm pack -w "${CORE_PKG}" --pack-destination release-assets
           node scripts/prepare-npm-release.js
-          npm pack -w "${CLI_PKG}" --pack-destination release-assets
+          npm pack ./dist/npm-release/m31a --pack-destination release-assets
           tar -czf "release-assets/m31a-${RELEASE_TAG}-bundle.tar.gz" bundle/
-          git checkout -- packages/cli/package.json
-        env:
-          CORE_PKG: "${{ vars.CORE_PACKAGE_NAME || '@m31a/core' }}"
-          CLI_PKG: "${{ vars.CLI_PACKAGE_NAME || '@m31a/cli' }}"
-          RELEASE_TAG: '${{ steps.meta.outputs.tag }}'
 
-      - name: 'Publish packages to npm'
+      - name: 'Publish package to npm'
         if: "${{ github.event_name == 'push' || github.event.inputs.dry_run != true }}"
         env:
           NODE_AUTH_TOKEN: '${{ secrets.NPM_TOKEN }}'
@@ -125,7 +118,8 @@ jobs:
             echo "NPM_TOKEN secret is not set; skipping npm publish."
             exit 0
           fi
-          for tgz in release-assets/m31a-core-*.tgz release-assets/m31a-cli-*.tgz; do
+          for tgz in release-assets/m31a-*.tgz; do
+            [[ "${tgz}" == *-bundle.tar.gz ]] && continue
             npm publish "${tgz}" --tag "${NPM_CHANNEL}" --access public
           done
 

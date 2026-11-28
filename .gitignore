@@ -33,6 +33,7 @@ Thumbs.db
 
 # Ignore built ts files
 dist
+release-assets/
 
 # Docker folder to help skip auth refreshes
 .docker

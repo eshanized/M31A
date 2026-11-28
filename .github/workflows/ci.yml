@@ -127,7 +127,9 @@ jobs:
           mkdir -p ../smoke-test-dir
           mv "$TARBALL" ../smoke-test-dir/
           cd ../smoke-test-dir
-          npx --yes "./$TARBALL" --version
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund --ignore-scripts "./$TARBALL"
+          ./node_modules/.bin/m31a --version
 
       - name: 'Upload test reports'
         if: '${{ always() }}'
