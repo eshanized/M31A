@@ -1,0 +1,156 @@
+name: 'Release'
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., 0.2.0 or v0.2.0). Defaults to package.json version.'
+        required: false
+        default: ''
+        type: 'string'
+      npm_channel:
+        description: 'npm dist-tag channel'
+        required: true
+        type: 'choice'
+        options:
+          - 'latest'
+          - 'preview'
+          - 'nightly'
+        default: 'latest'
+      dry_run:
+        description: 'Dry run without publishing to npm or creating a GitHub Release'
+        required: true
+        type: 'boolean'
+        default: true
+      skip_tests:
+        description: 'Skip unit tests during release build'
+        required: false
+        type: 'boolean'
+        default: false
+
+permissions:
+  contents: 'write'
+  id-token: 'write'
+
+defaults:
+  run:
+    shell: 'bash'
+
+jobs:
+  release:
+    name: 'Build & Release'
+    runs-on: 'ubuntu-latest'
+    environment: 'prod'
+    steps:
+      - name: 'Checkout'
+        uses: 'actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8' # ratchet:actions/checkout@v5
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: 'Set up Node.js'
+        uses: 'actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020' # ratchet:actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'npm'
+          registry-url: "${{ vars.NPM_REGISTRY_URL || 'https://registry.npmjs.org' }}"
+          scope: "${{ vars.NPM_REGISTRY_SCOPE || '@m31a' }}"
+
+      - name: 'Install dependencies'
+        run: 'npm ci'
+
+      - name: 'Resolve release metadata'
+        id: 'meta'
+        env:
+          EVENT_NAME: '${{ github.event_name }}'
+          REF_NAME: '${{ github.ref_name }}'
+          INPUT_VERSION: '${{ github.event.inputs.version }}'
+        run: |
+          if [[ -n "${INPUT_VERSION}" ]]; then
+            RAW_VER="${INPUT_VERSION#v}"
+          elif [[ "${EVENT_NAME}" == "push" && "${REF_NAME}" == v* ]]; then
+            RAW_VER="${REF_NAME#v}"
+          else
+            RAW_VER="$(node -p "require('./package.json').version")"
+          fi
+          echo "version=${RAW_VER}" >> "${GITHUB_OUTPUT}"
+          echo "tag=v${RAW_VER}" >> "${GITHUB_OUTPUT}"
+
+      - name: 'Build packages'
+        run: 'npm run build'
+
+      - name: 'Run tests'
+        if: '${{ !inputs.skip_tests }}'
+        env:
+          NO_COLOR: 'true'
+          M31A_TRUST_WORKSPACE: 'true'
+        run: |
+          npm run test:ci --workspaces --if-present -- --coverage.enabled=false
+          npm run test:scripts
+          npm run test:sea-launch
+
+      - name: 'Bundle CLI'
+        run: 'npm run bundle'
+
+      - name: 'Smoke test bundle'
+        run: |
+          VERSION_OUT="$(node ./bundle/m31a.js --version)"
+          echo "Bundle reported version: ${VERSION_OUT}"
+
+      - name: 'Prepare release artifacts'
+        run: |
+          mkdir -p release-assets
+          npm run prepare:package
+          npm pack --pack-destination release-assets
+          npm pack -w "${CORE_PKG}" --pack-destination release-assets
+          node scripts/prepare-npm-release.js
+          npm pack -w "${CLI_PKG}" --pack-destination release-assets
+          tar -czf "release-assets/m31a-${RELEASE_TAG}-bundle.tar.gz" bundle/
+          git checkout -- packages/cli/package.json
+        env:
+          CORE_PKG: "${{ vars.CORE_PACKAGE_NAME || '@m31a/core' }}"
+          CLI_PKG: "${{ vars.CLI_PACKAGE_NAME || '@m31a/cli' }}"
+          RELEASE_TAG: '${{ steps.meta.outputs.tag }}'
+
+      - name: 'Publish packages to npm'
+        if: "${{ github.event_name == 'push' || github.event.inputs.dry_run != true }}"
+        env:
+          NODE_AUTH_TOKEN: '${{ secrets.NPM_TOKEN }}'
+          NPM_CHANNEL: "${{ github.event.inputs.npm_channel || 'latest' }}"
+        run: |
+          if [[ -z "${NODE_AUTH_TOKEN}" ]]; then
+            echo "NPM_TOKEN secret is not set; skipping npm publish."
+            exit 0
+          fi
+          for tgz in release-assets/m31a-core-*.tgz release-assets/m31a-cli-*.tgz; do
+            npm publish "${tgz}" --tag "${NPM_CHANNEL}" --access public
+          done
+
+      - name: 'Create GitHub Release'
+        if: "${{ github.event_name == 'push' || github.event.inputs.dry_run != true }}"
+        env:
+          GH_TOKEN: '${{ secrets.GITHUB_TOKEN }}'
+          RELEASE_TAG: '${{ steps.meta.outputs.tag }}'
+          NPM_CHANNEL: "${{ github.event.inputs.npm_channel || 'latest' }}"
+        run: |
+          PRERELEASE_FLAG=""
+          if [[ "${NPM_CHANNEL}" != "latest" || "${RELEASE_TAG}" == *-* ]]; then
+            PRERELEASE_FLAG="--prerelease"
+          fi
+          if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
+            gh release upload "${RELEASE_TAG}" release-assets/* --clobber
+          else
+            gh release create "${RELEASE_TAG}" release-assets/* \
+              --title "M31A ${RELEASE_TAG}" \
+              --generate-notes \
+              ${PRERELEASE_FLAG}
+          fi
+
+      - name: 'Upload release artifacts'
+        uses: 'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02' # ratchet:actions/upload-artifact@v4
+        with:
+          name: 'release-${{ steps.meta.outputs.tag }}'
+          path: 'release-assets/*'

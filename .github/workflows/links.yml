@@ -2,26 +2,30 @@ name: 'Links'
 
 on:
   push:
-    branches: ['main']
+    branches:
+      - 'master'
   pull_request:
-    branches: ['main']
-  repository_dispatch:
+    branches:
+      - 'master'
   workflow_dispatch:
   schedule:
-    - cron: '00 18 * * *'
+    - cron: '00 18 * * 1'
+
+permissions:
+  contents: 'read'
 
 jobs:
-  linkChecker:
-    if: |-
-      ${{ github.repository == 'm31a/M31A' }}
+  link-checker:
+    name: 'Check Markdown Links'
     runs-on: 'ubuntu-latest'
     steps:
-      - uses: 'actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8' # ratchet:actions/checkout@v5
+      - name: 'Checkout'
+        uses: 'actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8' # ratchet:actions/checkout@v5
         with:
           persist-credentials: false
 
       - name: 'Link Checker'
-        id: 'lychee'
-        uses: 'lycheeverse/lychee-action@885c65f3dc543b57c898c8099f4e08c8afd178a2' # ratchet: lycheeverse/lychee-action@v2.6.1
+        uses: 'lycheeverse/lychee-action@885c65f3dc543b57c898c8099f4e08c8afd178a2' # ratchet:lycheeverse/lychee-action@v2.6.1
         with:
           args: '--verbose --no-progress --accept 200,503 ./**/*.md'
+          fail: true
