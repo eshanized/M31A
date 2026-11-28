@@ -4,22 +4,15 @@
 
 # M31A
 
-> **M31A** is an MIT-licensed agentic coding terminal maintained by **Eshan
-> Roy** ([github.com/eshanized/M31A](https://github.com/eshanized/M31A)),
-> originally forked from **gemini-cli** (Apache-2.0, © Google LLC), with Google
-> sign-in, telemetry, and Gemini-only backends removed in favor of **NVIDIA
-> NIM** via an OpenAI-compatible runtime. It is **not affiliated with, endorsed
-> by, or a product of Google or NVIDIA**. Upstream Google copyright and
-> Apache-2.0 notices are retained; see [`LICENSE`](LICENSE),
-> [`LICENSE-APACHE-2.0`](LICENSE-APACHE-2.0), [`NOTICE`](NOTICE), and
-> [`MODIFICATIONS.md`](MODIFICATIONS.md).
-
 [![Version](https://img.shields.io/npm/v/@m31a/cli)](https://www.npmjs.com/package/@m31a/cli)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/eshanized/M31A/blob/main/LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/eshanized/M31A/blob/master/LICENSE)
 
-M31A (`m31a`) is an open-source terminal coding agent powered by NVIDIA NIM
-models, with local file/shell tools, workspace trust policies, sandboxing, MCP
-server support, skills, and interactive TUI workflows.
+**M31A** (`m31a`) is an open-source, MIT-licensed agentic coding terminal built
+by **Eshan Roy**
+([github.com/eshanized/M31A](https://github.com/eshanized/M31A)) and powered by
+**NVIDIA NIM** models via an OpenAI-compatible runtime, with local file/shell
+tools, workspace trust policies, sandboxing, MCP server support, skills, and
+interactive TUI workflows.
 
 ## Installation
 
@@ -95,9 +88,7 @@ npm run typecheck
 - **[Contributing](./CONTRIBUTING.md)**
 - **[Security Policy](./SECURITY.md)**
 
-## Legal
+## License
 
 - **Author**: Eshan Roy
-- **License**: [MIT License](LICENSE) (upstream Apache-2.0 notices in
-  [`LICENSE-APACHE-2.0`](LICENSE-APACHE-2.0), [`NOTICE`](NOTICE), and
-  [`MODIFICATIONS.md`](MODIFICATIONS.md))
+- **License**: [MIT License](LICENSE)

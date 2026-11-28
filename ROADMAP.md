@@ -1,8 +1,7 @@
 # M31A Roadmap
 
-M31A is an open-source terminal coding agent built as an MIT-licensed fork of
-gemini-cli, refactored around **NVIDIA NIM** backends and local developer
-workflows.
+M31A is an open-source, MIT-licensed terminal coding agent built around **NVIDIA
+NIM** backends and local developer workflows.
 
 ## Guiding Principles
 
@@ -18,8 +17,8 @@ workflows.
 
 - **Providers & Auth:** Streamlined NVIDIA NIM API key auth and
   OpenAI-compatible protocol mapping.
-- **Core Runtime:** Decoupling remaining legacy Gemini wire assumptions,
-  improving compaction, tool execution, and streaming reliability.
+- **Core Runtime:** Refining the OpenAI-compatible runtime, context compaction,
+  tool execution, and streaming reliability.
 - **User Experience:** Polished TUI (`m31a`), command palette, session
   search/resume, and clear documentation.
 - **Tooling & MCP:** Reliable file editing, ripgrep search, shell execution, and

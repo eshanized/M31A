@@ -71,10 +71,9 @@ You can run the review tool in two ways:
     immediately after creation. This allows you to catch and fix simple issues
     locally before a maintainer performs a full review.
 
-    **Note on Models:** By default, the script uses the latest Pro model
-    (`gemini-3.1-pro-preview`). If you do not have enough Pro quota, you can run
-    it with the latest Flash model instead:
-    `./scripts/review.sh <PR_NUMBER> gemini-3-flash-preview`.
+    **Note on Models:** By default, the script uses the repository's default
+    model. You can also specify a model name explicitly:
+    `./scripts/review.sh <PR_NUMBER> nvidia/nemotron-3-ultra-550b-a55b`.
 
 2.  **Manually from within M31A:** If you already have the PR checked out and
     built, you can run the tool directly from the CLI prompt:
@@ -97,7 +96,7 @@ assign or unassign the issue as requested, provided the conditions are met
 
 Please note that you can have a maximum of 3 issues assigned to you at any given
 time and that only
-[issues labeled "help wanted"](https://github.com/m31a/M31A/issues?q=is%3Aissue%20state%3Aopen%20label%3A%22help%20wanted%22)
+[issues labeled "help wanted"](https://github.com/eshanized/M31A/issues?q=is%3Aissue%20state%3Aopen%20label%3A%22help%20wanted%22)
 may be self-assigned.
 
 ### Pull request guidelines
@@ -168,13 +167,12 @@ relevant issue (e.g., `Fixes #123`).
 
 ### Forking
 
-If you are forking the repository you will be able to run the Build, Test and
-Integration test workflows. However in order to make the integration tests run
-you'll need to add a
+If you fork this repository, you can run the Build, Test, and CI workflows on
+GitHub Actions. To enable live API tests in your fork, add a
 [GitHub Repository Secret](https://docs.github.com/en/actions/security-for-github-actions/security-guides/using-secrets-in-github-actions#creating-secrets-for-a-repository)
-with a value of `GEMINI_API_KEY` and set that to a valid API key that you have
-available. Your key and secret are private to your repo; no one without access
-can see your key and you cannot see any secrets related to this repo.
+named `NVIDIA_API_KEY` with a valid NVIDIA NIM API key. Your key and secret are
+private to your repo; no one without access can see your key and you cannot see
+any secrets related to this repo.
 
 Additionally you will need to click on the `Actions` tab and enable workflows
 for your repository, you'll find it's the large blue button in the center of the
@@ -190,11 +188,10 @@ development setup of this project.
 **Prerequisites:**
 
 1.  **Node.js**:
-    - **Development:** Please use Node.js `~20.19.0`. This specific version is
-      required due to an upstream development dependency issue. You can use a
-      tool like [nvm](https://github.com/nvm-sh/nvm) to manage Node.js versions.
-    - **Production:** For running the CLI in a production environment, any
-      version of Node.js `>=20` is acceptable.
+    - **Development:** Please use Node.js `>=20.0.0` (see `.nvmrc`). You can use
+      a tool like [nvm](https://github.com/nvm-sh/nvm) to manage Node.js
+      versions.
+    - **Production:** Any version of Node.js `>=20` is supported.
 2.  **Git**
 
 ### Build process
@@ -202,8 +199,8 @@ development setup of this project.
 To clone the repository:
 
 ```bash
-git clone https://github.com/m31a/M31A.git # Or your fork's URL
-cd m31a
+git clone https://github.com/eshanized/M31A.git
+cd M31A
 ```
 
 To install dependencies defined in `package.json` as well as root dependencies:
@@ -324,8 +321,8 @@ npm run lint
 
 - Please adhere to the coding style, patterns, and conventions used throughout
   the existing codebase.
-- Consult [M31A.md](https://github.com/m31a/M31A/blob/main/M31A.md) (typically
-  found in the project root) for specific instructions related to AI-assisted
+- Consult [M31A.md](https://github.com/eshanized/M31A/blob/master/M31A.md)
+  (found in the project root) for specific instructions related to AI-assisted
   development, including conventions for React, comments, and Git usage.
 - **Imports:** Pay special attention to import paths. The project uses ESLint to
   enforce restrictions on relative imports between packages.
@@ -353,7 +350,7 @@ recommended.
 To hit a breakpoint inside the sandbox container run:
 
 ```bash
-DEBUG=1 gemini
+DEBUG=1 m31a
 ```
 
 **Note:** If you have `DEBUG=true` in a project's `.env` file, it won't affect
@@ -468,7 +465,8 @@ The process for contributing to the documentation is similar to contributing
 code.
 
 1. **Fork the repository** and create a new branch.
-2. **Make your changes** in the `/docs` directory.
+2. **Make your changes** to the relevant markdown files (such as `README.md`,
+   `ROADMAP.md`, or `CONTRIBUTING.md`).
 3. **Preview your changes locally** in Markdown rendering.
 4. **Lint and format your changes.** Our preflight check includes linting and
    formatting for documentation files.
@@ -477,21 +475,9 @@ code.
    ```
 5. **Open a pull request** with your changes.
 
-### Documentation structure
-
-Our documentation is organized using
-[sidebar.json](https://github.com/m31a/M31A/blob/main/docs/sidebar.json) as the
-table of contents. When adding new documentation:
-
-1. Create your markdown file **in the appropriate directory** under `/docs`.
-2. Add an entry to `sidebar.json` in the relevant section.
-3. Ensure all internal links use relative paths and point to existing files.
-
 ### Style guide
 
-We follow the
-[Google Developer Documentation Style Guide](https://developers.google.com/style).
-Please refer to it for guidance on writing style, tone, and formatting.
+Keep documentation clear, direct, and consistent:
 
 #### Key style points
 
@@ -524,18 +510,14 @@ Before submitting your documentation pull request, please:
 2. Review your changes for clarity and accuracy.
 3. Check that all links work correctly.
 4. Ensure any code examples are tested and functional.
-5. Sign the
-   [Contributor License Agreement (CLA)](https://cla.developers.google.com/) if
-   you haven't already.
 
 ### Need help?
 
 If you have questions about contributing documentation:
 
-- Check our [FAQ](https://geminicli.com/docs/resources/faq).
 - Review existing documentation for examples.
-- Open [an issue](https://github.com/m31a/M31A/issues) to discuss your proposed
-  changes.
+- Open [an issue](https://github.com/eshanized/M31A/issues) to discuss your
+  proposed changes.
 - Reach out to the maintainers.
 
 We appreciate your contributions to making M31A documentation better!

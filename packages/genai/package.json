@@ -1,7 +1,7 @@
 {
   "name": "@m31a/genai",
   "version": "0.2.0",
-  "description": "M31A own genai types (no Google @google/genai; not derived from Google types)",
+  "description": "M31A structural model request and response types",
   "author": "Eshan Roy",
   "license": "MIT",
   "repository": {

@@ -121,10 +121,7 @@
   "files": [
     "bundle/",
     "README.md",
-    "LICENSE",
-    "LICENSE-APACHE-2.0",
-    "NOTICE",
-    "MODIFICATIONS.md"
+    "LICENSE"
   ],
   "devDependencies": {
     "@agentclientprotocol/sdk": "0.16.1",
