@@ -166,12 +166,10 @@ This command sets the `RUN_EVALS` environment variable to `1`, which enables the
 
 ## Ensuring Eval is Stable Prior to Check-in
 
-The
-[Evals: Nightly](https://github.com/m31a/M31A/actions/workflows/evals-nightly.yml)
-run is considered to be the source of truth for the quality of an eval test.
-Each run of it executes a test 3 times in a row, for each supported model. The
-result is then scored 0%, 33%, 66%, or 100% respectively, to indicate how many
-of the individual executions passed.
+The **Evals: Nightly** run is considered to be the source of truth for the
+quality of an eval test. Each run of it executes a test 3 times in a row, for
+each supported model. The result is then scored 0%, 33%, 66%, or 100%
+respectively, to indicate how many of the individual executions passed.
 
 Googlers can schedule a manual run against their branch by clicking the link
 above.
@@ -199,12 +197,9 @@ evaluations into the CI.
 
 Results for evaluations are available on GitHub Actions:
 
-- **CI Evals**: Included in the
-  [E2E (Chained)](https://github.com/m31a/M31A/actions/workflows/chained_e2e.yml)
-  workflow. These must pass 100% for every PR.
-- **Nightly Evals**: Run daily via the
-  [Evals: Nightly](https://github.com/m31a/M31A/actions/workflows/evals-nightly.yml)
-  workflow. These track the long-term health and stability of model steering.
+- **CI Evals**: Run locally or in CI via `npm run test:always_passing_evals`.
+- **Nightly Evals**: Run locally via `npm run test:all_evals` to track the
+  long-term health and stability of model steering.
 
 ### Nightly Report Format
 

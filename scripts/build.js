@@ -33,28 +33,38 @@ if (!existsSync(join(root, 'node_modules'))) {
 // build all workspaces/packages
 execSync('npm run generate', { stdio: 'inherit', cwd: root });
 
+// Build @m31a/genai first because @m31a/core and @m31a/cli depend on it,
+// then @m31a/core because the remaining workspaces depend on it.
+console.log('Building @m31a/genai...');
+execSync('npm run build -w @m31a/genai', {
+  stdio: 'inherit',
+  cwd: root,
+});
+
+console.log('Building @m31a/core...');
+execSync('npm run build -w @m31a/core', {
+  stdio: 'inherit',
+  cwd: root,
+});
+
+const workspaceInfo = JSON.parse(
+  execSync('npm query .workspace --json', { cwd: root, encoding: 'utf-8' }),
+);
+const remainingWorkspaces = workspaceInfo
+  .map((w) => w.name)
+  .filter((name) => name !== '@m31a/genai' && name !== '@m31a/core');
+
 if (process.env.CI) {
-  console.log('CI environment detected. Building workspaces sequentially...');
-  execSync('npm run build --workspaces', { stdio: 'inherit', cwd: root });
-} else {
-  // Build core first because everyone depends on it
-  console.log('Building @m31a/core...');
-  execSync('npm run build -w @m31a/core', {
-    stdio: 'inherit',
-    cwd: root,
-  });
-
-  // Build the rest in parallel
-  console.log('Building other workspaces in parallel...');
-  const workspaceInfo = JSON.parse(
-    execSync('npm query .workspace --json', { cwd: root, encoding: 'utf-8' }),
+  console.log(
+    'CI environment detected. Building remaining workspaces sequentially...',
   );
-  const parallelWorkspaces = workspaceInfo
-    .map((w) => w.name)
-    .filter((name) => name !== '@m31a/core');
-
+  for (const ws of remainingWorkspaces) {
+    execSync(`npm run build -w ${ws}`, { stdio: 'inherit', cwd: root });
+  }
+} else {
+  console.log('Building other workspaces in parallel...');
   execSync(
-    `npx --no-install npm-run-all --parallel ${parallelWorkspaces.map((w) => `"build -w ${w}"`).join(' ')}`,
+    `npx --no-install npm-run-all --parallel ${remainingWorkspaces.map((w) => `"build -w ${w}"`).join(' ')}`,
     { stdio: 'inherit', cwd: root },
   );
 }

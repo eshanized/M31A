@@ -110,6 +110,7 @@ const cliConfig = {
   alias: {
     'is-in-ci': path.resolve(__dirname, 'packages/cli/src/patches/is-in-ci.ts'),
     '@m31a/devtools': path.resolve(__dirname, 'packages/devtools/src/index.ts'),
+    '@m31a/genai': path.resolve(__dirname, 'packages/genai/src/index.ts'),
     ...commonAliases,
   },
   metafile: true,
