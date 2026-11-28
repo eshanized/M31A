@@ -1,37 +1,41 @@
 version: 2
 updates:
-  # Maintain Cargo dependencies
-  - package-ecosystem: "cargo"
-    directory: "/"
+  - package-ecosystem: 'npm'
+    directory: '/'
     schedule:
-      interval: "weekly"
+      interval: 'weekly'
+      day: 'monday'
     open-pull-requests-limit: 10
-    commit-message:
-      prefix: "chore(deps)"
+    reviewers:
+      - 'joshualitt'
+    cooldown:
+      semver-major-days: 14
+      semver-minor-days: 14
+      semver-patch-days: 14
+    groups:
+      npm-dependencies:
+        patterns:
+          - '*'
+        update-types:
+          - 'minor'
+          - 'patch'
 
-  # Maintain TypeScript SDK npm dependencies
-  - package-ecosystem: "npm"
-    directory: "/sdk/typescript"
+  - package-ecosystem: 'github-actions'
+    directory: '/'
     schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    commit-message:
-      prefix: "chore(deps-ts)"
-
-  # Maintain Python SDK dependencies
-  - package-ecosystem: "pip"
-    directory: "/sdk/python"
-    schedule:
-      interval: "weekly"
-    open-pull-requests-limit: 5
-    commit-message:
-      prefix: "chore(deps-py)"
-
-  # Maintain GitHub Actions workflows
-  - package-ecosystem: "github-actions"
-    directory: "/"
-    schedule:
-      interval: "monthly"
-    open-pull-requests-limit: 5
-    commit-message:
-      prefix: "chore(ci)"
+      interval: 'weekly'
+      day: 'monday'
+    open-pull-requests-limit: 10
+    reviewers:
+      - 'joshualitt'
+    cooldown:
+      semver-major-days: 14
+      semver-minor-days: 14
+      semver-patch-days: 14
+    groups:
+      actions-dependencies:
+        patterns:
+          - '*'
+        update-types:
+          - 'minor'
+          - 'patch'

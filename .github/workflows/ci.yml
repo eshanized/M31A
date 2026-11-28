@@ -1,371 +1,516 @@
-name: CI
+name: 'Testing: CI'
 
 on:
   push:
-    branches: [master, feat/desktop-phase-2, fix/desktop-phase-2-1-integrity]
+    branches:
+      - 'main'
+      - 'release/**'
   pull_request:
-    branches: [master, feat/desktop-phase-2]
+    branches:
+      - 'main'
+      - 'release/**'
+  merge_group:
   workflow_dispatch:
+    inputs:
+      branch_ref:
+        description: 'Branch to run on'
+        required: true
+        default: 'main'
+        type: 'string'
 
-env:
-  CARGO_TERM_COLOR: always
-  RUST_BACKTRACE: 1
-  RUSTUP_TOOLCHAIN: stable
+concurrency:
+  group: '${{ github.workflow }}-${{ github.head_ref || github.ref }}'
+  cancel-in-progress: |-
+    ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/heads/release/') }}
+
+permissions:
+  contents: 'read'
+
+defaults:
+  run:
+    shell: 'bash'
 
 jobs:
-  lint-and-format:
-    name: Lint & Format Check
-    runs-on: ubuntu-latest
+  merge_queue_skipper:
+    permissions:
+      checks: 'read'
+      contents: 'read'
+      pull-requests: 'read'
+    name: 'Merge Queue Skipper'
+    runs-on: 'm31a-ubuntu-16-core'
+    if: "github.repository == 'm31a/M31A'"
+    outputs:
+      skip: '${{ steps.merge-queue-ci-skipper.outputs.skip-check }}'
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - id: 'merge-queue-ci-skipper'
+        uses: 'cariad-tech/merge-queue-ci-skipper@1032489e59437862c90a08a2c92809c903883772' # ratchet:cariad-tech/merge-queue-ci-skipper@main
         with:
-          components: rustfmt, clippy
+          secret: '${{ secrets.M31A_ROBOT_GITHUB_PAT }}'
 
-      - name: Set default Rust toolchain
-        run: rustup default stable
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update && sudo apt-get install -y protobuf-compiler bubblewrap libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev
-          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
-
-      - name: Cache Cargo dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            target/
-          key: ${{ runner.os }}-cargo-lint-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-lint-
-
-      - name: Verify workspace formatting
-        run: cargo fmt --all -- --check
-
-      - name: Verify workspace clippy with -D warnings
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
-
-  test-suite:
-    name: Workspace Tests (Nextest)
-    runs-on: ubuntu-latest
-    timeout-minutes: 35
+  lint:
+    name: 'Lint'
+    runs-on: 'm31a-ubuntu-16-core'
+    needs: 'merge_queue_skipper'
+    if: "github.repository == 'm31a/M31A' && needs.merge_queue_skipper.outputs.skip == 'false'"
+    env:
+      GEMINI_LINT_TEMP_DIR: '${{ github.workspace }}/.m31a-linters'
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Set default Rust toolchain
-        run: rustup default stable
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update && sudo apt-get install -y protobuf-compiler bubblewrap libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev
-          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
-
-      - name: Cache Cargo dependencies
-        uses: actions/cache@v4
+      - name: 'Checkout'
+        uses: 'actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8' # ratchet:actions/checkout@v5
         with:
-          path: |
-            ~/.cargo/bin/cargo-nextest
-            ~/.cargo/bin/cargo-dist
-            ~/.cargo/bin/dist
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            target/
-          key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-test-
+          persist-credentials: false
+          ref: '${{ github.event.inputs.branch_ref || github.ref }}'
+          fetch-depth: 0
 
-      - name: Install cargo-nextest
-        run: |
-          if ! command -v cargo-nextest &>/dev/null; then
-            echo "Attempting cargo-nextest binary installation..."
-            mkdir -p "$HOME/.cargo/bin"
-            if ! curl -fsSL --retry 3 --connect-timeout 10 --max-time 30 https://get.nexte.st/latest/linux | tar -xzf - -C "$HOME/.cargo/bin" 2>/dev/null; then
-              echo "Direct prebuilt download failed. Falling back to cargo install --locked cargo-nextest..."
-              cargo install --locked cargo-nextest || true
-            fi
-          fi
-          cargo-nextest --version || cargo nextest --version || echo "nextest installed"
+      - name: 'Set up Node.js'
+        uses: 'actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020' # ratchet:actions/setup-node@v4.4.0
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'npm'
 
-      - name: Configure Git identity for tests
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+      - name: 'Cache Linters'
+        uses: 'actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830' # ratchet:actions/cache@v4
+        with:
+          path: '${{ env.GEMINI_LINT_TEMP_DIR }}'
+          key: "${{ runner.os }}-${{ runner.arch }}-linters-${{ hashFiles('scripts/lint.js') }}"
 
-      - name: Build workspace binaries for integration tests
-        run: cargo build --workspace --bins
+      - name: 'Install dependencies'
+        run: 'npm ci'
 
-      - name: Run workspace unit and integration tests (Nextest)
-        run: |
-          if command -v cargo-nextest &>/dev/null; then
-            env -u NVIDIA_API_KEY cargo nextest run --workspace --all-targets
-          else
-            env -u NVIDIA_API_KEY cargo test --workspace --all-targets
-          fi
+      - name: 'Cache ESLint'
+        uses: 'actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830' # ratchet:actions/cache@v4
+        with:
+          path: '.eslintcache'
+          key: "${{ runner.os }}-eslint-${{ hashFiles('package-lock.json', 'eslint.config.js') }}"
 
-      - name: Run documentation tests
-        run: cargo test --workspace --doc
+      - name: 'Check lockfile'
+        run: 'npm run check:lockfile'
 
-      - name: Run workspace trust verification suite
-        run: cargo test -p m31a-trust
+      - name: 'Install linters'
+        run: 'node scripts/lint.js --setup'
 
-      - name: Run slash-command consistency and keybinding suite
-        run: cargo test -p m31a-composer -p m31a-tui
+      - name: 'Run ESLint'
+        run: 'node scripts/lint.js --eslint'
 
-      - name: Run integrity verification test suite
-        run: cargo test -p m31a-verify
+      - name: 'Run actionlint'
+        run: 'node scripts/lint.js --actionlint'
 
-      - name: Run architectural maturity e2e test
-        run: cargo test -p m31a-agent-engine --test architectural_maturity_e2e_test
+      - name: 'Run shellcheck'
+        run: 'node scripts/lint.js --shellcheck'
 
-  cross-platform-build:
-    name: Build Verification (${{ matrix.target }})
-    runs-on: ${{ matrix.os }}
+      - name: 'Run yamllint'
+        run: 'node scripts/lint.js --yamllint'
+
+      - name: 'Build project for typecheck'
+        run: 'npm run build'
+
+      - name: 'Run typecheck'
+        run: 'npm run typecheck'
+
+      - name: 'Run Prettier'
+        run: 'node scripts/lint.js --prettier'
+
+      - name: 'Build docs prerequisites'
+        run: 'npm run predocs:settings'
+
+      - name: 'Verify settings docs'
+        run: 'npm run docs:settings -- --check'
+
+      - name: 'Run sensitive keyword linter'
+        run: 'node scripts/lint.js --sensitive-keywords'
+
+      - name: 'Run GitHub Actions pinning linter'
+        run: 'node scripts/lint.js --check-github-actions-pinning'
+
+  link_checker:
+    name: 'Link Checker'
+    runs-on: 'ubuntu-latest'
+    if: "github.repository == 'm31a/M31A'"
+    steps:
+      - name: 'Checkout'
+        uses: 'actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8' # ratchet:actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: 'Link Checker'
+        uses: 'lycheeverse/lychee-action@885c65f3dc543b57c898c8099f4e08c8afd178a2' # ratchet: lycheeverse/lychee-action@v2.6.1
+        with:
+          args: '--verbose --accept 200,503 ./**/*.md'
+          fail: true
+  test_linux:
+    name: 'Test (Linux) - ${{ matrix.node-version }}, ${{ matrix.shard }}'
+    runs-on: 'm31a-ubuntu-16-core'
+    needs:
+      - 'merge_queue_skipper'
+    if: "github.repository == 'm31a/M31A' && needs.merge_queue_skipper.outputs.skip == 'false'"
+    permissions:
+      contents: 'read'
+      checks: 'write'
+      pull-requests: 'write'
     strategy:
-      fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-musl
+        node-version:
+          - '20.x'
+          - '22.x'
+          - '24.x'
+        shard:
+          - 'cli'
+          - 'others'
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - name: 'Checkout'
+        uses: 'actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8' # ratchet:actions/checkout@v5
         with:
-          targets: ${{ matrix.target }}
+          persist-credentials: false
 
-      - name: Set default Rust toolchain
-        run: rustup default stable
+      - name: 'Set up Node.js ${{ matrix.node-version }}'
+        uses: 'actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020' # ratchet:actions/setup-node@v4
+        with:
+          node-version: '${{ matrix.node-version }}'
+          cache: 'npm'
 
-      - name: Install Linux build dependencies
+      - name: 'Build project'
+        run: 'npm run build'
+
+      - name: 'Install system dependencies'
         run: |
-          sudo apt-get update && sudo apt-get install -y protobuf-compiler bubblewrap musl-tools
+          sudo apt-get update -qq && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq bubblewrap
+          # Ubuntu 24.04+ requires this to allow bwrap to function in CI
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
 
-      - name: Cache Cargo dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            target/
-          key: ${{ runner.os }}-${{ matrix.target }}-cargo-build-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-${{ matrix.target }}-cargo-build-
-            ${{ runner.os }}-cargo-
+      - name: 'Install dependencies for testing'
+        run: 'npm ci'
 
-      - name: Build M31A CLI release binary
-        run: cargo build --release -p m31a-cli --bin m31a --target ${{ matrix.target }}
-
-  release-packaging:
-    name: Release Packaging Verification
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Set default Rust toolchain
-        run: rustup default stable
-
-      - name: Install cargo-dist
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-dist
-
-      - name: Configure cargo-dist binary symlink
-        run: ln -sf "$HOME/.cargo/bin/dist" "$HOME/.cargo/bin/cargo-dist"
-
-      - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler bubblewrap musl-tools libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev
-
-      - name: Cache Cargo dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            target/
-          key: ${{ runner.os }}-cargo-dist-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-dist-
-
-      - name: Plan release distribution
-        run: cargo dist plan
-
-      - name: Build host release artifacts
-        run: cargo dist build --artifacts=host
-
-      - name: Upload local packaging artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: m31a-release-artifacts
-          path: target/distrib/
-          retention-days: 7
-
-  desktop-frontend:
-    name: Desktop Frontend Tests
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: npm
-          cache-dependency-path: apps/desktop/package-lock.json
-
-      - name: Install desktop dependencies
-        run: npm ci
-        working-directory: apps/desktop
-
-      - name: Typecheck desktop frontend
-        run: npm run typecheck
-        working-directory: apps/desktop
-
-      - name: Run desktop frontend tests
-        run: npm test
-        working-directory: apps/desktop
-
-      - name: Build desktop frontend
-        run: npm run build
-        working-directory: apps/desktop
-
-  sdk-verification:
-    name: SDK Test Suite
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Run Python SDK tests
-        run: PYTHONPATH=sdk/python python3 -m unittest discover -s sdk/python/tests
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
-      - name: Run TypeScript SDK tests
-        run: |
-          cd sdk/typescript
-          npm ci
-          npm test
-
-  schema-verification:
-    name: Protocol Schema Verification
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Verify schema extraction
-        run: |
-          python3 scripts/extract_protocol_schema.py schemas/app_server/schema.json
-          git diff --exit-code schemas/
-
-  e2e-benchmark:
-    name: E2E Benchmark
-    runs-on: ubuntu-latest
-    needs: [test-suite]
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Set default Rust toolchain
-        run: rustup default stable
-
-      - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler bubblewrap musl-tools libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev
-
-      - name: Cache Cargo dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            target/
-          key: ${{ runner.os }}-cargo-bench-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-bench-
-
-      - name: Build M31A CLI binary for benchmark
-        run: cargo build --release -p m31a-cli --bin m31a
-
-      - name: Run E2E benchmark
-        run: python3 scripts/benchmark_runner.py --name bench_full_session --iterations 5 --output benchmark_results.json
-
-      - name: Upload benchmark results
-        uses: actions/upload-artifact@v4
-        with:
-          name: benchmark-results
-          path: benchmark_results.json
-          retention-days: 7
-
-  live-nvidia-suite:
-    name: Live NVIDIA NIM Verification Suite
-    needs: [test-suite]
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Set default Rust toolchain
-        run: rustup default stable
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update && sudo apt-get install -y protobuf-compiler bubblewrap libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev
-          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
-
-      - name: Run live provider integration tests
+      - name: 'Run tests and generate reports'
         env:
-          M31A_RUN_LIVE_NVIDIA_TESTS: "1"
-          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+          NO_COLOR: true
+          M31A_TRUST_WORKSPACE: true
         run: |
-          if [ -z "$NVIDIA_API_KEY" ]; then
-            echo "NVIDIA_API_KEY is not configured; skipping live integration tests."
-            exit 0
+          if [[ "${{ matrix.shard }}" == "cli" ]]; then
+            npm run test:ci --workspace "@m31a/cli"
+          else
+            # Explicitly list non-cli packages to ensure they are sharded correctly
+            npm run test:ci --workspace "@m31a/core" --workspace "@m31a/genai" --workspace "@m31a/devtools" --workspace "@m31a/test-utils" --if-present -- --coverage.enabled=false
+            npm run test:scripts
           fi
-          cargo test -p m31a-provider --features live-nvidia-tests --test live_provider_test -- --ignored --test-threads=1
-          cargo test -p m31a-agent-engine --features live-nvidia-tests --test live_nvidia_e2e -- --ignored --test-threads=1
-          cargo test -p m31a-cli --features live-nvidia-tests --test live_nvidia_cli -- --ignored --test-threads=1
-          cargo test -p m31a-tui --features live-nvidia-tests --test live_nvidia_activation -- --ignored --test-threads=1
+
+      - name: 'Bundle'
+        run: 'npm run bundle'
+
+      - name: 'Smoke test bundle'
+        run: 'node ./bundle/m31a.js --version'
+
+      - name: 'Smoke test npx installation'
+        run: |
+          # 1. Package the project into a tarball
+          TARBALL=$(npm pack | tail -n 1)
+
+          # 2. Move to a fresh directory for isolation
+          mkdir -p ../smoke-test-dir
+          mv "$TARBALL" ../smoke-test-dir/
+          cd ../smoke-test-dir
+
+          # 3. Run npx from the tarball
+          npx "./$TARBALL" --version
+
+      - name: 'Wait for file system sync'
+        run: 'sleep 2'
+
+      - name: 'Publish Test Report (for non-forks)'
+        if: |-
+          ${{ always() && (github.event.pull_request.head.repo.full_name == github.repository) }}
+        uses: 'dorny/test-reporter@dc3a92680fcc15842eef52e8c4606ea7ce6bd3f3' # ratchet:dorny/test-reporter@v2
+        with:
+          name: 'Test Results (Node ${{ runner.os }}, ${{ matrix.node-version }}, ${{ matrix.shard }})'
+          path: 'packages/*/junit.xml'
+          reporter: 'java-junit'
+          fail-on-error: 'false'
+
+      - name: 'Upload Test Results Artifact (for forks)'
+        if: |-
+          ${{ always() && (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) }}
+        uses: 'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02' # ratchet:actions/upload-artifact@v4
+        with:
+          name: 'test-results-fork-${{ runner.os }}-${{ matrix.node-version }}-${{ matrix.shard }}'
+          path: 'packages/*/junit.xml'
+
+  test_mac:
+    name: 'Test (Mac) - ${{ matrix.node-version }}, ${{ matrix.shard }}'
+    runs-on: 'macos-latest-large'
+    needs:
+      - 'merge_queue_skipper'
+    if: "github.repository == 'm31a/M31A' && needs.merge_queue_skipper.outputs.skip == 'false'"
+    permissions:
+      contents: 'read'
+      checks: 'write'
+      pull-requests: 'write'
+    continue-on-error: true
+    strategy:
+      matrix:
+        node-version:
+          - '20.x'
+          - '22.x'
+          - '24.x'
+        shard:
+          - 'cli'
+          - 'others'
+    steps:
+      - name: 'Checkout'
+        uses: 'actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8' # ratchet:actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: 'Set up Node.js ${{ matrix.node-version }}'
+        uses: 'actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020' # ratchet:actions/setup-node@v4
+        with:
+          node-version: '${{ matrix.node-version }}'
+          cache: 'npm'
+
+      - name: 'Build project'
+        run: 'npm run build'
+
+      - name: 'Install dependencies for testing'
+        run: 'npm ci'
+
+      - name: 'Run tests and generate reports'
+        env:
+          NO_COLOR: true
+          M31A_TRUST_WORKSPACE: true
+        run: |
+          if [[ "${{ matrix.shard }}" == "cli" ]]; then
+            npm run test:ci --workspace "@m31a/cli" -- --coverage.enabled=false
+          else
+            # Explicitly list non-cli packages to ensure they are sharded correctly
+            npm run test:ci --workspace "@m31a/core" --workspace "@m31a/genai" --workspace "@m31a/devtools" --workspace "@m31a/test-utils" --if-present -- --coverage.enabled=false
+            npm run test:scripts
+          fi
+
+      - name: 'Bundle'
+        run: 'npm run bundle'
+
+      - name: 'Smoke test bundle'
+        run: 'node ./bundle/m31a.js --version'
+
+      - name: 'Smoke test npx installation'
+        run: |
+          # 1. Package the project into a tarball
+          TARBALL=$(npm pack | tail -n 1)
+
+          # 2. Move to a fresh directory for isolation
+          mkdir -p ../smoke-test-dir
+          mv "$TARBALL" ../smoke-test-dir/
+          cd ../smoke-test-dir
+
+          # 3. Run npx from the tarball
+          npx "./$TARBALL" --version
+
+      - name: 'Wait for file system sync'
+        run: 'sleep 2'
+
+      - name: 'Publish Test Report (for non-forks)'
+        if: |-
+          ${{ always() && (github.event.pull_request.head.repo.full_name == github.repository) }}
+        uses: 'dorny/test-reporter@dc3a92680fcc15842eef52e8c4606ea7ce6bd3f3' # ratchet:dorny/test-reporter@v2
+        with:
+          name: 'Test Results (Node ${{ runner.os }}, ${{ matrix.node-version }}, ${{ matrix.shard }})'
+          path: 'packages/*/junit.xml'
+          reporter: 'java-junit'
+          fail-on-error: 'false'
+
+      - name: 'Upload Test Results Artifact (for forks)'
+        if: |-
+          ${{ always() && (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) }}
+        uses: 'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02' # ratchet:actions/upload-artifact@v4
+        with:
+          name: 'test-results-fork-${{ runner.os }}-${{ matrix.node-version }}-${{ matrix.shard }}'
+          path: 'packages/*/junit.xml'
+
+      - name: 'Upload coverage reports'
+        if: |-
+          ${{ always() }}
+        uses: 'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02' # ratchet:actions/upload-artifact@v4
+        with:
+          name: 'coverage-reports-${{ runner.os }}-${{ matrix.node-version }}-${{ matrix.shard }}'
+          path: 'packages/*/coverage'
+
+  codeql:
+    name: 'CodeQL'
+    runs-on: 'm31a-ubuntu-16-core'
+    needs: 'merge_queue_skipper'
+    if: "github.repository == 'm31a/M31A' && needs.merge_queue_skipper.outputs.skip == 'false'"
+    permissions:
+      actions: 'read'
+      contents: 'read'
+      security-events: 'write'
+    steps:
+      - name: 'Checkout'
+        uses: 'actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8' # ratchet:actions/checkout@v5
+        with:
+          persist-credentials: false
+          ref: '${{ github.event.inputs.branch_ref || github.ref }}'
+
+      - name: 'Initialize CodeQL'
+        uses: 'github/codeql-action/init@df559355d593797519d70b90fc8edd5db049e7a2' # ratchet:github/codeql-action/init@v3
+        with:
+          languages: 'javascript'
+
+      - name: 'Perform CodeQL Analysis'
+        uses: 'github/codeql-action/analyze@df559355d593797519d70b90fc8edd5db049e7a2' # ratchet:github/codeql-action/analyze@v3
+
+  # Check for changes in bundle size.
+  bundle_size:
+    name: 'Check Bundle Size'
+    needs: 'merge_queue_skipper'
+    if: "github.repository == 'm31a/M31A' && github.event_name == 'pull_request' && needs.merge_queue_skipper.outputs.skip == 'false'"
+    runs-on: 'm31a-ubuntu-16-core'
+    permissions:
+      contents: 'read' # For checkout
+      pull-requests: 'write' # For commenting
+
+    steps:
+      - name: 'Checkout'
+        uses: 'actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8' # ratchet:actions/checkout@v5
+        with:
+          persist-credentials: false
+          ref: '${{ github.event.inputs.branch_ref || github.ref }}'
+          fetch-depth: 1
+
+      - uses: 'preactjs/compressed-size-action@946a292cd35bd1088e0d7eb92b69d1a8d5b5d76a'
+        with:
+          repo-token: '${{ secrets.GITHUB_TOKEN }}'
+          pattern: './bundle/**/*.{js,sb}'
+          minimum-change-threshold: '1000'
+          compression: 'none'
+          clean-script: 'clean'
+
+  test_windows:
+    name: 'Slow Test - Win - ${{ matrix.shard }}'
+    runs-on: 'm31a-windows-16-core'
+    needs: 'merge_queue_skipper'
+    if: "github.repository == 'm31a/M31A' && needs.merge_queue_skipper.outputs.skip == 'false'"
+    timeout-minutes: 60
+    strategy:
+      matrix:
+        shard:
+          - 'cli'
+          - 'others'
+
+    steps:
+      - name: 'Checkout'
+        uses: 'actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8' # ratchet:actions/checkout@v5
+        with:
+          persist-credentials: false
+          ref: '${{ github.event.inputs.branch_ref || github.ref }}'
+
+      - name: 'Set up Node.js 20.x'
+        uses: 'actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020' # ratchet:actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          cache: 'npm'
+
+      - name: 'Configure Windows Defender exclusions'
+        run: |
+          Add-MpPreference -ExclusionPath $env:GITHUB_WORKSPACE -Force
+          Add-MpPreference -ExclusionPath "$env:GITHUB_WORKSPACE\node_modules" -Force
+          Add-MpPreference -ExclusionPath "$env:GITHUB_WORKSPACE\packages" -Force
+          Add-MpPreference -ExclusionPath "$env:TEMP" -Force
+        shell: 'pwsh'
+
+      - name: 'Configure npm for Windows performance'
+        run: |
+          npm config set progress false
+          npm config set audit false
+          npm config set fund false
+          npm config set loglevel error
+          npm config set maxsockets 32
+          npm config set registry https://registry.npmjs.org/
+        shell: 'pwsh'
+
+      - name: 'Install dependencies'
+        run: 'npm ci'
+        shell: 'pwsh'
+
+      - name: 'Build project'
+        run: 'npm run build'
+        shell: 'pwsh'
+        env:
+          NODE_OPTIONS: '--max-old-space-size=32768 --max-semi-space-size=256'
+          UV_THREADPOOL_SIZE: '32'
+          NODE_ENV: 'production'
+
+      - name: 'Run tests and generate reports'
+        env:
+          GEMINI_API_KEY: '${{ secrets.GEMINI_API_KEY }}'
+          NO_COLOR: true
+          M31A_TRUST_WORKSPACE: true
+          NODE_OPTIONS: '--max-old-space-size=32768 --max-semi-space-size=256'
+          UV_THREADPOOL_SIZE: '32'
+          NODE_ENV: 'test'
+        run: |
+          if ("${{ matrix.shard }}" -eq "cli") {
+            npm run test:ci --workspace "@m31a/cli" -- --coverage.enabled=false
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } else {
+            # Explicitly list non-cli packages to ensure they are sharded correctly
+            npm run test:ci --workspace "@m31a/core" --workspace "@m31a/genai" --workspace "@m31a/devtools" --workspace "@m31a/test-utils" --if-present -- --coverage.enabled=false
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            npm run test:scripts
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+        shell: 'pwsh'
+
+      - name: 'Bundle'
+        run: 'npm run bundle'
+        shell: 'pwsh'
+
+      - name: 'Smoke test bundle'
+        run: 'node ./bundle/m31a.js --version'
+        shell: 'pwsh'
+
+      - name: 'Smoke test npx installation'
+        run: |
+          # 1. Package the project into a tarball
+          $PACK_OUTPUT = npm pack
+          $TARBALL = $PACK_OUTPUT[-1]
+
+          # 2. Move to a fresh directory for isolation
+          New-Item -ItemType Directory -Force -Path ../smoke-test-dir
+          Move-Item $TARBALL ../smoke-test-dir/
+          Set-Location ../smoke-test-dir
+
+          # 3. Run npx from the tarball
+          npx "./$TARBALL" --version
+        shell: 'pwsh'
+
+  ci:
+    name: 'CI'
+    if: "github.repository == 'm31a/M31A' && always()"
+    needs:
+      - 'lint'
+      - 'link_checker'
+      - 'test_linux'
+      - 'test_mac'
+      - 'test_windows'
+      - 'codeql'
+      - 'bundle_size'
+    runs-on: 'm31a-ubuntu-16-core'
+    steps:
+      - name: 'Check all job results'
+        run: |
+          if [[ (${NEEDS_LINT_RESULT} != 'success' && ${NEEDS_LINT_RESULT} != 'skipped') || \
+               (${NEEDS_LINK_CHECKER_RESULT} != 'success' && ${NEEDS_LINK_CHECKER_RESULT} != 'skipped') || \
+               (${NEEDS_TEST_LINUX_RESULT} != 'success' && ${NEEDS_TEST_LINUX_RESULT} != 'skipped') || \
+               (${NEEDS_TEST_MAC_RESULT} != 'success' && ${NEEDS_TEST_MAC_RESULT} != 'skipped') || \
+               (${NEEDS_TEST_WINDOWS_RESULT} != 'success' && ${NEEDS_TEST_WINDOWS_RESULT} != 'skipped') || \
+               (${NEEDS_CODEQL_RESULT} != 'success' && ${NEEDS_CODEQL_RESULT} != 'skipped') || \
+               (${NEEDS_BUNDLE_SIZE_RESULT} != 'success' && ${NEEDS_BUNDLE_SIZE_RESULT} != 'skipped') ]]; then
+            echo "One or more CI jobs failed."
+            exit 1
+          fi
+          echo "All CI jobs passed!"
+        env:
+          NEEDS_LINT_RESULT: '${{ needs.lint.result }}'
+          NEEDS_LINK_CHECKER_RESULT: '${{ needs.link_checker.result }}'
+          NEEDS_TEST_LINUX_RESULT: '${{ needs.test_linux.result }}'
+          NEEDS_TEST_MAC_RESULT: '${{ needs.test_mac.result }}'
+          NEEDS_TEST_WINDOWS_RESULT: '${{ needs.test_windows.result }}'
+          NEEDS_CODEQL_RESULT: '${{ needs.codeql.result }}'
+          NEEDS_BUNDLE_SIZE_RESULT: '${{ needs.bundle_size.result }}'

@@ -1,46 +1,35 @@
-name: "Feature Request"
-description: "Suggest an idea or enhancement for M31A"
-title: "[FEATURE]: "
-labels: ["enhancement"]
+name: 'Feature Request'
+description: 'Suggest an idea for this project'
+labels:
+  - 'status/need-triage'
+type: 'Feature'
 body:
-  - type: markdown
+  - type: 'markdown'
     attributes:
-      value: |
-        We love feedback and ideas! Tell us what you want to see improved or added to M31A.
-  - type: textarea
-    id: problem
+      value: |-
+        > [!IMPORTANT]
+        > Thanks for taking the time to suggest an enhancement!
+        >
+        > Please search **[existing issues](https://github.com/m31a/M31A/issues)** to see if a similar feature has already been requested.
+
+  - type: 'textarea'
+    id: 'feature'
     attributes:
-      label: Is your feature request related to a problem?
-      description: A clear and concise description of what the problem is.
-      placeholder: "I'm always frustrated when..."
+      label: 'What would you like to be added?'
+      description: 'A clear and concise description of the enhancement.'
     validations:
       required: true
-  - type: textarea
-    id: solution
+
+  - type: 'textarea'
+    id: 'rationale'
     attributes:
-      label: Describe the Solution You'd Like
-      description: A clear and concise description of what you want to happen.
+      label: 'Why is this needed?'
+      description: 'A clear and concise description of why this enhancement is needed.'
     validations:
       required: true
-  - type: textarea
-    id: alternatives
+
+  - type: 'textarea'
+    id: 'additional-context'
     attributes:
-      label: Describe Alternatives You've Considered
-      description: Any alternative solutions or features you've considered.
-  - type: dropdown
-    id: component
-    attributes:
-      label: Affected Subsystem / Component
-      options:
-        - CLI / Subcommands
-        - TUI (Terminal User Interface)
-        - Agent Engine / Vibe Loop / Speculative Arena
-        - NVIDIA NIM Provider / Model Integration
-        - Sandbox / ExecPolicy / Security
-        - App Server / JSON-RPC Protocol
-        - TypeScript SDK (@m31a/sdk)
-        - Python SDK (m31a)
-        - Tool Suite / Patch Engine
-        - Other
-    validations:
-      required: true
+      label: 'Additional context'
+      description: 'Add any other context or screenshots about the feature request here.'
