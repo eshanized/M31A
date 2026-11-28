@@ -1,0 +1,106 @@
+/**
+ * @license
+ * Copyright 2025 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import type { CommandModule } from 'yargs';
+import chalk from 'chalk';
+import {
+  debugLogger,
+  getErrorMessage,
+  type ExtensionInstallMetadata,
+} from '@m31a/core';
+
+import {
+  INSTALL_WARNING_MESSAGE,
+  LINK_WARNING_MESSAGE,
+  requestConsentNonInteractive,
+} from '../../config/extensions/consent.js';
+import { ExtensionManager } from '../../config/extension-manager.js';
+import { loadSettings } from '../../config/settings.js';
+import { promptForSetting } from '../../config/extensions/extensionSettings.js';
+import { exitCli } from '../utils.js';
+
+interface InstallArgs {
+  path: string;
+  consent?: boolean;
+}
+
+export async function handleLink(args: InstallArgs) {
+  try {
+    const trimmedPath = args.path.trim();
+    if (!trimmedPath) {
+      throw new Error('Extension path cannot be empty.');
+    }
+    const workspaceDir = process.cwd();
+    const canonicalPath = fs.realpathSync(
+      path.resolve(workspaceDir, trimmedPath),
+    );
+    const installMetadata: ExtensionInstallMetadata = {
+      source: canonicalPath,
+      type: 'link',
+    };
+    const requestConsent = args.consent
+      ? () => Promise.resolve(true)
+      : async (consentDescription: string) => {
+          if (!process.stdin.isTTY) {
+            debugLogger.log(consentDescription);
+            return false;
+          }
+          return requestConsentNonInteractive(consentDescription);
+        };
+    if (args.consent) {
+      debugLogger.log('You have consented to the following:');
+      debugLogger.log(LINK_WARNING_MESSAGE);
+      debugLogger.log(INSTALL_WARNING_MESSAGE);
+    }
+    const extensionManager = new ExtensionManager({
+      workspaceDir,
+      requestConsent,
+      requestSetting: promptForSetting,
+      settings: loadSettings(workspaceDir).merged,
+    });
+    await extensionManager.loadExtensions();
+    const extension =
+      await extensionManager.installOrUpdateExtension(installMetadata);
+    debugLogger.log(
+      chalk.green(
+        `Extension "${extension.name}" linked successfully and enabled.`,
+      ),
+    );
+  } catch (error) {
+    debugLogger.error(getErrorMessage(error));
+    process.exit(1);
+  }
+}
+
+export const linkCommand: CommandModule = {
+  command: 'link <path>',
+  describe:
+    'Links an extension from a local path. Updates made to the local path will always be reflected.',
+  builder: (yargs) =>
+    yargs
+      .positional('path', {
+        describe: 'The name of the extension to link.',
+        type: 'string',
+      })
+      .option('consent', {
+        describe:
+          'Acknowledge the security risks of installing an extension and skip the confirmation prompt.',
+        type: 'boolean',
+        default: false,
+      })
+      .check((_) => true),
+  handler: async (argv) => {
+    await handleLink({
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+      path: argv['path'] as string,
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+      consent: argv['consent'] as boolean | undefined,
+    });
+    await exitCli();
+  },
+};

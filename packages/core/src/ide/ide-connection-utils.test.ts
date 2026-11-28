@@ -1,0 +1,1049 @@
+/**
+ * @license
+ * Copyright 2025 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import {
+  describe,
+  it,
+  expect,
+  vi,
+  beforeEach,
+  afterEach,
+  type Mock,
+} from 'vitest';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import * as os from 'node:os';
+import {
+  getConnectionConfigFromFile,
+  validateWorkspacePath,
+  getIdeServerHost,
+} from './ide-connection-utils.js';
+import { getIdeConnectionDir } from '../utils/paths.js';
+import { pathToFileURL } from 'node:url';
+
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof fs>();
+  return {
+    ...(actual as object),
+    promises: {
+      ...actual.promises,
+      readFile: vi.fn(),
+      readdir: vi.fn(),
+      realpath: vi.fn((p) => Promise.resolve(p)),
+      lstat: vi.fn(),
+      stat: vi.fn(() =>
+        Promise.resolve({
+          uid: process.getuid ? process.getuid() : 1000,
+          mode: 0o100600,
+          isFile: () => true,
+        }),
+      ),
+      open: vi.fn((filePath: string) =>
+        Promise.resolve({
+          stat: () => fs.promises.stat(filePath),
+          readFile: (options?: string | { encoding?: string }) =>
+            fs.promises.readFile(
+              filePath,
+              options as unknown as BufferEncoding | undefined,
+            ),
+          close: () => Promise.resolve(),
+        } as unknown as fs.promises.FileHandle),
+      ),
+    },
+    realpathSync: (p: string) => p,
+    existsSync: vi.fn(() => false),
+  };
+});
+vi.mock('node:os');
+vi.mock('undici', () => ({
+  EnvHttpProxyAgent: vi.fn(),
+  fetch: vi.fn(),
+  setGlobalDispatcher: vi.fn(),
+  Agent: vi.fn(),
+}));
+
+describe('ide-connection-utils', () => {
+  const expectedIdeDir = getIdeConnectionDir('/tmp');
+
+  beforeEach(() => {
+    // Mock environment variables
+    vi.stubEnv('M31A_IDE_WORKSPACE_PATH', '/test/workspace');
+    vi.stubEnv('M31A_IDE_SERVER_PORT', '');
+    vi.stubEnv('M31A_IDE_SERVER_STDIO_COMMAND', '');
+    vi.stubEnv('M31A_IDE_SERVER_STDIO_ARGS', '');
+    vi.stubEnv('M31A_IDE_AUTH_TOKEN', '');
+
+    vi.spyOn(process, 'cwd').mockReturnValue('/test/workspace/sub-dir');
+    vi.mocked(os.tmpdir).mockReturnValue('/tmp');
+    vi.mocked(os.platform).mockReturnValue('linux');
+    vi.spyOn(process, 'kill').mockImplementation(() => true);
+
+    const currentUid = process.getuid ? process.getuid() : 1000;
+    vi.mocked(fs.promises.lstat).mockImplementation((targetPath) => {
+      if (String(targetPath) === expectedIdeDir) {
+        return Promise.resolve({
+          uid: currentUid,
+          mode: 0o40700,
+          isSymbolicLink: () => false,
+          isDirectory: () => true,
+        } as unknown as fs.Stats);
+      }
+      return Promise.reject(
+        Object.assign(new Error('ENOENT'), { code: 'ENOENT' }),
+      );
+    });
+    vi.mocked(fs.promises.stat).mockImplementation(() =>
+      Promise.resolve({
+        uid: currentUid,
+        mode: 0o100600,
+        isFile: () => true,
+      } as unknown as fs.Stats),
+    );
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  describe('getConnectionConfigFromFile', () => {
+    it('should return config from the specific pid file if it exists', async () => {
+      const config = { port: '1234', workspacePath: '/test/workspace' };
+      vi.mocked(fs.promises.readFile).mockResolvedValue(JSON.stringify(config));
+
+      const result = await getConnectionConfigFromFile(12345);
+
+      expect(result).toEqual(config);
+      expect(fs.promises.readFile).toHaveBeenCalledWith(
+        path.join(expectedIdeDir, 'm31a-ide-server-12345.json'),
+        'utf8',
+      );
+    });
+
+    it('should return undefined if no config files are found', async () => {
+      vi.mocked(fs.promises.readFile).mockRejectedValue(new Error('not found'));
+      (
+        vi.mocked(fs.promises.readdir) as Mock<
+          (path: fs.PathLike) => Promise<string[]>
+        >
+      ).mockResolvedValue([]);
+
+      const result = await getConnectionConfigFromFile(12345);
+
+      expect(result).toBeUndefined();
+    });
+
+    it('should find and parse a single config file with the new naming scheme', async () => {
+      const config = { port: '5678', workspacePath: '/test/workspace' };
+      vi.mocked(fs.promises.readFile).mockRejectedValueOnce(
+        new Error('not found'),
+      ); // For old path
+      (
+        vi.mocked(fs.promises.readdir) as Mock<
+          (path: fs.PathLike) => Promise<string[]>
+        >
+      ).mockResolvedValue(['m31a-ide-server-12345-123.json']);
+      vi.mocked(fs.promises.readFile).mockResolvedValue(JSON.stringify(config));
+
+      const result = await getConnectionConfigFromFile(12345);
+
+      expect(result).toEqual(config);
+      expect(fs.promises.readFile).toHaveBeenCalledWith(
+        path.join(expectedIdeDir, 'm31a-ide-server-12345-123.json'),
+        'utf8',
+      );
+    });
+
+    it('should filter out configs with invalid workspace paths', async () => {
+      const validConfig = {
+        port: '5678',
+        workspacePath: '/test/workspace',
+      };
+      const invalidConfig = {
+        port: '1111',
+        workspacePath: '/invalid/workspace',
+      };
+      vi.mocked(fs.promises.readFile).mockRejectedValueOnce(
+        new Error('not found'),
+      );
+      (
+        vi.mocked(fs.promises.readdir) as Mock<
+          (path: fs.PathLike) => Promise<string[]>
+        >
+      ).mockResolvedValue([
+        'm31a-ide-server-12345-111.json',
+        'm31a-ide-server-12345-222.json',
+      ]);
+      vi.mocked(fs.promises.readFile)
+        .mockResolvedValueOnce(JSON.stringify(invalidConfig))
+        .mockResolvedValueOnce(JSON.stringify(validConfig));
+
+      const result = await getConnectionConfigFromFile(12345);
+
+      expect(result).toEqual(validConfig);
+    });
+
+    it('should fall back to a different PID if it matches the current workspace', async () => {
+      const targetPid = 12345;
+      const otherPid = 67890;
+      const validConfig = {
+        port: '5678',
+        workspacePath: '/test/workspace',
+      };
+      vi.mocked(fs.promises.readFile).mockRejectedValueOnce(
+        new Error('not found'),
+      );
+      (
+        vi.mocked(fs.promises.readdir) as Mock<
+          (path: fs.PathLike) => Promise<string[]>
+        >
+      ).mockResolvedValue([`m31a-ide-server-${otherPid}-111.json`]);
+      vi.mocked(fs.promises.readFile).mockResolvedValueOnce(
+        JSON.stringify(validConfig),
+      );
+
+      const result = await getConnectionConfigFromFile(targetPid);
+
+      expect(result).toEqual(validConfig);
+      expect(fs.promises.readFile).toHaveBeenCalledWith(
+        path.join(expectedIdeDir, `m31a-ide-server-${otherPid}-111.json`),
+        'utf8',
+      );
+    });
+
+    it('should prioritize the target PID over other PIDs', async () => {
+      const targetPid = 12345;
+      const otherPid = 67890;
+      const targetConfig = { port: '1111', workspacePath: '/test/workspace' };
+      const otherConfig = { port: '2222', workspacePath: '/test/workspace' };
+
+      vi.mocked(fs.promises.readFile).mockRejectedValueOnce(
+        new Error('not found'),
+      );
+      (
+        vi.mocked(fs.promises.readdir) as Mock<
+          (path: fs.PathLike) => Promise<string[]>
+        >
+      ).mockResolvedValue([
+        `m31a-ide-server-${otherPid}-1.json`,
+        `m31a-ide-server-${targetPid}-1.json`,
+      ]);
+
+      // readFile will be called for both files in the sorted order.
+      // We expect targetPid file to be first.
+      vi.mocked(fs.promises.readFile)
+        .mockResolvedValueOnce(JSON.stringify(targetConfig))
+        .mockResolvedValueOnce(JSON.stringify(otherConfig));
+
+      const result = await getConnectionConfigFromFile(targetPid);
+
+      expect(result).toEqual(targetConfig);
+      expect(fs.promises.readFile).toHaveBeenCalledWith(
+        path.join(expectedIdeDir, `m31a-ide-server-${targetPid}-1.json`),
+        'utf8',
+      );
+    });
+
+    it('should prioritize an alive process over a dead one', async () => {
+      const targetPid = 12345; // target not present
+      const alivePid = 22222;
+      const deadPid = 11111;
+      const aliveConfig = { port: '2222', workspacePath: '/test/workspace' };
+      const deadConfig = { port: '1111', workspacePath: '/test/workspace' };
+
+      vi.mocked(fs.promises.readFile).mockRejectedValueOnce(
+        new Error('not found'),
+      );
+      (
+        vi.mocked(fs.promises.readdir) as Mock<
+          (path: fs.PathLike) => Promise<string[]>
+        >
+      ).mockResolvedValue([
+        `m31a-ide-server-${deadPid}-1.json`,
+        `m31a-ide-server-${alivePid}-1.json`,
+      ]);
+
+      vi.spyOn(process, 'kill').mockImplementation((pid) => {
+        if (pid === alivePid) return true;
+        throw new Error('dead');
+      });
+
+      vi.mocked(fs.promises.readFile)
+        .mockResolvedValueOnce(JSON.stringify(aliveConfig))
+        .mockResolvedValueOnce(JSON.stringify(deadConfig));
+
+      const result = await getConnectionConfigFromFile(targetPid);
+
+      expect(result).toEqual(aliveConfig);
+      expect(fs.promises.readFile).toHaveBeenCalledWith(
+        path.join(expectedIdeDir, `m31a-ide-server-${alivePid}-1.json`),
+        'utf8',
+      );
+    });
+
+    it('should prioritize the largest PID (newest) among alive processes', async () => {
+      const targetPid = 12345; // target not present
+      const oldPid = 20000;
+      const newPid = 30000;
+      const oldConfig = { port: '2000', workspacePath: '/test/workspace' };
+      const newConfig = { port: '3000', workspacePath: '/test/workspace' };
+
+      vi.mocked(fs.promises.readFile).mockRejectedValueOnce(
+        new Error('not found'),
+      );
+      (
+        vi.mocked(fs.promises.readdir) as Mock<
+          (path: fs.PathLike) => Promise<string[]>
+        >
+      ).mockResolvedValue([
+        `m31a-ide-server-${oldPid}-1.json`,
+        `m31a-ide-server-${newPid}-1.json`,
+      ]);
+
+      // Both are alive
+      vi.spyOn(process, 'kill').mockImplementation(() => true);
+
+      vi.mocked(fs.promises.readFile)
+        .mockResolvedValueOnce(JSON.stringify(newConfig))
+        .mockResolvedValueOnce(JSON.stringify(oldConfig));
+
+      const result = await getConnectionConfigFromFile(targetPid);
+
+      expect(result).toEqual(newConfig);
+      expect(fs.promises.readFile).toHaveBeenCalledWith(
+        path.join(expectedIdeDir, `m31a-ide-server-${newPid}-1.json`),
+        'utf8',
+      );
+    });
+
+    it('should return the first valid config when multiple workspaces are valid', async () => {
+      const config1 = { port: '1111', workspacePath: '/test/workspace' };
+      const config2 = { port: '2222', workspacePath: '/test/workspace2' };
+      vi.mocked(fs.promises.readFile).mockRejectedValueOnce(
+        new Error('not found'),
+      );
+      (
+        vi.mocked(fs.promises.readdir) as Mock<
+          (path: fs.PathLike) => Promise<string[]>
+        >
+      ).mockResolvedValue([
+        'm31a-ide-server-12345-111.json',
+        'm31a-ide-server-12345-222.json',
+      ]);
+      vi.mocked(fs.promises.readFile)
+        .mockResolvedValueOnce(JSON.stringify(config1))
+        .mockResolvedValueOnce(JSON.stringify(config2));
+
+      const result = await getConnectionConfigFromFile(12345);
+
+      expect(result).toEqual(config1);
+    });
+
+    it('should prioritize the config matching the port from the environment variable', async () => {
+      vi.stubEnv('M31A_IDE_SERVER_PORT', '2222');
+      const config1 = { port: '1111', workspacePath: '/test/workspace' };
+      const config2 = { port: '2222', workspacePath: '/test/workspace' };
+      vi.mocked(fs.promises.readFile).mockRejectedValueOnce(
+        new Error('not found'),
+      );
+      (
+        vi.mocked(fs.promises.readdir) as Mock<
+          (path: fs.PathLike) => Promise<string[]>
+        >
+      ).mockResolvedValue([
+        'm31a-ide-server-12345-111.json',
+        'm31a-ide-server-12345-222.json',
+      ]);
+      vi.mocked(fs.promises.readFile)
+        .mockResolvedValueOnce(JSON.stringify(config1))
+        .mockResolvedValueOnce(JSON.stringify(config2));
+
+      const result = await getConnectionConfigFromFile(12345);
+
+      expect(result).toEqual(config2);
+    });
+
+    it('should handle invalid JSON in one of the config files', async () => {
+      const validConfig = { port: '2222', workspacePath: '/test/workspace' };
+      vi.mocked(fs.promises.readFile).mockRejectedValueOnce(
+        new Error('not found'),
+      );
+      (
+        vi.mocked(fs.promises.readdir) as Mock<
+          (path: fs.PathLike) => Promise<string[]>
+        >
+      ).mockResolvedValue([
+        'm31a-ide-server-12345-111.json',
+        'm31a-ide-server-12345-222.json',
+      ]);
+      vi.mocked(fs.promises.readFile)
+        .mockResolvedValueOnce('invalid json')
+        .mockResolvedValueOnce(JSON.stringify(validConfig));
+
+      const result = await getConnectionConfigFromFile(12345);
+
+      expect(result).toEqual(validConfig);
+    });
+
+    it('should return undefined if readdir throws an error', async () => {
+      vi.mocked(fs.promises.readFile).mockRejectedValueOnce(
+        new Error('not found'),
+      );
+      vi.mocked(fs.promises.readdir).mockRejectedValue(
+        new Error('readdir failed'),
+      );
+
+      const result = await getConnectionConfigFromFile(12345);
+
+      expect(result).toBeUndefined();
+    });
+
+    it('should ignore files with invalid names', async () => {
+      const validConfig = { port: '3333', workspacePath: '/test/workspace' };
+      vi.mocked(fs.promises.readFile).mockRejectedValueOnce(
+        new Error('not found'),
+      );
+      (
+        vi.mocked(fs.promises.readdir) as Mock<
+          (path: fs.PathLike) => Promise<string[]>
+        >
+      ).mockResolvedValue([
+        'm31a-ide-server-12345-111.json', // valid
+        'not-a-config-file.txt', // invalid
+        'm31a-ide-server-asdf.json', // invalid
+      ]);
+      vi.mocked(fs.promises.readFile).mockResolvedValueOnce(
+        JSON.stringify(validConfig),
+      );
+
+      const result = await getConnectionConfigFromFile(12345);
+
+      expect(result).toEqual(validConfig);
+      expect(fs.promises.readFile).toHaveBeenCalledWith(
+        path.join(expectedIdeDir, 'm31a-ide-server-12345-111.json'),
+        'utf8',
+      );
+      expect(fs.promises.readFile).not.toHaveBeenCalledWith(
+        path.join(expectedIdeDir, 'not-a-config-file.txt'),
+        'utf8',
+      );
+    });
+
+    it('should match env port string to a number port in the config', async () => {
+      vi.stubEnv('M31A_IDE_SERVER_PORT', '3333');
+      const config1 = { port: 1111, workspacePath: '/test/workspace' };
+      const config2 = { port: 3333, workspacePath: '/test/workspace' };
+      vi.mocked(fs.promises.readFile).mockRejectedValueOnce(
+        new Error('not found'),
+      );
+      (
+        vi.mocked(fs.promises.readdir) as Mock<
+          (path: fs.PathLike) => Promise<string[]>
+        >
+      ).mockResolvedValue([
+        'm31a-ide-server-12345-111.json',
+        'm31a-ide-server-12345-222.json',
+      ]);
+      vi.mocked(fs.promises.readFile)
+        .mockResolvedValueOnce(JSON.stringify(config1))
+        .mockResolvedValueOnce(JSON.stringify(config2));
+
+      const result = await getConnectionConfigFromFile(12345);
+
+      expect(result).toEqual(config2);
+    });
+
+    it('should NOT filter out config if all found config files are mismatched/invalid workspaces, returning the best sorted match so that the correct Directory Mismatch error is raised downstream', async () => {
+      const invalidConfig1 = {
+        port: '1111',
+        workspacePath: '/invalid/workspace1',
+      };
+      const invalidConfig2 = {
+        port: '2222',
+        workspacePath: '/invalid/workspace2',
+      };
+      vi.mocked(fs.promises.readFile).mockRejectedValueOnce(
+        new Error('not found'),
+      );
+      (
+        vi.mocked(fs.promises.readdir) as Mock<
+          (path: fs.PathLike) => Promise<string[]>
+        >
+      ).mockResolvedValue([
+        'm31a-ide-server-12345-111.json',
+        'm31a-ide-server-12345-222.json',
+      ]);
+      vi.mocked(fs.promises.readFile)
+        .mockResolvedValueOnce(JSON.stringify(invalidConfig1))
+        .mockResolvedValueOnce(JSON.stringify(invalidConfig2));
+
+      const result = await getConnectionConfigFromFile(12345);
+
+      expect(result).toEqual(invalidConfig1);
+    });
+
+    it('should prioritize the config matching the port from the environment variable when all found config files are mismatched/invalid workspaces', async () => {
+      vi.stubEnv('M31A_IDE_SERVER_PORT', '2222');
+      const invalidConfig1 = {
+        port: '1111',
+        workspacePath: '/invalid/workspace1',
+      };
+      const invalidConfig2 = {
+        port: '2222',
+        workspacePath: '/invalid/workspace2',
+      };
+      vi.mocked(fs.promises.readFile).mockRejectedValueOnce(
+        new Error('not found'),
+      );
+      (
+        vi.mocked(fs.promises.readdir) as Mock<
+          (path: fs.PathLike) => Promise<string[]>
+        >
+      ).mockResolvedValue([
+        'm31a-ide-server-12345-111.json',
+        'm31a-ide-server-12345-222.json',
+      ]);
+      vi.mocked(fs.promises.readFile)
+        .mockResolvedValueOnce(JSON.stringify(invalidConfig1))
+        .mockResolvedValueOnce(JSON.stringify(invalidConfig2));
+
+      const result = await getConnectionConfigFromFile(12345);
+
+      expect(result).toEqual(invalidConfig2);
+    });
+
+    it.runIf(process.getuid !== undefined)(
+      'should reject and ignore config files owned by a different user UID to prevent hijacking/information disclosure',
+      async () => {
+        const config1 = {
+          port: '1111',
+          workspacePath: '/test/workspace',
+        };
+        vi.mocked(fs.promises.readFile).mockRejectedValueOnce(
+          new Error('not found'),
+        );
+        (
+          vi.mocked(fs.promises.readdir) as Mock<
+            (path: fs.PathLike) => Promise<string[]>
+          >
+        ).mockResolvedValue(['m31a-ide-server-12345-111.json']);
+        vi.mocked(fs.promises.readFile).mockResolvedValueOnce(
+          JSON.stringify(config1),
+        );
+
+        const otherUid = (process.getuid ? process.getuid() : 1000) + 1;
+        vi.mocked(fs.promises.stat).mockResolvedValue({
+          uid: otherUid,
+          mode: 0o100600,
+          isFile: () => true,
+        } as unknown as fs.Stats);
+
+        const result = await getConnectionConfigFromFile(12345);
+
+        expect(result).toBeUndefined();
+      },
+    );
+
+    it('should accept and parse config files owned by the current user UID', async () => {
+      const config1 = {
+        port: '1111',
+        workspacePath: '/test/workspace',
+      };
+      vi.mocked(fs.promises.readFile).mockRejectedValueOnce(
+        new Error('not found'),
+      );
+      (
+        vi.mocked(fs.promises.readdir) as Mock<
+          (path: fs.PathLike) => Promise<string[]>
+        >
+      ).mockResolvedValue(['m31a-ide-server-12345-111.json']);
+      vi.mocked(fs.promises.readFile).mockResolvedValueOnce(
+        JSON.stringify(config1),
+      );
+
+      const currentUid = process.getuid ? process.getuid() : 1000;
+      vi.mocked(fs.promises.stat).mockResolvedValue({
+        uid: currentUid,
+        mode: 0o100600,
+        isFile: () => true,
+      } as unknown as fs.Stats);
+
+      const result = await getConnectionConfigFromFile(12345);
+
+      expect(result).toEqual(config1);
+    });
+
+    it('should reject and ignore config files if fs.promises.open throws an error', async () => {
+      vi.mocked(fs.promises.readFile).mockRejectedValueOnce(
+        new Error('not found'),
+      );
+      (
+        vi.mocked(fs.promises.readdir) as Mock<
+          (path: fs.PathLike) => Promise<string[]>
+        >
+      ).mockResolvedValue(['m31a-ide-server-12345-111.json']);
+
+      vi.mocked(fs.promises.open).mockRejectedValue(
+        new Error('symlink loop / permission denied'),
+      );
+
+      const result = await getConnectionConfigFromFile(12345);
+
+      expect(result).toBeUndefined();
+    });
+
+    it('should open config files with O_RDONLY | O_NOFOLLOW | O_NONBLOCK on POSIX', async () => {
+      const config1 = {
+        port: '1111',
+        workspacePath: '/test/workspace',
+      };
+      vi.mocked(fs.promises.readFile).mockResolvedValue(
+        JSON.stringify(config1),
+      );
+
+      await getConnectionConfigFromFile(12345);
+
+      const expectedFlags =
+        fs.constants.O_RDONLY |
+        (fs.constants.O_NOFOLLOW ?? 0) |
+        (fs.constants.O_NONBLOCK ?? 0);
+      expect(fs.promises.open).toHaveBeenCalledWith(
+        path.join(expectedIdeDir, 'm31a-ide-server-12345.json'),
+        expectedFlags,
+      );
+    });
+
+    it.runIf(process.getuid !== undefined)(
+      'should reject primary discovery directory if it is a symlink, owned by another UID, or group/world accessible',
+      async () => {
+        const currentUid = process.getuid ? process.getuid() : 1000;
+        const badStats: Array<Partial<fs.Stats>> = [
+          {
+            uid: currentUid,
+            mode: 0o120777,
+            isSymbolicLink: () => true,
+            isDirectory: () => false,
+          },
+          {
+            uid: currentUid + 1,
+            mode: 0o40700,
+            isSymbolicLink: () => false,
+            isDirectory: () => true,
+          },
+          {
+            uid: currentUid,
+            mode: 0o40755,
+            isSymbolicLink: () => false,
+            isDirectory: () => true,
+          },
+        ];
+
+        for (const statObj of badStats) {
+          vi.mocked(fs.promises.lstat).mockImplementation((targetPath) => {
+            if (String(targetPath) === expectedIdeDir) {
+              return Promise.resolve(statObj as unknown as fs.Stats);
+            }
+            return Promise.reject(
+              Object.assign(new Error('ENOENT'), { code: 'ENOENT' }),
+            );
+          });
+
+          const result = await getConnectionConfigFromFile(12345);
+          expect(result).toBeUndefined();
+          expect(fs.promises.readdir).not.toHaveBeenCalled();
+        }
+      },
+    );
+
+    it('should reject config files that are non-regular files (e.g. FIFOs) or accessible by group/other', async () => {
+      const currentUid = process.getuid ? process.getuid() : 1000;
+      vi.mocked(fs.promises.readFile).mockResolvedValue(
+        JSON.stringify({ port: '1111', workspacePath: '/test/workspace' }),
+      );
+
+      // Non-regular file (FIFO)
+      vi.mocked(fs.promises.stat).mockResolvedValue({
+        uid: currentUid,
+        mode: 0o010600,
+        isFile: () => false,
+      } as unknown as fs.Stats);
+      expect(await getConnectionConfigFromFile(12345)).toBeUndefined();
+
+      // Group/world-readable regular file (0o644)
+      vi.mocked(fs.promises.stat).mockResolvedValue({
+        uid: currentUid,
+        mode: 0o100644,
+        isFile: () => true,
+      } as unknown as fs.Stats);
+      expect(await getConnectionConfigFromFile(12345)).toBeUndefined();
+
+      // Group-readable regular file (0o640)
+      vi.mocked(fs.promises.stat).mockResolvedValue({
+        uid: currentUid,
+        mode: 0o100640,
+        isFile: () => true,
+      } as unknown as fs.Stats);
+      expect(await getConnectionConfigFromFile(12345)).toBeUndefined();
+
+      // World-writable regular file (0o666)
+      vi.mocked(fs.promises.stat).mockResolvedValue({
+        uid: currentUid,
+        mode: 0o100666,
+        isFile: () => true,
+      } as unknown as fs.Stats);
+      expect(await getConnectionConfigFromFile(12345)).toBeUndefined();
+    });
+
+    it.runIf(process.getuid !== undefined)(
+      'should fall back to legacy /tmp/gemini/ide directory when primary per-user directory does not exist',
+      async () => {
+        const legacyDir = path.join('/tmp', 'gemini', 'ide');
+        const currentUid = process.getuid ? process.getuid() : 1000;
+        const legacyConfig = {
+          port: '7777',
+          workspacePath: '/test/workspace',
+        };
+
+        vi.mocked(fs.promises.lstat).mockImplementation((targetPath) => {
+          if (String(targetPath) === legacyDir) {
+            return Promise.resolve({
+              uid: currentUid,
+              mode: 0o40755,
+              isSymbolicLink: () => false,
+              isDirectory: () => true,
+            } as unknown as fs.Stats);
+          }
+          return Promise.reject(
+            Object.assign(new Error('ENOENT'), { code: 'ENOENT' }),
+          );
+        });
+        vi.mocked(fs.promises.readFile).mockRejectedValueOnce(
+          new Error('not found'),
+        );
+        (
+          vi.mocked(fs.promises.readdir) as Mock<
+            (path: fs.PathLike) => Promise<string[]>
+          >
+        ).mockResolvedValue(['m31a-ide-server-12345-7777.json']);
+        vi.mocked(fs.promises.readFile).mockResolvedValueOnce(
+          JSON.stringify(legacyConfig),
+        );
+
+        const result = await getConnectionConfigFromFile(12345);
+        expect(result).toEqual(legacyConfig);
+        expect(fs.promises.readFile).toHaveBeenCalledWith(
+          path.join(legacyDir, 'm31a-ide-server-12345-7777.json'),
+          'utf8',
+        );
+      },
+    );
+  });
+
+  describe('validateWorkspacePath', () => {
+    it('should return valid if path is within cwd', () => {
+      const result = validateWorkspacePath(
+        '/test/workspace',
+        '/test/workspace/sub-dir',
+      );
+      expect(result.isValid).toBe(true);
+    });
+
+    it('should return invalid if path is undefined', () => {
+      const result = validateWorkspacePath(
+        undefined,
+        '/test/workspace/sub-dir',
+      );
+      expect(result.isValid).toBe(false);
+      expect(result.error).toContain('Failed to connect');
+    });
+
+    it('should return invalid if path is empty', () => {
+      const result = validateWorkspacePath('', '/test/workspace/sub-dir');
+      expect(result.isValid).toBe(false);
+      expect(result.error).toContain('please open a workspace folder');
+    });
+
+    it('should return invalid if cwd is not within workspace path', () => {
+      const result = validateWorkspacePath(
+        '/other/workspace',
+        '/test/workspace/sub-dir',
+      );
+      expect(result.isValid).toBe(false);
+      expect(result.error).toContain('Directory mismatch');
+    });
+  });
+  describe('with special characters and encoding', () => {
+    it('should return true for a URI-encoded path with spaces', () => {
+      const workspaceDir = path.resolve('/test/my workspace');
+      const workspacePath = '/test/my%20workspace';
+      const cwd = path.join(workspaceDir, 'sub-dir');
+      const result = validateWorkspacePath(workspacePath, cwd);
+      expect(result.isValid).toBe(true);
+    });
+
+    it('should return true for a URI-encoded path with Korean characters', () => {
+      const workspaceDir = path.resolve('/test/테스트');
+      const workspacePath = '/test/%ED%85%8C%EC%8A%A4%ED%8A%B8'; // "테스트"
+      const cwd = path.join(workspaceDir, 'sub-dir');
+      const result = validateWorkspacePath(workspacePath, cwd);
+      expect(result.isValid).toBe(true);
+    });
+
+    it('should return true for a plain decoded path with Korean characters', () => {
+      const workspacePath = path.resolve('/test/테스트');
+      const cwd = path.join(workspacePath, 'sub-dir');
+      const result = validateWorkspacePath(workspacePath, cwd);
+      expect(result.isValid).toBe(true);
+    });
+
+    it('should return true when one of multi-root paths is a valid URI-encoded path', () => {
+      const workspaceDir1 = path.resolve('/another/workspace');
+      const workspaceDir2 = path.resolve('/test/테스트');
+      const workspacePath = [
+        workspaceDir1,
+        '/test/%ED%85%8C%EC%8A%A4%ED%8A%B8', // "테스트"
+      ].join(path.delimiter);
+      const cwd = path.join(workspaceDir2, 'sub-dir');
+      const result = validateWorkspacePath(workspacePath, cwd);
+      expect(result.isValid).toBe(true);
+    });
+
+    it('should return true for paths containing a literal % sign', () => {
+      const workspacePath = path.resolve('/test/a%path');
+      const cwd = path.join(workspacePath, 'sub-dir');
+      const result = validateWorkspacePath(workspacePath, cwd);
+      expect(result.isValid).toBe(true);
+    });
+
+    it.skipIf(process.platform !== 'win32')(
+      'should correctly convert a Windows file URI',
+      () => {
+        const workspacePath = 'file:///C:\\Users\\test';
+        const cwd = 'C:\\Users\\test\\sub-dir';
+
+        const result = validateWorkspacePath(workspacePath, cwd);
+
+        expect(result.isValid).toBe(true);
+      },
+    );
+  });
+
+  describe('validateWorkspacePath (sanitization)', () => {
+    it.each([
+      {
+        description: 'should return true for identical paths',
+        workspacePath: path.resolve('test', 'ws'),
+        cwd: path.resolve('test', 'ws'),
+        expectedValid: true,
+      },
+      {
+        description: 'should return true when workspace has file:// protocol',
+        workspacePath: pathToFileURL(path.resolve('test', 'ws')).toString(),
+        cwd: path.resolve('test', 'ws'),
+        expectedValid: true,
+      },
+      {
+        description: 'should return true when workspace has encoded spaces',
+        workspacePath: path.resolve('test', 'my ws').replace(/ /g, '%20'),
+        cwd: path.resolve('test', 'my ws'),
+        expectedValid: true,
+      },
+      {
+        description:
+          'should return true when cwd needs normalization matching workspace',
+        workspacePath: path.resolve('test', 'my ws'),
+        cwd: path.resolve('test', 'my ws').replace(/ /g, '%20'),
+        expectedValid: true,
+      },
+    ])('$description', ({ workspacePath, cwd, expectedValid }) => {
+      expect(validateWorkspacePath(workspacePath, cwd)).toMatchObject({
+        isValid: expectedValid,
+      });
+    });
+  });
+
+  describe('getIdeServerHost', () => {
+    // Helper to set existsSync mock behavior
+    const existsSyncMock = vi.mocked(fs.existsSync);
+    const setupFsMocks = (
+      dockerenvExists: boolean,
+      containerenvExists: boolean,
+    ) => {
+      existsSyncMock.mockImplementation((path: fs.PathLike) => {
+        if (path === '/.dockerenv') {
+          return dockerenvExists;
+        }
+        if (path === '/run/.containerenv') {
+          return containerenvExists;
+        }
+        return false;
+      });
+    };
+
+    it('should return 127.0.0.1 when not in container and no SSH_CONNECTION or Dev Container env vars', () => {
+      setupFsMocks(false, false);
+      vi.stubEnv('SSH_CONNECTION', '');
+      vi.stubEnv('VSCODE_REMOTE_CONTAINERS_SESSION', '');
+      vi.stubEnv('REMOTE_CONTAINERS', '');
+      expect(getIdeServerHost()).toBe('127.0.0.1');
+      expect(vi.mocked(fs.existsSync)).toHaveBeenCalledWith('/.dockerenv');
+      expect(vi.mocked(fs.existsSync)).toHaveBeenCalledWith(
+        '/run/.containerenv',
+      );
+    });
+
+    it('should return 127.0.0.1 when not in container but SSH_CONNECTION is set', () => {
+      setupFsMocks(false, false);
+      vi.stubEnv('SSH_CONNECTION', 'some_ssh_value');
+      vi.stubEnv('VSCODE_REMOTE_CONTAINERS_SESSION', '');
+      vi.stubEnv('REMOTE_CONTAINERS', '');
+      expect(getIdeServerHost()).toBe('127.0.0.1');
+      expect(vi.mocked(fs.existsSync)).toHaveBeenCalledWith('/.dockerenv');
+      expect(vi.mocked(fs.existsSync)).toHaveBeenCalledWith(
+        '/run/.containerenv',
+      );
+    });
+
+    it('should return host.docker.internal when in .dockerenv container and no SSH_CONNECTION or Dev Container env vars', () => {
+      setupFsMocks(true, false);
+      vi.stubEnv('SSH_CONNECTION', '');
+      vi.stubEnv('VSCODE_REMOTE_CONTAINERS_SESSION', '');
+      vi.stubEnv('REMOTE_CONTAINERS', '');
+      expect(getIdeServerHost()).toBe('host.docker.internal');
+      expect(vi.mocked(fs.existsSync)).toHaveBeenCalledWith('/.dockerenv');
+      expect(vi.mocked(fs.existsSync)).not.toHaveBeenCalledWith(
+        '/run/.containerenv',
+      ); // Short-circuiting
+    });
+
+    it('should return 127.0.0.1 when in .dockerenv container and SSH_CONNECTION is set', () => {
+      setupFsMocks(true, false);
+      vi.stubEnv('SSH_CONNECTION', 'some_ssh_value');
+      vi.stubEnv('VSCODE_REMOTE_CONTAINERS_SESSION', '');
+      vi.stubEnv('REMOTE_CONTAINERS', '');
+      expect(getIdeServerHost()).toBe('127.0.0.1');
+      expect(vi.mocked(fs.existsSync)).toHaveBeenCalledWith('/.dockerenv');
+      expect(vi.mocked(fs.existsSync)).not.toHaveBeenCalledWith(
+        '/run/.containerenv',
+      ); // Short-circuiting
+    });
+
+    it('should return 127.0.0.1 when in .dockerenv container and VSCODE_REMOTE_CONTAINERS_SESSION is set', () => {
+      setupFsMocks(true, false);
+      vi.stubEnv('SSH_CONNECTION', '');
+      vi.stubEnv('VSCODE_REMOTE_CONTAINERS_SESSION', 'some_session_id');
+      expect(getIdeServerHost()).toBe('127.0.0.1');
+      expect(vi.mocked(fs.existsSync)).toHaveBeenCalledWith('/.dockerenv');
+      expect(vi.mocked(fs.existsSync)).not.toHaveBeenCalledWith(
+        '/run/.containerenv',
+      ); // Short-circuiting
+    });
+
+    it('should return host.docker.internal when in .containerenv container and no SSH_CONNECTION or Dev Container env vars', () => {
+      setupFsMocks(false, true);
+      vi.stubEnv('SSH_CONNECTION', '');
+      vi.stubEnv('VSCODE_REMOTE_CONTAINERS_SESSION', '');
+      vi.stubEnv('REMOTE_CONTAINERS', '');
+      expect(getIdeServerHost()).toBe('host.docker.internal');
+      expect(vi.mocked(fs.existsSync)).toHaveBeenCalledWith('/.dockerenv');
+      expect(vi.mocked(fs.existsSync)).toHaveBeenCalledWith(
+        '/run/.containerenv',
+      );
+    });
+
+    it('should return 127.0.0.1 when in .containerenv container and SSH_CONNECTION is set', () => {
+      setupFsMocks(false, true);
+      vi.stubEnv('SSH_CONNECTION', 'some_ssh_value');
+      vi.stubEnv('VSCODE_REMOTE_CONTAINERS_SESSION', '');
+      vi.stubEnv('REMOTE_CONTAINERS', '');
+      expect(getIdeServerHost()).toBe('127.0.0.1');
+      expect(vi.mocked(fs.existsSync)).toHaveBeenCalledWith('/.dockerenv');
+      expect(vi.mocked(fs.existsSync)).toHaveBeenCalledWith(
+        '/run/.containerenv',
+      );
+    });
+
+    it('should return 127.0.0.1 when in .containerenv container and REMOTE_CONTAINERS is set', () => {
+      setupFsMocks(false, true);
+      vi.stubEnv('SSH_CONNECTION', '');
+      vi.stubEnv('REMOTE_CONTAINERS', 'true');
+      expect(getIdeServerHost()).toBe('127.0.0.1');
+      expect(vi.mocked(fs.existsSync)).toHaveBeenCalledWith('/.dockerenv');
+      expect(vi.mocked(fs.existsSync)).toHaveBeenCalledWith(
+        '/run/.containerenv',
+      );
+    });
+
+    it('should return host.docker.internal when in both containers and no SSH_CONNECTION or Dev Container env vars', () => {
+      setupFsMocks(true, true);
+      vi.stubEnv('SSH_CONNECTION', '');
+      vi.stubEnv('VSCODE_REMOTE_CONTAINERS_SESSION', '');
+      vi.stubEnv('REMOTE_CONTAINERS', '');
+      expect(getIdeServerHost()).toBe('host.docker.internal');
+      expect(vi.mocked(fs.existsSync)).toHaveBeenCalledWith('/.dockerenv');
+      expect(vi.mocked(fs.existsSync)).not.toHaveBeenCalledWith(
+        '/run/.containerenv',
+      ); // Short-circuiting
+    });
+
+    it('should return 127.0.0.1 when in both containers and SSH_CONNECTION is set', () => {
+      setupFsMocks(true, true);
+      vi.stubEnv('SSH_CONNECTION', 'some_ssh_value');
+      vi.stubEnv('VSCODE_REMOTE_CONTAINERS_SESSION', '');
+      vi.stubEnv('REMOTE_CONTAINERS', '');
+      expect(getIdeServerHost()).toBe('127.0.0.1');
+      expect(vi.mocked(fs.existsSync)).toHaveBeenCalledWith('/.dockerenv');
+      expect(vi.mocked(fs.existsSync)).not.toHaveBeenCalledWith(
+        '/run/.containerenv',
+      ); // Short-circuiting
+    });
+
+    it('should return 127.0.0.1 when in both containers and VSCODE_REMOTE_CONTAINERS_SESSION is set', () => {
+      setupFsMocks(true, true);
+      vi.stubEnv('SSH_CONNECTION', '');
+      vi.stubEnv('VSCODE_REMOTE_CONTAINERS_SESSION', 'some_session_id');
+      expect(getIdeServerHost()).toBe('127.0.0.1');
+      expect(vi.mocked(fs.existsSync)).toHaveBeenCalledWith('/.dockerenv');
+      expect(vi.mocked(fs.existsSync)).not.toHaveBeenCalledWith(
+        '/run/.containerenv',
+      ); // Short-circuiting
+    });
+  });
+
+  describe('createProxyAwareFetch', () => {
+    it('should return a proxy-aware fetcher function that respects NO_PROXY and includes ideServerHost', async () => {
+      const { createProxyAwareFetch } = await import(
+        './ide-connection-utils.js'
+      );
+      const { EnvHttpProxyAgent } = await import('undici');
+      const ideServerHost = '127.0.0.1';
+      const existingNoProxy = 'google.com,example.com';
+      vi.stubEnv('NO_PROXY', existingNoProxy);
+
+      const fetcher = await createProxyAwareFetch(ideServerHost);
+      expect(typeof fetcher).toBe('function');
+
+      expect(EnvHttpProxyAgent).toHaveBeenCalledWith({
+        noProxy: `${existingNoProxy},${ideServerHost}`,
+      });
+    });
+
+    it('should handle missing NO_PROXY when creating proxy-aware fetcher', async () => {
+      const { createProxyAwareFetch } = await import(
+        './ide-connection-utils.js'
+      );
+      const { EnvHttpProxyAgent } = await import('undici');
+      const ideServerHost = 'host.docker.internal';
+      vi.stubEnv('NO_PROXY', '');
+
+      await createProxyAwareFetch(ideServerHost);
+
+      expect(EnvHttpProxyAgent).toHaveBeenCalledWith({
+        noProxy: ideServerHost,
+      });
+    });
+  });
+});

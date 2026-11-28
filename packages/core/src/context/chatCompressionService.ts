@@ -1,0 +1,955 @@
+/**
+ * @license
+ * Copyright 2025 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import type { Content, Part } from '@m31a/genai';
+import type { Config } from '../config/config.js';
+import type { M31aChat } from '../core/m31aChat.js';
+import { type ChatCompressionInfo, CompressionStatus } from '../core/turn.js';
+import { tokenLimit } from '../core/tokenLimits.js';
+import { getCompressionPrompt } from '../core/prompts.js';
+import { getResponseText } from '../utils/partUtils.js';
+import { logChatCompression } from '../telemetry/loggers.js';
+import { makeChatCompressionEvent, LlmRole } from '../telemetry/types.js';
+import {
+  saveTruncatedToolOutput,
+  formatTruncatedToolOutput,
+} from '../utils/fileUtils.js';
+import { debugLogger } from '../utils/debugLogger.js';
+import { getInitialChatHistory } from '../utils/environmentContext.js';
+import {
+  calculateRequestTokenCount,
+  estimateTokenCountSync,
+} from '../utils/tokenCalculation.js';
+import { DEFAULT_M31A_MODEL } from '../config/models.js';
+import { PreCompressTrigger } from '../hooks/types.js';
+
+void DEFAULT_M31A_MODEL;
+
+/**
+ * Default threshold for compression token count as a fraction of the model's
+ * token limit. If the chat history exceeds this threshold, it will be compressed.
+ */
+export const DEFAULT_COMPRESSION_TOKEN_THRESHOLD = 0.5;
+
+/**
+ * Number of recent tool response turns that must be preserved at full fidelity.
+ */
+export const RECENT_TURNS_PROTECTED = 3;
+
+/**
+ * Tools that retrieve file content, documentation, or search results whose outputs
+ * are essential for multi-step reasoning and must be exempted from collapsing into snippets.
+ */
+export const RETRIEVAL_TOOL_NAMES_EXEMPT_FROM_COLLAPSE: ReadonlySet<string> =
+  new Set([
+    'read_file',
+    'read_many_files',
+    'get_internal_docs',
+    'read_mcp_resource',
+    'grep',
+    'rip_grep',
+    'glob',
+    'search_file_content',
+    'find_files',
+  ]);
+
+export function isExemptRetrievalTool(
+  toolName?: string,
+  exemptTools: ReadonlySet<string> = RETRIEVAL_TOOL_NAMES_EXEMPT_FROM_COLLAPSE,
+): boolean {
+  if (!toolName) {
+    return false;
+  }
+  const normalized = toolName.toLowerCase();
+  if (exemptTools.has(normalized)) {
+    return true;
+  }
+  return (
+    normalized.endsWith('read_file') ||
+    normalized.endsWith('read_files') ||
+    normalized.endsWith('read_many_files') ||
+    normalized.endsWith('read_resource')
+  );
+}
+
+export const COLLAPSED_FUNCTION_RESPONSE_MAX_BYTES = 2048; // 2 KB
+
+/**
+ * Maximum cumulative bytes of older retrieval tool outputs (beyond the recent protected
+ * turns) that may remain uncollapsed before older retrieval turns are also collapsed.
+ */
+export const MAX_EXEMPT_RETRIEVAL_HISTORY_BYTES = 64 * 1024; // 64 KB
+
+/**
+ * History byte size threshold at which older function responses are collapsed
+ * even if estimated token counts have not yet reached the model compression threshold.
+ */
+export const COLLAPSE_HISTORY_BYTE_THRESHOLD = 256 * 1024; // 256 KB
+
+const OMITTED_BINARY_MESSAGE =
+  '[Binary content omitted from previous turn to conserve memory]';
+
+/**
+ * Computes the total byte size of text and payload content across all turns in history.
+ */
+export function calculateHistoryByteSize(history: readonly Content[]): number {
+  let bytes = 0;
+  for (const turn of history) {
+    if (turn.parts) {
+      for (const part of turn.parts) {
+        if (part.text) {
+          bytes += Buffer.byteLength(part.text, 'utf8');
+        }
+        if (part.functionResponse?.response) {
+          const resp = part.functionResponse.response;
+          if (typeof resp === 'string') {
+            bytes += Buffer.byteLength(resp, 'utf8');
+          } else if (typeof resp === 'object' && resp !== null) {
+            try {
+              bytes += Buffer.byteLength(JSON.stringify(resp), 'utf8');
+            } catch {
+              // ignore JSON errors
+            }
+          }
+        }
+        if (part.functionResponse?.parts) {
+          for (const nestedPart of part.functionResponse.parts) {
+            if (nestedPart && typeof nestedPart === 'object') {
+              if (
+                'text' in nestedPart &&
+                typeof nestedPart.text === 'string' &&
+                nestedPart.text
+              ) {
+                bytes += Buffer.byteLength(nestedPart.text, 'utf8');
+              }
+              if (nestedPart.inlineData?.data) {
+                bytes += Buffer.byteLength(nestedPart.inlineData.data, 'utf8');
+              }
+            }
+          }
+        }
+        if (part.inlineData?.data) {
+          bytes += Buffer.byteLength(part.inlineData.data, 'utf8');
+        }
+      }
+    }
+  }
+  return bytes;
+}
+
+const defaultGraphemeSegmenter = new Intl.Segmenter(undefined, {
+  granularity: 'grapheme',
+});
+
+/**
+ * Collapses detailed logs in older functionResponse payloads from completed previous turns.
+ * The most recent N tool response turns (default 3) and recent retrieval tools (within
+ * MAX_EXEMPT_RETRIEVAL_HISTORY_BYTES) are preserved intact for immediate context fidelity
+ * and multi-step reasoning.
+ */
+export function collapseOlderFunctionResponses(
+  history: Content[],
+  maxBytesPerOldResponse?: number,
+  segmenter?: Intl.Segmenter,
+  protectedTurns?: number,
+  exemptTools?: ReadonlySet<string>,
+): Content[];
+export function collapseOlderFunctionResponses(
+  history: readonly Content[],
+  maxBytesPerOldResponse?: number,
+  segmenter?: Intl.Segmenter,
+  protectedTurns?: number,
+  exemptTools?: ReadonlySet<string>,
+): readonly Content[];
+export function collapseOlderFunctionResponses(
+  history: readonly Content[],
+  maxBytesPerOldResponse: number = COLLAPSED_FUNCTION_RESPONSE_MAX_BYTES,
+  segmenter: Intl.Segmenter = defaultGraphemeSegmenter,
+  protectedTurns: number = RECENT_TURNS_PROTECTED,
+  exemptTools: ReadonlySet<string> = RETRIEVAL_TOOL_NAMES_EXEMPT_FROM_COLLAPSE,
+): readonly Content[] {
+  // Find all indices of user messages that contain functionResponse
+  const toolIndices: number[] = [];
+  for (let i = 0; i < history.length; i++) {
+    if (
+      history[i].role === 'user' &&
+      history[i].parts?.some((p) => !!p.functionResponse)
+    ) {
+      toolIndices.push(i);
+    }
+  }
+
+  if (toolIndices.length <= protectedTurns) {
+    return history;
+  }
+
+  // The last N tool indices represent recent tool turns that must be protected.
+  // Only prior tool indices are older completed turns eligible for collapsing.
+  const cutoffToolIndex = toolIndices[toolIndices.length - protectedTurns];
+
+  // Prioritize preserving the most recent older retrieval tool turns up to MAX_EXEMPT_RETRIEVAL_HISTORY_BYTES.
+  let remainingExemptBytes = MAX_EXEMPT_RETRIEVAL_HISTORY_BYTES;
+  const preservedExemptTurns = new Set<number>();
+  for (let i = cutoffToolIndex - 1; i >= 0; i--) {
+    if (remainingExemptBytes <= 0) {
+      break;
+    }
+    const turn = history[i];
+    if (turn.role !== 'user' || !turn.parts) {
+      continue;
+    }
+    const hasExemptPart = turn.parts.some(
+      (p) =>
+        p.functionResponse &&
+        isExemptRetrievalTool(p.functionResponse.name, exemptTools),
+    );
+    if (!hasExemptPart) {
+      continue;
+    }
+    const turnBytes = calculateHistoryByteSize([turn]);
+    if (turnBytes <= remainingExemptBytes) {
+      preservedExemptTurns.add(i);
+      remainingExemptBytes -= turnBytes;
+    } else {
+      remainingExemptBytes = 0;
+      break;
+    }
+  }
+
+  const collapseString = (str: string): string => {
+    const totalBytes = Buffer.byteLength(str, 'utf8');
+    if (totalBytes <= maxBytesPerOldResponse) {
+      return str;
+    }
+
+    const previewBytes = maxBytesPerOldResponse;
+    let preview = '';
+    let currentBytes = 0;
+
+    for (const { segment } of segmenter.segment(str)) {
+      const segmentBytes = Buffer.byteLength(segment, 'utf8');
+      if (currentBytes + segmentBytes > previewBytes) {
+        break;
+      }
+      preview += segment;
+      currentBytes += segmentBytes;
+    }
+
+    const omittedBytes = totalBytes - currentBytes;
+    return `${preview}\n... [Tool output collapsed from previous turn: ${omittedBytes} bytes omitted to conserve memory] ...`;
+  };
+
+  const collapseValue = (val: unknown): unknown => {
+    if (typeof val === 'string') {
+      return collapseString(val);
+    }
+
+    if (Array.isArray(val)) {
+      let arrayModified = false;
+      const newVal = val.map((item) => {
+        const collapsed = collapseValue(item);
+        if (collapsed !== item) {
+          arrayModified = true;
+        }
+        return collapsed;
+      });
+      return arrayModified ? newVal : val;
+    }
+
+    if (typeof val === 'object' && val !== null) {
+      const proto: unknown = Object.getPrototypeOf(val);
+      if (proto !== Object.prototype && proto !== null) {
+        return val;
+      }
+
+      let objModified = false;
+      const copy: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(val)) {
+        const collapsed = collapseValue(v);
+        if (collapsed !== v) {
+          objModified = true;
+        }
+        copy[k] = collapsed;
+      }
+      return objModified ? copy : val;
+    }
+
+    return val;
+  };
+
+  let modified = false;
+  const newHistory = history.map((content, idx) => {
+    // Only process older tool response turns before the protected recent window
+    if (idx >= cutoffToolIndex || content.role !== 'user' || !content.parts) {
+      return content;
+    }
+
+    let partsModified = false;
+    const newParts = content.parts.map((part) => {
+      if (part.inlineData) {
+        partsModified = true;
+        return {
+          text: OMITTED_BINARY_MESSAGE,
+        };
+      }
+
+      if (!part.functionResponse?.response) {
+        return part;
+      }
+
+      const hasNestedParts = Boolean(part.functionResponse.parts?.length);
+
+      // Exempt retrieval and file reading tools from text collapsing while within the exempt byte budget,
+      // but still strip any nested multimodal inlineData parts from older turns.
+      if (
+        isExemptRetrievalTool(part.functionResponse.name, exemptTools) &&
+        preservedExemptTurns.has(idx)
+      ) {
+        if (hasNestedParts) {
+          partsModified = true;
+          const { parts: _parts, ...cleanFunctionResponse } =
+            part.functionResponse;
+          return {
+            ...part,
+            functionResponse: cleanFunctionResponse,
+          };
+        }
+        return part;
+      }
+
+      const resp: unknown = part.functionResponse.response;
+      const newResp = collapseValue(resp);
+
+      if (newResp !== resp || hasNestedParts) {
+        partsModified = true;
+        const { parts: _parts, ...cleanFunctionResponse } =
+          part.functionResponse;
+        return {
+          ...part,
+          functionResponse: {
+            ...cleanFunctionResponse,
+            // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+            response: newResp as Record<string, unknown>,
+          },
+        };
+      }
+
+      return part;
+    });
+
+    if (partsModified) {
+      modified = true;
+      return { ...content, parts: newParts };
+    }
+    return content;
+  });
+
+  return modified ? newHistory : history;
+}
+
+/**
+ * The fraction of the latest chat history to keep. A value of 0.3
+ * means that only the last 30% of the chat history will be kept after compression.
+ */
+const COMPRESSION_PRESERVE_THRESHOLD = 0.3;
+
+/**
+ * The budget for function response tokens in the preserved history.
+ */
+const COMPRESSION_FUNCTION_RESPONSE_TOKEN_BUDGET = 50_000;
+
+/**
+ * Returns the index of the oldest item to keep when compressing. May return
+ * contents.length which indicates that everything should be compressed.
+ *
+ * Exported for testing purposes.
+ */
+export function findCompressSplitPoint(
+  contents: Content[],
+  fraction: number,
+): number {
+  if (fraction <= 0 || fraction >= 1) {
+    throw new Error('Fraction must be between 0 and 1');
+  }
+
+  const charCounts = contents.map((content) => JSON.stringify(content).length);
+  const totalCharCount = charCounts.reduce((a, b) => a + b, 0);
+  const targetCharCount = totalCharCount * fraction;
+
+  let lastSplitPoint = 0; // 0 is always valid (compress nothing)
+  let cumulativeCharCount = 0;
+  for (let i = 0; i < contents.length; i++) {
+    const content = contents[i];
+    if (
+      content.role === 'user' &&
+      !content.parts?.some((part) => !!part.functionResponse)
+    ) {
+      if (cumulativeCharCount >= targetCharCount) {
+        return i;
+      }
+      lastSplitPoint = i;
+    }
+    cumulativeCharCount += charCounts[i];
+  }
+
+  // We found no split points after targetCharCount.
+  // Check if it's safe to compress everything.
+  const lastContent = contents[contents.length - 1];
+  if (
+    lastContent?.role === 'model' &&
+    !lastContent?.parts?.some((part) => part.functionCall)
+  ) {
+    return contents.length;
+  }
+
+  // Can't compress everything so just compress at last splitpoint.
+  return lastSplitPoint;
+}
+
+export function modelStringToModelConfigAlias(_model: string): string {
+  return 'chat-compression-default';
+}
+
+/**
+ * Processes the chat history to ensure function responses don't exceed a specific token budget.
+ *
+ * This function implements a "Reverse Token Budget" strategy:
+ * 1. It iterates through the history from the most recent turn to the oldest.
+ * 2. It keeps a running tally of tokens used by function responses.
+ * 3. Recent tool outputs are preserved in full to maintain high-fidelity context for the current turn.
+ * 4. Once the budget (COMPRESSION_FUNCTION_RESPONSE_TOKEN_BUDGET) is exceeded, any older large
+ *    tool responses are truncated to their last 30 lines and saved to a temporary file.
+ *
+ * This ensures that compression effectively reduces context size even when recent turns
+ * contain massive tool outputs (like large grep results or logs).
+ */
+async function truncateHistoryToBudget(
+  history: readonly Content[],
+  config: Config,
+): Promise<Content[]> {
+  let functionResponseTokenCounter = 0;
+  const truncatedHistory: Content[] = [];
+
+  // Iterate backwards: newest messages first to prioritize their context.
+  for (let i = history.length - 1; i >= 0; i--) {
+    const content = history[i];
+    const newParts = [];
+
+    if (content.parts) {
+      // Process parts of the message backwards as well.
+      for (let j = content.parts.length - 1; j >= 0; j--) {
+        const part = content.parts[j];
+
+        if (part.functionResponse) {
+          const responseObj = part.functionResponse.response;
+          // Ensure we have a string representation to truncate.
+          // If the response is an object, we try to extract a primary string field (output or content).
+          let contentStr: string;
+          if (typeof responseObj === 'string') {
+            contentStr = responseObj;
+          } else if (responseObj && typeof responseObj === 'object') {
+            if (
+              'output' in responseObj &&
+              // eslint-disable-next-line no-restricted-syntax
+              typeof responseObj['output'] === 'string'
+            ) {
+              contentStr = responseObj['output'];
+            } else if (
+              'content' in responseObj &&
+              // eslint-disable-next-line no-restricted-syntax
+              typeof responseObj['content'] === 'string'
+            ) {
+              contentStr = responseObj['content'];
+            } else {
+              contentStr = JSON.stringify(responseObj, null, 2);
+            }
+          } else {
+            contentStr = JSON.stringify(responseObj, null, 2);
+          }
+
+          contentStr = contentStr ?? '';
+          const nestedParts: Part[] = part.functionResponse.parts ?? [];
+          if (!contentStr && nestedParts.length > 0) {
+            contentStr =
+              nestedParts
+                .map(
+                  (p) =>
+                    p.text ||
+                    (p.inlineData
+                      ? `[Inline Data: ${p.inlineData.mimeType}]`
+                      : ''),
+                )
+                .filter(Boolean)
+                .join('\n') || JSON.stringify(nestedParts, null, 2);
+          }
+          const nestedTokens =
+            nestedParts.length > 0 ? estimateTokenCountSync(nestedParts) : 0;
+          const textTokens = estimateTokenCountSync([{ text: contentStr }]);
+          const tokens = textTokens + nestedTokens;
+
+          if (
+            functionResponseTokenCounter + tokens >
+            COMPRESSION_FUNCTION_RESPONSE_TOKEN_BUDGET
+          ) {
+            const toolName =
+              part.functionResponse.name?.trim() || 'generic_tool';
+            if (
+              part.functionResponse.response !== undefined &&
+              nestedParts.length > 0 &&
+              functionResponseTokenCounter + textTokens <=
+                COMPRESSION_FUNCTION_RESPONSE_TOKEN_BUDGET
+            ) {
+              newParts.unshift({
+                functionResponse: {
+                  id: part.functionResponse.id,
+                  name: toolName,
+                  response: part.functionResponse.response,
+                },
+              });
+              functionResponseTokenCounter += textTokens;
+            } else {
+              try {
+                // Budget exceeded: Truncate this response.
+                const { outputFile } = await saveTruncatedToolOutput(
+                  contentStr,
+                  toolName,
+                  config.getNextCompressionTruncationId(),
+                  config.storage.getProjectTempDir(),
+                );
+
+                const truncatedMessage = formatTruncatedToolOutput(
+                  contentStr,
+                  outputFile,
+                  config.getTruncateToolOutputThreshold(),
+                );
+
+                newParts.unshift({
+                  functionResponse: {
+                    id: part.functionResponse.id,
+                    name: toolName,
+                    response: { output: truncatedMessage },
+                  },
+                });
+
+                // Count the small truncated placeholder towards the budget.
+                functionResponseTokenCounter += estimateTokenCountSync([
+                  { text: truncatedMessage },
+                ]);
+              } catch (error) {
+                // Fallback: if truncation fails, keep the original part to avoid data loss in the chat.
+                debugLogger.debug(
+                  'Failed to truncate history to budget:',
+                  error,
+                );
+                newParts.unshift(part);
+                functionResponseTokenCounter += tokens;
+              }
+            }
+          } else {
+            // Within budget: keep the full response.
+            functionResponseTokenCounter += tokens;
+            newParts.unshift(part);
+          }
+        } else if (part.inlineData) {
+          const tokens = estimateTokenCountSync([part]);
+          if (
+            functionResponseTokenCounter + tokens >
+            COMPRESSION_FUNCTION_RESPONSE_TOKEN_BUDGET
+          ) {
+            const omittedPart: Part = {
+              text: OMITTED_BINARY_MESSAGE,
+            };
+            newParts.unshift(omittedPart);
+            functionResponseTokenCounter += estimateTokenCountSync([
+              omittedPart,
+            ]);
+          } else {
+            functionResponseTokenCounter += tokens;
+            newParts.unshift(part);
+          }
+        } else {
+          // Non-tool response part: always keep.
+          newParts.unshift(part);
+        }
+      }
+    }
+
+    // Reconstruct the message with processed (potentially truncated) parts.
+    truncatedHistory.unshift({ ...content, parts: newParts });
+  }
+
+  return truncatedHistory;
+}
+
+export class ChatCompressionService {
+  async compress(
+    chat: M31aChat,
+    promptId: string,
+    force: boolean,
+    model: string,
+    config: Config,
+    hasFailedCompressionAttempt: boolean,
+    abortSignal?: AbortSignal,
+  ): Promise<{ newHistory: Content[] | null; info: ChatCompressionInfo }> {
+    const curatedHistory = chat.getHistory(true);
+
+    // Regardless of `force`, don't do anything if the history is empty.
+    if (curatedHistory.length === 0) {
+      return {
+        newHistory: null,
+        info: {
+          originalTokenCount: 0,
+          newTokenCount: 0,
+          compressionStatus: CompressionStatus.NOOP,
+        },
+      };
+    }
+
+    // Fire PreCompress hook before compression
+    // This fires for both manual and auto compression attempts
+    const trigger = force ? PreCompressTrigger.Manual : PreCompressTrigger.Auto;
+    await config.getHookSystem()?.firePreCompressEvent(trigger);
+
+    const lastPromptTokenCount = chat.getLastPromptTokenCount();
+    const originalTokenCount =
+      lastPromptTokenCount > 0
+        ? lastPromptTokenCount
+        : estimateTokenCountSync(curatedHistory.flatMap((c) => c.parts || []));
+
+    // Don't compress if not forced and we are under the limit.
+    if (!force) {
+      const threshold =
+        (await config.getCompressionThreshold()) ??
+        DEFAULT_COMPRESSION_TOKEN_THRESHOLD;
+      const contextOverride = config.getContextWindowOverride?.();
+      const effectiveLimit =
+        contextOverride !== undefined
+          ? tokenLimit(model, contextOverride)
+          : tokenLimit(model);
+      const isOverModelThreshold =
+        originalTokenCount >= threshold * effectiveLimit;
+
+      if (!isOverModelThreshold) {
+        return {
+          newHistory: null,
+          info: {
+            originalTokenCount,
+            newTokenCount: originalTokenCount,
+            compressionStatus: CompressionStatus.NOOP,
+          },
+        };
+      }
+    }
+
+    // Apply token-based truncation to the entire history before splitting.
+    // This ensures that even the "to compress" portion is within safe limits for the summarization model.
+    const truncatedHistory = await truncateHistoryToBudget(
+      curatedHistory,
+      config,
+    );
+
+    // If summarization previously failed (and not forced), we only rely on truncation.
+    // We do NOT attempt to invoke the LLM for summarization again to avoid repeated failures/costs.
+    if (hasFailedCompressionAttempt && !force) {
+      const truncatedTokenCount = estimateTokenCountSync(
+        truncatedHistory.flatMap((c) => c.parts || []),
+      );
+
+      // If truncation reduced the size, we consider it a successful "compression" (truncation only).
+      if (truncatedTokenCount < originalTokenCount) {
+        return {
+          newHistory: truncatedHistory,
+          info: {
+            originalTokenCount,
+            newTokenCount: truncatedTokenCount,
+            compressionStatus: CompressionStatus.CONTENT_TRUNCATED,
+          },
+        };
+      }
+
+      return {
+        newHistory: null,
+        info: {
+          originalTokenCount,
+          newTokenCount: originalTokenCount,
+          compressionStatus: CompressionStatus.NOOP,
+        },
+      };
+    }
+
+    const splitPoint = findCompressSplitPoint(
+      truncatedHistory,
+      1 - COMPRESSION_PRESERVE_THRESHOLD,
+    );
+
+    const historyToCompressTruncated = truncatedHistory.slice(0, splitPoint);
+    const historyToKeepTruncated = truncatedHistory.slice(splitPoint);
+
+    if (historyToCompressTruncated.length === 0) {
+      return {
+        newHistory: null,
+        info: {
+          originalTokenCount,
+          newTokenCount: originalTokenCount,
+          compressionStatus: CompressionStatus.NOOP,
+        },
+      };
+    }
+
+    // High Fidelity Decision: Should we send the original or truncated history to the summarizer?
+    const originalHistoryToCompress = curatedHistory.slice(0, splitPoint);
+    const originalToCompressTokenCount = estimateTokenCountSync(
+      originalHistoryToCompress.flatMap((c) => c.parts || []),
+    );
+
+    const contextOverride = config.getContextWindowOverride?.();
+    const effectiveLimit =
+      contextOverride !== undefined
+        ? tokenLimit(model, contextOverride)
+        : tokenLimit(model);
+    const historyForSummarizer =
+      originalToCompressTokenCount < effectiveLimit
+        ? originalHistoryToCompress
+        : historyToCompressTruncated;
+
+    const hasPreviousSnapshot = historyForSummarizer.some((c) =>
+      c.parts?.some((p) => p.text?.includes('<state_snapshot>')),
+    );
+
+    const anchorInstruction = hasPreviousSnapshot
+      ? 'A previous <state_snapshot> exists in the history. You MUST integrate all still-relevant information from that snapshot into the new one, updating it with the more recent events. Do not lose established constraints or critical knowledge.'
+      : 'Generate a new <state_snapshot> based on the provided history.';
+
+    const summaryResponse = await config.getBaseLlmClient().generateContent({
+      modelConfigKey: { model: modelStringToModelConfigAlias(model) },
+      contents: [
+        ...historyForSummarizer,
+        {
+          role: 'user',
+          parts: [
+            {
+              text: `${anchorInstruction}\n\nFirst, reason in your scratchpad. Then, generate the updated <state_snapshot>.`,
+            },
+          ],
+        },
+      ],
+      systemInstruction: { text: getCompressionPrompt(config) },
+      promptId,
+      // TODO(joshualitt): wire up a sensible abort signal,
+      abortSignal: abortSignal ?? new AbortController().signal,
+      role: LlmRole.UTILITY_COMPRESSOR,
+    });
+    const summary = getResponseText(summaryResponse) ?? '';
+
+    // Phase 3: The "Probe" Verification (Self-Correction)
+    // We perform a second lightweight turn to ensure no critical information was lost.
+    const verificationResponse = await config
+      .getBaseLlmClient()
+      .generateContent({
+        modelConfigKey: { model: modelStringToModelConfigAlias(model) },
+        contents: [
+          ...historyForSummarizer,
+          {
+            role: 'model',
+            parts: [{ text: summary }],
+          },
+          {
+            role: 'user',
+            parts: [
+              {
+                text: 'Critically evaluate the <state_snapshot> you just generated. Did you omit any specific technical details, file paths, tool results, or user constraints mentioned in the history? If anything is missing or could be more precise, generate a FINAL, improved <state_snapshot>. Otherwise, repeat the exact same <state_snapshot> again.',
+              },
+            ],
+          },
+        ],
+        systemInstruction: { text: getCompressionPrompt(config) },
+        promptId: `${promptId}-verify`,
+        role: LlmRole.UTILITY_COMPRESSOR,
+        abortSignal: abortSignal ?? new AbortController().signal,
+      });
+
+    const finalSummary = (
+      getResponseText(verificationResponse)?.trim() || summary
+    ).trim();
+
+    if (!finalSummary) {
+      logChatCompression(
+        config,
+        makeChatCompressionEvent({
+          tokens_before: originalTokenCount,
+          tokens_after: originalTokenCount, // No change since it failed
+        }),
+      );
+      return {
+        newHistory: null,
+        info: {
+          originalTokenCount,
+          newTokenCount: originalTokenCount,
+          compressionStatus: CompressionStatus.COMPRESSION_FAILED_EMPTY_SUMMARY,
+        },
+      };
+    }
+
+    const extraHistory: Content[] = [
+      {
+        role: 'user',
+        parts: [{ text: finalSummary }],
+      },
+      {
+        role: 'model',
+        parts: [{ text: 'Got it. Thanks for the additional context!' }],
+      },
+      ...historyToKeepTruncated,
+    ];
+
+    // Use a shared utility to construct the initial history for an accurate token count.
+    const fullNewHistory = await getInitialChatHistory(config, extraHistory);
+
+    const newTokenCount = await calculateRequestTokenCount(
+      fullNewHistory.flatMap(
+        (c) => ('content' in c ? c.content.parts : c.parts) || [],
+      ),
+      config.getContentGenerator(),
+      model,
+    );
+
+    logChatCompression(
+      config,
+      makeChatCompressionEvent({
+        tokens_before: originalTokenCount,
+        tokens_after: newTokenCount,
+      }),
+    );
+
+    if (newTokenCount > originalTokenCount) {
+      return {
+        newHistory: null,
+        info: {
+          originalTokenCount,
+          newTokenCount,
+          compressionStatus:
+            CompressionStatus.COMPRESSION_FAILED_INFLATED_TOKEN_COUNT,
+        },
+      };
+    } else {
+      // Explicitly dereference old history slices so V8 GC can immediately reclaim memory
+      historyToCompressTruncated.length = 0;
+      originalHistoryToCompress.length = 0;
+
+      return {
+        newHistory: extraHistory,
+        info: {
+          originalTokenCount,
+          newTokenCount,
+          compressionStatus: CompressionStatus.COMPRESSED,
+        },
+      };
+    }
+  }
+}
+
+export const COMPACTION_PRECOMPUTE_LEAD_TOKENS = 60_000;
+
+/**
+ * Returns true when current context token count enters the pre-compaction lead
+ * window prior to hitting the active compression threshold ceiling.
+ */
+export function shouldPrecomputeCompression(
+  tokenCount: number,
+  modelLimit: number,
+  compressionThreshold: number = DEFAULT_COMPRESSION_TOKEN_THRESHOLD,
+): boolean {
+  if (tokenCount <= 0 || modelLimit <= 0 || compressionThreshold <= 0) {
+    return false;
+  }
+  const thresholdTokens = Math.floor(compressionThreshold * modelLimit);
+  if (thresholdTokens <= 0) {
+    return false;
+  }
+  const leadTrigger = Math.max(
+    Math.floor(thresholdTokens * 0.75),
+    thresholdTokens - COMPACTION_PRECOMPUTE_LEAD_TOKENS,
+  );
+  return tokenCount >= leadTrigger;
+}
+
+/**
+ * Deduplicates and caches background compression summaries triggered ahead of
+ * hard context-ceiling pressure so threshold compression can resolve quickly.
+ */
+export class CompactionPrecomputer {
+  private readonly inFlight = new Map<string, Promise<string | undefined>>();
+  private readonly ready = new Map<string, string>();
+
+  getStatus(key: string): 'idle' | 'pending' | 'ready' {
+    if (this.ready.has(key)) {
+      return 'ready';
+    }
+    if (this.inFlight.has(key)) {
+      return 'pending';
+    }
+    return 'idle';
+  }
+
+  maybePrecompute(
+    key: string,
+    tokenCount: number,
+    modelLimit: number,
+    computeFn: () => Promise<string>,
+    compressionThreshold: number = DEFAULT_COMPRESSION_TOKEN_THRESHOLD,
+  ): boolean {
+    if (
+      this.ready.has(key) ||
+      this.inFlight.has(key) ||
+      !shouldPrecomputeCompression(tokenCount, modelLimit, compressionThreshold)
+    ) {
+      return false;
+    }
+
+    const job = Promise.resolve()
+      .then(() => computeFn())
+      .then((summary) => {
+        const trimmed = summary.trim();
+        if (trimmed) {
+          this.ready.set(key, trimmed);
+          return trimmed;
+        }
+        return undefined;
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        this.inFlight.delete(key);
+      });
+
+    this.inFlight.set(key, job);
+    return true;
+  }
+
+  async waitFor(key: string): Promise<string | undefined> {
+    const existing = this.ready.get(key);
+    if (existing !== undefined) {
+      return existing;
+    }
+    const pending = this.inFlight.get(key);
+    if (pending) {
+      return pending;
+    }
+    return undefined;
+  }
+
+  consumePrecomputed(key: string): string | undefined {
+    const value = this.ready.get(key);
+    if (value !== undefined) {
+      this.ready.delete(key);
+    }
+    return value;
+  }
+
+  clear(): void {
+    this.ready.clear();
+    this.inFlight.clear();
+  }
+}

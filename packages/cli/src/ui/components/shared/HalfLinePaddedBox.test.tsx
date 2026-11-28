@@ -1,0 +1,119 @@
+/**
+ * @license
+ * Copyright 2025 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+import { renderWithProviders } from '../../../test-utils/render.js';
+import { HalfLinePaddedBox } from './HalfLinePaddedBox.js';
+import { Text, useIsScreenReaderEnabled } from 'ink';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { supportsTrueColor } from '@m31a/core';
+
+vi.mock('ink', async () => {
+  const actual = await vi.importActual('ink');
+  return {
+    ...actual,
+    useIsScreenReaderEnabled: vi.fn(() => false),
+  };
+});
+
+vi.mock('@m31a/core', async () => {
+  const actual = await vi.importActual('@m31a/core');
+  return {
+    ...actual,
+    supportsTrueColor: vi.fn(() => true),
+  };
+});
+
+describe('<HalfLinePaddedBox />', () => {
+  const mockUseIsScreenReaderEnabled = vi.mocked(useIsScreenReaderEnabled);
+  const mockSupportsTrueColor = vi.mocked(supportsTrueColor);
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('renders standard background and blocks when true color is supported', async () => {
+    mockSupportsTrueColor.mockReturnValue(true);
+
+    const { lastFrame, unmount } = await renderWithProviders(
+      <HalfLinePaddedBox backgroundBaseColor="blue" backgroundOpacity={0.5}>
+        <Text>Content</Text>
+      </HalfLinePaddedBox>,
+      { width: 10 },
+    );
+
+    expect(lastFrame()).toMatchSnapshot();
+
+    unmount();
+  });
+
+  it('renders alternative blocks when true color is not supported', async () => {
+    mockSupportsTrueColor.mockReturnValue(false);
+
+    const { lastFrame, unmount } = await renderWithProviders(
+      <HalfLinePaddedBox backgroundBaseColor="blue" backgroundOpacity={0.5}>
+        <Text>Content</Text>
+      </HalfLinePaddedBox>,
+      { width: 10 },
+    );
+
+    expect(lastFrame()).toMatchSnapshot();
+
+    unmount();
+  });
+
+  it('renders nothing when useBackgroundColor is false', async () => {
+    const { lastFrame, unmount } = await renderWithProviders(
+      <HalfLinePaddedBox
+        backgroundBaseColor="blue"
+        backgroundOpacity={0.5}
+        useBackgroundColor={false}
+      >
+        <Text>Content</Text>
+      </HalfLinePaddedBox>,
+      { width: 10 },
+    );
+
+    expect(lastFrame()).toMatchSnapshot();
+
+    unmount();
+  });
+
+  it('renders nothing when screen reader is enabled', async () => {
+    mockUseIsScreenReaderEnabled.mockReturnValue(true);
+
+    const { lastFrame, unmount } = await renderWithProviders(
+      <HalfLinePaddedBox backgroundBaseColor="blue" backgroundOpacity={0.5}>
+        <Text>Content</Text>
+      </HalfLinePaddedBox>,
+      { width: 10 },
+    );
+
+    expect(lastFrame()).toMatchSnapshot();
+
+    unmount();
+  });
+
+  it('handles zero and negative terminal widths without throwing', async () => {
+    const { lastFrame: frameZero, unmount: unmountZero } =
+      await renderWithProviders(
+        <HalfLinePaddedBox backgroundBaseColor="blue" backgroundOpacity={0.5}>
+          <Text>Content</Text>
+        </HalfLinePaddedBox>,
+        { width: 0 },
+      );
+    expect(frameZero()).toBeDefined();
+    unmountZero();
+
+    const { lastFrame: frameNeg, unmount: unmountNeg } =
+      await renderWithProviders(
+        <HalfLinePaddedBox backgroundBaseColor="blue" backgroundOpacity={0.5}>
+          <Text>Content</Text>
+        </HalfLinePaddedBox>,
+        { width: -5 },
+      );
+    expect(frameNeg()).toBeDefined();
+    unmountNeg();
+  });
+});

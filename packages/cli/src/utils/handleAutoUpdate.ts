@@ -1,0 +1,312 @@
+/**
+ * @license
+ * Copyright 2025 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { EventEmitter } from 'node:events';
+import type { UpdateObject } from '../ui/utils/updateCheck.js';
+import type { LoadedSettings } from '../config/settings.js';
+import { getInstallationInfo, PackageManager } from './installationInfo.js';
+import { MessageType, type HistoryItem } from '../ui/types.js';
+import { spawn } from 'node:child_process';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import semver from 'semver';
+import {
+  debugLogger,
+  getChannelFromVersion,
+  getPackageJson,
+  RELEASE_CHANNEL_STABILITY,
+} from '@m31a/core';
+
+export const updateEventEmitter = new EventEmitter();
+
+let _updateInProgress = false;
+
+/** @internal */
+export function _setUpdateStateForTesting(value: boolean) {
+  _updateInProgress = value;
+}
+
+export function isUpdateInProgress() {
+  return _updateInProgress;
+}
+
+/**
+ * Returns a promise that resolves when the update process completes or times out.
+ */
+export async function waitForUpdateCompletion(
+  timeoutMs = 30000,
+): Promise<void> {
+  if (!_updateInProgress) {
+    return;
+  }
+
+  debugLogger.log(
+    '\nM31A is waiting for a background update to complete before restarting...',
+  );
+
+  return new Promise((resolve) => {
+    // Re-check the condition inside the promise executor to avoid a race condition.
+    // If the update finished between the initial check and now, resolve immediately.
+    if (!_updateInProgress) {
+      resolve();
+      return;
+    }
+
+    const timer = setTimeout(cleanup, timeoutMs);
+
+    function cleanup() {
+      clearTimeout(timer);
+      updateEventEmitter.off('update-success', cleanup);
+      updateEventEmitter.off('update-failed', cleanup);
+      resolve();
+    }
+
+    updateEventEmitter.once('update-success', cleanup);
+    updateEventEmitter.once('update-failed', cleanup);
+  });
+}
+
+export function handleAutoUpdate(
+  info: UpdateObject | null,
+  settings: LoadedSettings,
+  projectRoot: string,
+  isSandboxEnabled: boolean,
+  spawnFn: typeof spawn = spawn,
+  getPackageJsonFn: (
+    cwd: string,
+  ) => Promise<
+    { name?: string; version?: string } | undefined
+  > = getPackageJson,
+) {
+  if (!info) {
+    return;
+  }
+
+  const rawCliPath = process.argv[1];
+  let resolvedCliPath: string | undefined;
+  if (rawCliPath) {
+    try {
+      resolvedCliPath = fs.realpathSync(rawCliPath);
+    } catch {
+      resolvedCliPath = path.resolve(rawCliPath);
+    }
+  }
+
+  const latestVersion = info.update?.latest ?? '';
+  if (!latestVersion || !semver.valid(latestVersion)) {
+    debugLogger.warn(
+      'Update check: latest version is missing or invalid. Skipping automatic update for safety.',
+    );
+    return;
+  }
+
+  if (isSandboxEnabled) {
+    updateEventEmitter.emit('update-info', {
+      message: `${info.message}\nAutomatic update is not available in sandbox mode.`,
+    });
+    return;
+  }
+
+  if (!settings.merged.general.enableAutoUpdateNotification) {
+    return;
+  }
+
+  const installationInfo = getInstallationInfo(
+    projectRoot,
+    settings.merged.general.enableAutoUpdate,
+  );
+
+  if (
+    [
+      PackageManager.NPX,
+      PackageManager.PNPX,
+      PackageManager.BUNX,
+      PackageManager.BINARY,
+    ].includes(installationInfo.packageManager)
+  ) {
+    return;
+  }
+
+  let combinedMessage = info.message;
+  if (installationInfo.updateMessage) {
+    combinedMessage += `\n${installationInfo.updateMessage}`;
+  }
+
+  if (
+    !installationInfo.updateCommand ||
+    !settings.merged.general.enableAutoUpdate
+  ) {
+    updateEventEmitter.emit('update-received', {
+      ...info,
+      message: combinedMessage,
+      isUpdating: false,
+    });
+    return;
+  }
+  updateEventEmitter.emit('update-received', {
+    ...info,
+    message: combinedMessage,
+    isUpdating: true,
+  });
+  if (_updateInProgress) {
+    return;
+  }
+
+  const currentVersion = info.update.current;
+  if (!currentVersion) {
+    debugLogger.warn(
+      'Update check: current version is missing. Skipping automatic update for safety.',
+    );
+    return;
+  }
+
+  const currentChannel = getChannelFromVersion(currentVersion);
+  const targetChannel = getChannelFromVersion(info.update.latest);
+
+  // Defense-in-depth: prevent updates to a less stable channel
+  if (
+    RELEASE_CHANNEL_STABILITY[targetChannel] <
+    RELEASE_CHANNEL_STABILITY[currentChannel]
+  ) {
+    return;
+  }
+
+  const isNightly = info.update.latest.includes('nightly');
+
+  const updateCommand = installationInfo.updateCommand.replace(
+    '@latest',
+    isNightly ? '@nightly' : `@${info.update.latest}`,
+  );
+  const updateProcess = spawnFn(updateCommand, {
+    stdio: 'ignore',
+    shell: true,
+    detached: true,
+  });
+
+  _updateInProgress = true;
+
+  // Un-reference the child process to allow the parent to exit independently.
+  updateProcess.unref();
+
+  updateProcess.on('close', async (code) => {
+    _updateInProgress = false;
+    if (code === 0) {
+      let isVerified = true;
+      try {
+        if (resolvedCliPath && info.update.latest) {
+          const checkDir = path.dirname(resolvedCliPath);
+          const updatedPkg = await getPackageJsonFn(checkDir);
+          if (
+            updatedPkg?.version &&
+            info.update.name &&
+            updatedPkg.name === info.update.name &&
+            semver.valid(updatedPkg.version) &&
+            semver.valid(info.update.latest) &&
+            semver.lt(updatedPkg.version, info.update.latest)
+          ) {
+            isVerified = false;
+          }
+        }
+      } catch (err) {
+        debugLogger.log('Failed to verify binary update version:', err);
+      }
+
+      if (!isVerified) {
+        updateEventEmitter.emit('update-failed', {
+          message: `Automatic update completed, but the active binary (${resolvedCliPath ?? process.argv[1] ?? 'unknown path'}) was not updated. It may be shadowed by another installation in your PATH. Please try updating manually:\n\n${updateCommand}`,
+        });
+        return;
+      }
+
+      updateEventEmitter.emit('update-success', {
+        message:
+          'Update successful! The new version will be used on your next run.',
+      });
+    } else {
+      updateEventEmitter.emit('update-failed', {
+        message: `Automatic update failed. Please try updating manually:\n\n${updateCommand}`,
+      });
+    }
+  });
+
+  updateProcess.on('error', (err) => {
+    _updateInProgress = false;
+    updateEventEmitter.emit('update-failed', {
+      message: `Automatic update failed. Please try updating manually. (error: ${err.message})\n\n${updateCommand}`,
+    });
+  });
+  return updateProcess;
+}
+
+export function setUpdateHandler(
+  addItem: (item: Omit<HistoryItem, 'id'>, timestamp: number) => void,
+  setUpdateInfo: (info: UpdateObject | null) => void,
+) {
+  let successfullyInstalled = false;
+  const handleUpdateReceived = (info: UpdateObject) => {
+    setUpdateInfo(info);
+    const savedMessage = info.message;
+    setTimeout(() => {
+      if (!successfullyInstalled) {
+        addItem(
+          {
+            type: MessageType.INFO,
+            text: savedMessage,
+          },
+          Date.now(),
+        );
+      }
+      setUpdateInfo(null);
+    }, 60000);
+  };
+
+  const handleUpdateFailed = (data?: { message: string }) => {
+    setUpdateInfo(null);
+    addItem(
+      {
+        type: MessageType.ERROR,
+        text:
+          data?.message ||
+          `Automatic update failed. Please try updating manually`,
+      },
+      Date.now(),
+    );
+  };
+
+  const handleUpdateSuccess = () => {
+    successfullyInstalled = true;
+    setUpdateInfo(null);
+    addItem(
+      {
+        type: MessageType.INFO,
+        text: `Update successful! The new version will be used on your next run.`,
+      },
+      Date.now(),
+    );
+  };
+
+  const handleUpdateInfo = (data: { message: string }) => {
+    addItem(
+      {
+        type: MessageType.INFO,
+        text: data.message,
+      },
+      Date.now(),
+    );
+  };
+
+  updateEventEmitter.on('update-received', handleUpdateReceived);
+  updateEventEmitter.on('update-failed', handleUpdateFailed);
+  updateEventEmitter.on('update-success', handleUpdateSuccess);
+  updateEventEmitter.on('update-info', handleUpdateInfo);
+
+  return () => {
+    updateEventEmitter.off('update-received', handleUpdateReceived);
+    updateEventEmitter.off('update-failed', handleUpdateFailed);
+    updateEventEmitter.off('update-success', handleUpdateSuccess);
+    updateEventEmitter.off('update-info', handleUpdateInfo);
+  };
+}

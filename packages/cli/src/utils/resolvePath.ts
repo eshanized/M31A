@@ -1,0 +1,26 @@
+/**
+ * @license
+ * Copyright 2025 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import * as path from 'node:path';
+import { homedir } from '@m31a/core';
+
+export function resolvePath(p: string): string {
+  if (!p) {
+    return '';
+  }
+  let expandedPath = p;
+  if (p.toLowerCase().startsWith('%userprofile%')) {
+    expandedPath = homedir() + p.substring('%userprofile%'.length);
+  } else if (
+    p === '~' ||
+    p.startsWith('~/') ||
+    (process.platform === 'win32' && p.startsWith('~\\'))
+  ) {
+    expandedPath = homedir() + p.substring(1);
+  }
+  const pathModule = process.platform === 'win32' ? path.win32 : path.posix;
+  return pathModule.normalize(expandedPath);
+}

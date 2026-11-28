@@ -1,0 +1,1393 @@
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import path from 'node:path';
+import { type FunctionCall } from '@m31a/genai';
+import {
+  SHELL_TOOL_NAMES,
+  REDIRECTION_NAMES,
+  initializeShellParsers,
+  parseCommandDetails,
+  parseCommandDetailsAsync,
+  isDefaultParseCommandDetails,
+  stripShellWrapper,
+  extractWrappedShellCommands,
+  hasRedirection,
+  hasRedirectionAsync,
+  isDefaultHasRedirection,
+  hasUnresolvedShellExpansion,
+  detectCommandSubstitution,
+  extractStringFromParseEntry,
+} from '../utils/shell-utils.js';
+import { runWithCommandParseCache } from '../utils/shell-parse-cache.js';
+import { parse as shellParse } from 'shell-quote';
+import { isSubpath } from '../utils/paths.js';
+import {
+  PolicyDecision,
+  type PolicyEngineConfig,
+  type PolicyRule,
+  type SafetyCheckerRule,
+  ApprovalMode,
+  type CheckResult,
+  ALWAYS_ALLOW_PRIORITY_FRACTION,
+} from './types.js';
+import { stableStringify } from './stable-stringify.js';
+import { SafeRegExp } from './safe-regex.js';
+import { debugLogger } from '../utils/debugLogger.js';
+import { isRecord } from '../utils/markdownUtils.js';
+import type { CheckerRunner } from '../safety/checker-runner.js';
+import { SafetyCheckDecision } from '../safety/protocol.js';
+import {
+  isBuildFile,
+  extractFilePathFromArgs,
+} from '../utils/buildFileUtils.js';
+import {
+  getToolAliases,
+  AGENT_TOOL_NAME,
+  EDIT_TOOL_NAMES,
+} from '../tools/tool-names.js';
+import { PARAM_ADDITIONAL_PERMISSIONS } from '../tools/definitions/base-declarations.js';
+import {
+  MCP_TOOL_PREFIX,
+  isMcpToolAnnotation,
+  parseMcpToolName,
+  formatMcpToolName,
+  isMcpToolName,
+} from '../tools/mcp-tool.js';
+import {
+  type SandboxManager,
+  NoopSandboxManager,
+  type SandboxPermissions,
+} from '../services/sandboxManager.js';
+
+const MAX_POLICY_WRAPPER_DEPTH = 5;
+
+function containsGitCommand(args: string[]): boolean {
+  if (!args || args.length === 0) return false;
+  const allowedPredecessors = new Set([
+    'sudo',
+    'env',
+    'time',
+    '&&',
+    '||',
+    ';',
+    '|',
+    '&',
+    '(',
+    '\\n',
+  ]);
+  return args.some((arg, index) => {
+    const trimmed = arg.trim();
+    if (!trimmed) return false;
+    const basename = path.basename(trimmed).toLowerCase();
+    if (basename !== 'git' && basename !== 'git.exe') {
+      return false;
+    }
+    let prevIndex = index - 1;
+    while (prevIndex >= 0 && /^[a-zA-Z_][a-zA-Z0-9_]*=/.test(args[prevIndex])) {
+      prevIndex--;
+    }
+    if (prevIndex >= 0) {
+      const prev = args[prevIndex].toLowerCase();
+      if (!allowedPredecessors.has(prev)) {
+        return false;
+      }
+    }
+    return true;
+  });
+}
+
+function isWildcardPattern(name: string): boolean {
+  return name === '*' || name.includes('*');
+}
+
+/**
+ * Checks if a tool call matches a wildcard pattern.
+ * Supports global (*) and the explicit MCP (*mcp_serverName_**) format.
+ */
+function matchesWildcard(
+  pattern: string,
+  toolName: string,
+  serverName: string | undefined,
+): boolean {
+  if (pattern === '*') {
+    return true;
+  }
+
+  if (pattern === `${MCP_TOOL_PREFIX}*`) {
+    return serverName !== undefined;
+  }
+
+  if (pattern.startsWith(MCP_TOOL_PREFIX) && pattern.endsWith('_*')) {
+    const expectedServerName = pattern.slice(MCP_TOOL_PREFIX.length, -2);
+    // 1. Must be an MCP tool call (has serverName)
+    // 2. Server name must match
+    // 3. Tool name must be properly qualified by that server
+    if (serverName === undefined || serverName !== expectedServerName) {
+      return false;
+    }
+    return toolName.startsWith(`${MCP_TOOL_PREFIX}${expectedServerName}_`);
+  }
+
+  // Not a recognized wildcard pattern, fallback to exact match just in case
+  return toolName === pattern;
+}
+
+/**
+ * Rejects a rule whose `argsPattern` is not a `SafeRegExp`.
+ *
+ * The type already requires `SafeRegExp`. This covers callers that are not
+ * type-checked, so that every pattern is evaluated by the linear-time engine.
+ */
+function assertSafeArgsPattern(
+  rule: PolicyRule | SafetyCheckerRule,
+  label: 'policy rule' | 'safety checker rule',
+): void {
+  const pattern: unknown = rule.argsPattern;
+  if (pattern !== undefined && !(pattern instanceof SafeRegExp)) {
+    throw new Error(
+      `Invalid ${label}: argsPattern must be created with SafeRegExp.compile(). ` +
+        `Native RegExp objects are not accepted. Source: ${rule.source || 'unknown'}`,
+    );
+  }
+}
+
+function ruleMatches(
+  rule: PolicyRule | SafetyCheckerRule,
+  toolCall: FunctionCall,
+  stringifiedArgs: string | undefined,
+  serverName: string | undefined,
+  currentApprovalMode: ApprovalMode,
+  nonInteractive: boolean,
+  toolAnnotations?: Record<string, unknown>,
+  subagent?: string,
+): boolean {
+  // Check if rule applies to current approval mode
+  if (rule.modes && rule.modes.length > 0) {
+    if (!rule.modes.includes(currentApprovalMode)) {
+      return false;
+    }
+  }
+
+  // Check subagent if specified (only for PolicyRule, SafetyCheckerRule doesn't have it)
+  if ('subagent' in rule && rule.subagent !== undefined) {
+    if (rule.subagent !== subagent) {
+      return false;
+    }
+  }
+
+  // Strictly enforce mcpName identity if the rule dictates it
+  if (rule.mcpName !== undefined) {
+    if (rule.mcpName === '*') {
+      // Rule requires it to be ANY MCP tool
+      if (serverName === undefined) return false;
+    } else {
+      // Rule requires it to be a specific MCP server
+      if (serverName !== rule.mcpName) return false;
+    }
+  }
+
+  // Check tool name if specified
+  if (rule.toolName !== undefined) {
+    // Support wildcard patterns: "mcp_serverName_*" matches "mcp_serverName_anyTool"
+    if (rule.toolName === '*') {
+      // Match all tools
+    } else if (isWildcardPattern(rule.toolName)) {
+      if (
+        !toolCall.name ||
+        !matchesWildcard(rule.toolName, toolCall.name, serverName)
+      ) {
+        return false;
+      }
+    } else if (toolCall.name !== rule.toolName) {
+      // If names don't match exactly, check for MCP short/full name mismatches
+      let mcpMatch = false;
+      if (serverName && toolCall.name) {
+        // Case 1: Rule uses short name + mcpName -> match FQN tool call
+        if (rule.mcpName && !isMcpToolName(rule.toolName)) {
+          if (
+            toolCall.name === formatMcpToolName(rule.mcpName, rule.toolName)
+          ) {
+            mcpMatch = true;
+          }
+        }
+        // Case 2: Rule uses FQN -> match short tool call (qualified by serverName)
+        if (!mcpMatch && isMcpToolName(rule.toolName)) {
+          if (rule.toolName === formatMcpToolName(serverName, toolCall.name)) {
+            mcpMatch = true;
+          }
+        }
+      }
+
+      if (!mcpMatch) {
+        return false;
+      }
+    }
+  }
+
+  // Check annotations if specified
+  if (rule.toolAnnotations) {
+    if (!toolAnnotations) {
+      return false;
+    }
+    for (const [key, value] of Object.entries(rule.toolAnnotations)) {
+      if (toolAnnotations[key] !== value) {
+        return false;
+      }
+    }
+  }
+
+  // Check args pattern if specified
+  if (rule.argsPattern) {
+    // If rule has an args pattern but tool has no args, no match
+    if (!toolCall.args) {
+      return false;
+    }
+    // Use stable JSON stringification with sorted keys to ensure consistent matching.
+    // argsPattern is a SafeRegExp, so this runs on the linear-time engine and
+    // never on RegExp.prototype.test().
+    if (
+      stringifiedArgs === undefined ||
+      !rule.argsPattern.test(stringifiedArgs)
+    ) {
+      return false;
+    }
+  }
+
+  // Check interactive if specified
+  if ('interactive' in rule && rule.interactive !== undefined) {
+    if (rule.interactive && nonInteractive) {
+      return false;
+    }
+    if (!rule.interactive && !nonInteractive) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+export class PolicyEngine {
+  private rules: PolicyRule[];
+  private checkers: SafetyCheckerRule[];
+  private readonly defaultDecision: PolicyDecision;
+  private readonly nonInteractive: boolean;
+  private readonly disableAlwaysAllow: boolean;
+  private readonly checkerRunner?: CheckerRunner;
+  private approvalMode: ApprovalMode;
+  private readonly sandboxManager: SandboxManager;
+  private readonly isTrustedFolderFn?: () => boolean;
+
+  constructor(config: PolicyEngineConfig = {}, checkerRunner?: CheckerRunner) {
+    this.rules = (config.rules ?? []).sort(
+      (a, b) => (b.priority ?? 0) - (a.priority ?? 0),
+    );
+    this.checkers = (config.checkers ?? []).sort(
+      (a, b) => (b.priority ?? 0) - (a.priority ?? 0),
+    );
+
+    // Validate rules
+    for (const rule of this.rules) {
+      if (rule.toolName === undefined || rule.toolName === '') {
+        throw new Error(
+          `Invalid policy rule: toolName is required. Use '*' for all tools. Rule source: ${rule.source || 'unknown'}`,
+        );
+      }
+      if (rule.mcpName === '') {
+        throw new Error(
+          `Invalid policy rule: mcpName is required if specified (cannot be empty). Rule source: ${rule.source || 'unknown'}`,
+        );
+      }
+      if (rule.subagent === '') {
+        throw new Error(
+          `Invalid policy rule: subagent is required if specified (cannot be empty). Rule source: ${rule.source || 'unknown'}`,
+        );
+      }
+      assertSafeArgsPattern(rule, 'policy rule');
+    }
+
+    // Validate checkers
+    for (const checker of this.checkers) {
+      if (checker.toolName === undefined || checker.toolName === '') {
+        throw new Error(
+          `Invalid safety checker rule: toolName is required. Use '*' for all tools. Checker source: ${checker.source || 'unknown'}`,
+        );
+      }
+      if (checker.mcpName === '') {
+        throw new Error(
+          `Invalid safety checker rule: mcpName is required if specified (cannot be empty). Checker source: ${checker.source || 'unknown'}`,
+        );
+      }
+      assertSafeArgsPattern(checker, 'safety checker rule');
+    }
+
+    this.nonInteractive = config.nonInteractive ?? false;
+    this.defaultDecision =
+      config.defaultDecision ??
+      (this.nonInteractive ? PolicyDecision.DENY : PolicyDecision.ASK_USER);
+    this.disableAlwaysAllow = config.disableAlwaysAllow ?? false;
+    this.checkerRunner = checkerRunner;
+    this.approvalMode = config.approvalMode ?? ApprovalMode.DEFAULT;
+    this.sandboxManager = config.sandboxManager ?? new NoopSandboxManager();
+    this.isTrustedFolderFn = config.isTrustedFolder;
+  }
+
+  isTrustedFolder(): boolean {
+    if (this.isTrustedFolderFn) {
+      return this.isTrustedFolderFn();
+    }
+    return true;
+  }
+
+  /**
+   * Update the current approval mode.
+   */
+  setApprovalMode(mode: ApprovalMode): void {
+    this.approvalMode = mode;
+  }
+
+  /**
+   * Get the current approval mode.
+   */
+  getApprovalMode(): ApprovalMode {
+    return this.approvalMode;
+  }
+
+  private isAlwaysAllowRule(rule: PolicyRule): boolean {
+    return (
+      rule.priority !== undefined &&
+      Math.round((rule.priority % 1) * 1000) === ALWAYS_ALLOW_PRIORITY_FRACTION
+    );
+  }
+
+  private async shouldDowngradeForRedirection(
+    command: string,
+    allowRedirection?: boolean,
+    rule?: PolicyRule,
+  ): Promise<boolean> {
+    if (allowRedirection) return false;
+    const redirected = isDefaultHasRedirection(hasRedirection)
+      ? await hasRedirectionAsync(command)
+      : hasRedirection(command);
+    if (!redirected) return false;
+
+    // Require explicit allowRedirection when matching a command-prefix rule.
+    if (rule?.argsPattern && !allowRedirection) {
+      return true;
+    }
+
+    // Do not downgrade (do not ask user) if in AUTO_EDIT or YOLO mode.
+    // These modes trust the agent's actions (YOLO) or specific task (AUTO_EDIT).
+    if (
+      this.approvalMode === ApprovalMode.AUTO_EDIT ||
+      this.approvalMode === ApprovalMode.YOLO
+    ) {
+      return false;
+    }
+
+    return true;
+  }
+
+  private shouldDowngradeForCommandSubstitution(
+    command: string,
+    allowCommandSubstitution?: boolean,
+    rule?: PolicyRule,
+  ): boolean {
+    if (allowCommandSubstitution ?? false) {
+      return false;
+    }
+    if (!detectCommandSubstitution(stripShellWrapper(command))) {
+      return false;
+    }
+
+    // Require explicit allowCommandSubstitution when matching a command-prefix rule.
+    if (rule?.argsPattern !== undefined) {
+      return true;
+    }
+
+    // Do not downgrade (do not ask user) if in YOLO mode for catch-all rules.
+    if (this.approvalMode === ApprovalMode.YOLO) {
+      return false;
+    }
+
+    return true;
+  }
+
+  /**
+   * Check if a shell command is allowed.
+   */
+  private async applyShellHeuristics(
+    command: string,
+    decision: PolicyDecision,
+    dir_path?: string,
+  ): Promise<PolicyDecision> {
+    if (decision === PolicyDecision.DENY) {
+      return PolicyDecision.DENY;
+    }
+    await initializeShellParsers();
+    try {
+      const parsedObjArgs = shellParse(command);
+      const parsedArgs = parsedObjArgs.map(extractStringFromParseEntry);
+
+      const workspace =
+        typeof this.sandboxManager.getWorkspace === 'function'
+          ? this.sandboxManager.getWorkspace()
+          : process.cwd();
+      const effectiveCwd = dir_path
+        ? path.resolve(workspace, dir_path)
+        : workspace;
+
+      if (
+        effectiveCwd !== workspace &&
+        !isSubpath(workspace, effectiveCwd) &&
+        this.approvalMode !== ApprovalMode.YOLO
+      ) {
+        debugLogger.debug(
+          `[PolicyEngine.check] Command working directory is outside workspace, forcing ASK_USER: ${command}`,
+        );
+        return PolicyDecision.ASK_USER;
+      }
+
+      if (containsGitCommand(parsedArgs) && !this.isTrustedFolder()) {
+        debugLogger.debug(
+          `[PolicyEngine.check] Git command evaluated in untrusted workspace. Forcing ASK_USER: ${command}`,
+        );
+        return PolicyDecision.ASK_USER;
+      }
+
+      if (this.sandboxManager.isDangerousCommand(parsedArgs, effectiveCwd)) {
+        if (this.approvalMode === ApprovalMode.YOLO) {
+          debugLogger.debug(
+            `[PolicyEngine.check] Command evaluated as dangerous, but YOLO mode is active. Preserving decision: ${command}`,
+          );
+          return decision;
+        }
+
+        debugLogger.debug(
+          `[PolicyEngine.check] Command evaluated as dangerous, forcing ASK_USER: ${command}`,
+        );
+        return PolicyDecision.ASK_USER;
+      }
+
+      if (
+        this.sandboxManager.isKnownSafeCommand(parsedArgs, effectiveCwd) &&
+        decision === PolicyDecision.ASK_USER
+      ) {
+        if (effectiveCwd !== workspace && !isSubpath(workspace, effectiveCwd)) {
+          debugLogger.debug(
+            `[PolicyEngine.check] dir_path evaluated outside workspace. Preserving ASK_USER: ${command}`,
+          );
+          return PolicyDecision.ASK_USER;
+        }
+
+        if (containsGitCommand(parsedArgs) && !this.isTrustedFolder()) {
+          debugLogger.debug(
+            `[PolicyEngine.check] Known safe Git command evaluated in untrusted workspace. Preserving ASK_USER: ${command}`,
+          );
+          return PolicyDecision.ASK_USER;
+        }
+
+        // The classifier sees the unexpanded text, so it can't vouch for
+        // arguments that bash rewrites before the command runs.
+        if (hasUnresolvedShellExpansion(command)) {
+          debugLogger.debug(
+            `[PolicyEngine.check] Command contains unresolved shell expansion, preserving ASK_USER: ${command}`,
+          );
+          return PolicyDecision.ASK_USER;
+        }
+
+        debugLogger.debug(
+          `[PolicyEngine.check] Command evaluated as known safe, overriding ASK_USER to ALLOW: ${command}`,
+        );
+        return PolicyDecision.ALLOW;
+      }
+    } catch {
+      // Ignore parsing errors
+    }
+    return decision;
+  }
+
+  private async checkShellCommand(
+    toolName: string,
+    command: string | undefined,
+    ruleDecision: PolicyDecision,
+    serverName: string | undefined,
+    dir_path: string | undefined,
+    allowRedirection?: boolean,
+    rule?: PolicyRule,
+    toolAnnotations?: Record<string, unknown>,
+    subagent?: string,
+    hasTopLevelHeuristicDowngrade = false,
+    wrapperDepth = 0,
+  ): Promise<CheckResult> {
+    if (!command) {
+      return {
+        decision: ruleDecision,
+        rule,
+      };
+    }
+
+    if (ruleDecision === PolicyDecision.DENY) {
+      return { decision: PolicyDecision.DENY, rule };
+    }
+
+    if (wrapperDepth >= MAX_POLICY_WRAPPER_DEPTH) {
+      debugLogger.debug(
+        `[PolicyEngine.check] Shell wrapper nesting exceeded depth limit (${MAX_POLICY_WRAPPER_DEPTH}), failing closed: ${command}`,
+      );
+      return {
+        decision: this.nonInteractive
+          ? PolicyDecision.DENY
+          : PolicyDecision.ASK_USER,
+        rule: undefined,
+      };
+    }
+
+    await initializeShellParsers();
+    const parsed = isDefaultParseCommandDetails(parseCommandDetails)
+      ? await parseCommandDetailsAsync(command)
+      : parseCommandDetails(command);
+    const subCommands = parsed?.details ?? [];
+
+    // Handle parser failures or syntax errors
+    if (subCommands.length === 0 || parsed?.hasError) {
+      if (this.approvalMode === ApprovalMode.YOLO) {
+        // Block execution if arguments cannot be validated
+        if (rule?.argsPattern) {
+          debugLogger.debug(
+            `[PolicyEngine.check] Parsing failed for restricted rule, forcing DENY: ${command}`,
+          );
+          return { decision: PolicyDecision.DENY, rule };
+        }
+        // Allow if no argument restrictions apply
+        return {
+          decision: PolicyDecision.ALLOW,
+          rule,
+        };
+      }
+
+      debugLogger.debug(
+        `[PolicyEngine.check] Command parsing failed for: ${command}. Falling back to ${this.defaultDecision}.`,
+      );
+
+      // Parsing logic failed, we can't trust it. Use default decision ASK_USER (or DENY in non-interactive).
+      return {
+        decision: this.defaultDecision,
+        rule,
+      };
+    }
+
+    debugLogger.debug(
+      `[PolicyEngine.check] Validating shell command: ${subCommands.length} parts`,
+    );
+
+    // Start with the decision from the rule or heuristics.
+    // If the tool call was already downgraded (e.g. by heuristics), we start there.
+    let aggregateDecision = ruleDecision;
+
+    // If heuristics downgraded the decision, we don't blame the rule.
+    let responsibleRule: PolicyRule | undefined =
+      rule && ruleDecision === rule.decision ? rule : undefined;
+
+    // Check for redirection on the full command string.
+    // Redirection always downgrades ALLOW to ASK_USER (it never upgrades).
+    const hasTopLevelRedirectionDowngrade =
+      await this.shouldDowngradeForRedirection(command, allowRedirection, rule);
+    if (hasTopLevelRedirectionDowngrade) {
+      if (aggregateDecision === PolicyDecision.ALLOW) {
+        debugLogger.debug(
+          `[PolicyEngine.check] Downgrading ALLOW to ASK_USER for redirected command: ${command}`,
+        );
+        aggregateDecision = PolicyDecision.ASK_USER;
+        responsibleRule = undefined; // Inherent policy
+      }
+    }
+
+    const hasTopLevelCommandSubstitutionDowngrade =
+      this.shouldDowngradeForCommandSubstitution(
+        command,
+        rule?.allowCommandSubstitution,
+        rule,
+      );
+    if (hasTopLevelCommandSubstitutionDowngrade) {
+      if (aggregateDecision === PolicyDecision.ALLOW) {
+        debugLogger.debug(
+          `[PolicyEngine.check] Downgrading ALLOW to ASK_USER for command substitution: ${command}`,
+        );
+        aggregateDecision = PolicyDecision.ASK_USER;
+        responsibleRule = undefined;
+      }
+    }
+
+    let evaluatedSubCommands = 0;
+    let allSubCommandsExplicitlyAllowed = true;
+    let lastAllowedSubRule: PolicyRule | undefined;
+    const checkedWrappedPayloads = new Set<string>();
+
+    const checkExtractedPayloads = async (
+      sourceCommand: string,
+      alreadyStripped?: string,
+    ): Promise<CheckResult | null> => {
+      if (typeof extractWrappedShellCommands !== 'function') {
+        return null;
+      }
+      const extracted = extractWrappedShellCommands(sourceCommand);
+      if (extracted.some((payload) => payload.uninspectable)) {
+        allSubCommandsExplicitlyAllowed = false;
+        if (aggregateDecision === PolicyDecision.ALLOW) {
+          aggregateDecision = PolicyDecision.ASK_USER;
+          responsibleRule = undefined;
+        }
+      }
+      const extraPayloads = extracted
+        .filter((payload) => !payload.uninspectable)
+        .map((payload) => payload.command.trim())
+        .filter(
+          (payload) =>
+            Boolean(payload) &&
+            payload !== sourceCommand &&
+            payload !== alreadyStripped &&
+            !checkedWrappedPayloads.has(payload),
+        );
+      if (extraPayloads.length === 0) {
+        return null;
+      }
+      for (const wrappedPayload of new Set(extraPayloads)) {
+        checkedWrappedPayloads.add(wrappedPayload);
+        const wrappedResult = await this.checkInternal(
+          { name: toolName, args: { command: wrappedPayload, dir_path } },
+          serverName,
+          toolAnnotations,
+          subagent,
+          Boolean(rule?.argsPattern),
+          wrapperDepth + 1,
+        );
+        if (wrappedResult.decision === PolicyDecision.DENY) {
+          return wrappedResult;
+        }
+        if (wrappedResult.decision === PolicyDecision.ASK_USER) {
+          allSubCommandsExplicitlyAllowed = false;
+          if (aggregateDecision === PolicyDecision.ALLOW) {
+            responsibleRule = wrappedResult.rule;
+          } else {
+            responsibleRule ??= wrappedResult.rule;
+          }
+          aggregateDecision = PolicyDecision.ASK_USER;
+        } else if (
+          wrappedResult.decision === PolicyDecision.ALLOW &&
+          wrappedResult.rule?.decision === PolicyDecision.ALLOW &&
+          Boolean(wrappedResult.rule?.argsPattern)
+        ) {
+          lastAllowedSubRule = wrappedResult.rule;
+        } else {
+          allSubCommandsExplicitlyAllowed = false;
+        }
+      }
+      return null;
+    };
+
+    for (const detail of subCommands) {
+      if (REDIRECTION_NAMES.has(detail.name)) {
+        continue;
+      }
+
+      const subCmd = detail.text.trim();
+      const isAtomic =
+        subCmd === command ||
+        (detail.startIndex === 0 && detail.text.length === command.length);
+
+      // Recursive check for shell wrappers (bash -c, etc.)
+      const stripped = stripShellWrapper(subCmd);
+      if (stripped !== subCmd) {
+        checkedWrappedPayloads.add(stripped);
+        evaluatedSubCommands++;
+        const wrapperResult = await this.checkInternal(
+          { name: toolName, args: { command: stripped, dir_path } },
+          serverName,
+          toolAnnotations,
+          subagent,
+          true,
+          wrapperDepth + 1,
+        );
+
+        if (wrapperResult.decision === PolicyDecision.DENY)
+          return wrapperResult;
+        if (wrapperResult.decision === PolicyDecision.ASK_USER) {
+          allSubCommandsExplicitlyAllowed = false;
+          if (aggregateDecision === PolicyDecision.ALLOW) {
+            responsibleRule = wrapperResult.rule;
+          } else {
+            responsibleRule ??= wrapperResult.rule;
+          }
+          aggregateDecision = PolicyDecision.ASK_USER;
+        } else if (
+          wrapperResult.decision === PolicyDecision.ALLOW &&
+          wrapperResult.rule?.decision === PolicyDecision.ALLOW &&
+          Boolean(wrapperResult.rule?.argsPattern)
+        ) {
+          lastAllowedSubRule = wrapperResult.rule;
+        } else {
+          allSubCommandsExplicitlyAllowed = false;
+        }
+      }
+
+      // Also recursively inspect inner payloads wrapped by prefix utilities,
+      // intermediate flags, trailing positional args, or Windows shell switches.
+      // These checks only restrict (DENY/ASK_USER) and never upgrade an
+      // unapproved outer wrapper to ALLOW.
+      const subPayloadDeny = await checkExtractedPayloads(subCmd, stripped);
+      if (subPayloadDeny) {
+        return subPayloadDeny;
+      }
+
+      if (!isAtomic) {
+        evaluatedSubCommands++;
+        const subResult = await this.checkInternal(
+          { name: toolName, args: { command: subCmd, dir_path } },
+          serverName,
+          toolAnnotations,
+          subagent,
+          true,
+          wrapperDepth,
+        );
+
+        if (subResult.decision === PolicyDecision.DENY) return subResult;
+
+        if (subResult.decision === PolicyDecision.ASK_USER) {
+          allSubCommandsExplicitlyAllowed = false;
+          if (aggregateDecision === PolicyDecision.ALLOW) {
+            responsibleRule = subResult.rule;
+          } else {
+            responsibleRule ??= subResult.rule;
+          }
+          aggregateDecision = PolicyDecision.ASK_USER;
+        }
+
+        // Downgrade if sub-command has redirection or disallowed substitution
+        if (
+          subResult.decision === PolicyDecision.ALLOW &&
+          ((await this.shouldDowngradeForRedirection(
+            subCmd,
+            subResult.rule?.allowRedirection ?? allowRedirection,
+            subResult.rule,
+          )) ||
+            this.shouldDowngradeForCommandSubstitution(
+              subCmd,
+              subResult.rule?.allowCommandSubstitution ??
+                rule?.allowCommandSubstitution,
+              subResult.rule,
+            ))
+        ) {
+          allSubCommandsExplicitlyAllowed = false;
+          if (aggregateDecision === PolicyDecision.ALLOW) {
+            aggregateDecision = PolicyDecision.ASK_USER;
+            responsibleRule = undefined;
+          }
+        } else if (
+          subResult.decision === PolicyDecision.ALLOW &&
+          subResult.rule?.decision === PolicyDecision.ALLOW &&
+          Boolean(subResult.rule?.argsPattern)
+        ) {
+          lastAllowedSubRule = subResult.rule;
+        } else {
+          allSubCommandsExplicitlyAllowed = false;
+        }
+      } else if (stripped === subCmd) {
+        allSubCommandsExplicitlyAllowed = false;
+      }
+    }
+
+    // Also inspect the full command for any wrapper payload split across AST
+    // redirections (e.g., `sh -c >/dev/null 'dangerous_cmd'`).
+    const topLevelPayloadDeny = await checkExtractedPayloads(command.trim());
+    if (topLevelPayloadDeny) {
+      return topLevelPayloadDeny;
+    }
+
+    const workspace =
+      typeof this.sandboxManager.getWorkspace === 'function'
+        ? this.sandboxManager.getWorkspace()
+        : process.cwd();
+    const effectiveCwd = dir_path
+      ? path.resolve(workspace, dir_path)
+      : workspace;
+    const isOutsideWorkspace =
+      effectiveCwd !== workspace &&
+      !isSubpath(workspace, effectiveCwd) &&
+      this.approvalMode !== ApprovalMode.YOLO;
+    const parsedObjArgs = shellParse(command);
+    const parsedArgs = parsedObjArgs.map(extractStringFromParseEntry);
+    const isUntrustedGit =
+      containsGitCommand(parsedArgs) && !this.isTrustedFolder();
+    const isDangerous =
+      this.approvalMode !== ApprovalMode.YOLO &&
+      this.sandboxManager.isDangerousCommand(parsedArgs, effectiveCwd);
+
+    // If the top-level compound command (e.g. a `for` loop or subshell) fell through
+    // to a catch-all ASK_USER rule without an argsPattern, but every decomposed
+    // sub-command explicitly matched an ALLOW rule with an argsPattern without redirection,
+    // and neither workspace boundary nor trust constraints are violated, upgrade to ALLOW.
+    if (
+      aggregateDecision === PolicyDecision.ASK_USER &&
+      !rule?.argsPattern &&
+      !hasTopLevelRedirectionDowngrade &&
+      !hasTopLevelCommandSubstitutionDowngrade &&
+      !hasTopLevelHeuristicDowngrade &&
+      !isOutsideWorkspace &&
+      !isUntrustedGit &&
+      !isDangerous &&
+      evaluatedSubCommands > 0 &&
+      allSubCommandsExplicitlyAllowed
+    ) {
+      aggregateDecision = PolicyDecision.ALLOW;
+      responsibleRule = lastAllowedSubRule;
+    }
+
+    return {
+      decision: aggregateDecision,
+      rule: aggregateDecision === ruleDecision ? rule : responsibleRule,
+    };
+  }
+
+  /**
+   * Check if a tool call is allowed based on the configured policies.
+   * Returns the decision and the matching rule (if any).
+   */
+  async check(
+    toolCall: FunctionCall,
+    serverName: string | undefined,
+    toolAnnotations?: Record<string, unknown>,
+    subagent?: string,
+    skipHeuristics = false,
+  ): Promise<CheckResult> {
+    return runWithCommandParseCache(() =>
+      this.checkInternal(
+        toolCall,
+        serverName,
+        toolAnnotations,
+        subagent,
+        skipHeuristics,
+      ),
+    );
+  }
+
+  private async checkInternal(
+    toolCall: FunctionCall,
+    serverName: string | undefined,
+    toolAnnotations?: Record<string, unknown>,
+    subagent?: string,
+    skipHeuristics = false,
+    wrapperDepth = 0,
+  ): Promise<CheckResult> {
+    // Case 1: Metadata injection is the primary and safest way to identify an MCP server.
+    // If we have explicit `_serverName` metadata (usually injected by tool-registry for active tools), use it.
+    if (!serverName && isMcpToolAnnotation(toolAnnotations)) {
+      serverName = toolAnnotations._serverName;
+    }
+
+    // Case 2: Fallback for static FQN strings (e.g. from TOML policies or allowed/excluded settings strings).
+    // These strings don't have active metadata objects associated with them during policy generation,
+    // so we must extract the server name from the qualified `mcp_{server}_{tool}` format.
+    if (!serverName && toolCall.name) {
+      const parsed = parseMcpToolName(toolCall.name);
+      if (parsed.serverName) {
+        serverName = parsed.serverName;
+      }
+    }
+
+    let stringifiedArgs: string | undefined;
+    // Compute stringified args once before the loop
+    if (
+      toolCall.args &&
+      (this.rules.some((rule) => rule.argsPattern) ||
+        this.checkers.some((checker) => checker.argsPattern))
+    ) {
+      stringifiedArgs = stableStringify(toolCall.args);
+    }
+
+    debugLogger.debug(
+      `[PolicyEngine.check] toolCall.name: ${toolCall.name}, stringifiedArgs: ${stringifiedArgs}`,
+    );
+
+    // Check for shell commands upfront to handle splitting
+    let isShellCommand = false;
+    let command: string | undefined;
+    let shellDirPath: string | undefined;
+
+    const toolName = toolCall.name;
+
+    if (toolName && SHELL_TOOL_NAMES.includes(toolName)) {
+      isShellCommand = true;
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+      const args = toolCall.args as { command?: string; dir_path?: string };
+      command = args?.command;
+      shellDirPath = args?.dir_path;
+    }
+
+    // Find the first matching rule (already sorted by priority)
+    let matchedRule: PolicyRule | undefined;
+    let decision: PolicyDecision | undefined;
+
+    // We also want to check legacy aliases for the tool name.
+    const toolNamesToTry = toolCall.name ? getToolAliases(toolCall.name) : [];
+
+    if (toolCall.name === AGENT_TOOL_NAME) {
+      if (isRecord(toolCall.args)) {
+        const subagentName = toolCall.args['agent_name'];
+        if (typeof subagentName === 'string') {
+          // Inject the subagent name as a virtual tool alias for transparent rule matching
+          toolNamesToTry.push(subagentName);
+        }
+      }
+    }
+
+    const toolCallsToTry: FunctionCall[] = [];
+    for (const name of toolNamesToTry) {
+      toolCallsToTry.push({ ...toolCall, name });
+    }
+
+    for (const rule of this.rules) {
+      if (this.disableAlwaysAllow && this.isAlwaysAllowRule(rule)) {
+        continue;
+      }
+
+      const match = toolCallsToTry.some((tc) =>
+        ruleMatches(
+          rule,
+          tc,
+          stringifiedArgs,
+          serverName,
+          this.approvalMode,
+          this.nonInteractive,
+          toolAnnotations,
+          subagent,
+        ),
+      );
+
+      if (match) {
+        debugLogger.debug(
+          `[PolicyEngine.check] MATCHED rule: toolName=${rule.toolName}, decision=${rule.decision}, priority=${rule.priority}, argsPattern=${rule.argsPattern?.source || 'none'}`,
+        );
+
+        let ruleDecision = rule.decision;
+        let hasTopLevelHeuristicDowngrade = false;
+        if (
+          !skipHeuristics &&
+          isShellCommand &&
+          command &&
+          !('commandPrefix' in rule) &&
+          !rule.argsPattern
+        ) {
+          const prevDecision = ruleDecision;
+          ruleDecision = await this.applyShellHeuristics(
+            command,
+            ruleDecision,
+            shellDirPath,
+          );
+          if (
+            prevDecision === PolicyDecision.ALLOW &&
+            ruleDecision === PolicyDecision.ASK_USER
+          ) {
+            hasTopLevelHeuristicDowngrade = true;
+          }
+        }
+
+        if (isShellCommand && toolName) {
+          const shellResult = await this.checkShellCommand(
+            toolName,
+            command,
+            ruleDecision,
+            serverName,
+            shellDirPath,
+            rule.allowRedirection,
+            rule,
+            toolAnnotations,
+            subagent,
+            hasTopLevelHeuristicDowngrade,
+            wrapperDepth,
+          );
+          decision = shellResult.decision;
+          matchedRule = shellResult.rule;
+          break;
+        } else {
+          decision = ruleDecision;
+          matchedRule = rule;
+          break;
+        }
+      }
+    }
+
+    // Default if no rule matched
+    if (decision === undefined) {
+      if (this.approvalMode === ApprovalMode.YOLO) {
+        debugLogger.debug(
+          `[PolicyEngine.check] NO MATCH in YOLO mode - using ALLOW`,
+        );
+        decision = PolicyDecision.ALLOW;
+      } else {
+        debugLogger.debug(
+          `[PolicyEngine.check] NO MATCH - using default decision: ${this.defaultDecision}`,
+        );
+        if (toolName && SHELL_TOOL_NAMES.includes(toolName)) {
+          let heuristicDecision = this.defaultDecision;
+          let hasTopLevelHeuristicDowngrade = false;
+          if (!skipHeuristics && command) {
+            const prevDecision = heuristicDecision;
+            heuristicDecision = await this.applyShellHeuristics(
+              command,
+              heuristicDecision,
+              shellDirPath,
+            );
+            if (
+              prevDecision === PolicyDecision.ALLOW &&
+              heuristicDecision === PolicyDecision.ASK_USER
+            ) {
+              hasTopLevelHeuristicDowngrade = true;
+            }
+          }
+
+          const shellResult = await this.checkShellCommand(
+            toolName,
+            command,
+            heuristicDecision,
+            serverName,
+            shellDirPath,
+            false,
+            undefined,
+            toolAnnotations,
+            subagent,
+            hasTopLevelHeuristicDowngrade,
+            wrapperDepth,
+          );
+          decision = shellResult.decision;
+          matchedRule = shellResult.rule;
+        } else {
+          decision = this.defaultDecision;
+        }
+      }
+    }
+
+    if (decision === PolicyDecision.ALLOW) {
+      const args = toolCall.args;
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+      const additionalPermissions = args?.[PARAM_ADDITIONAL_PERMISSIONS] as
+        | SandboxPermissions
+        | undefined;
+
+      const fsPerms = additionalPermissions?.fileSystem;
+      if (fsPerms) {
+        const workspace = this.sandboxManager.getWorkspace();
+        const readPaths = Array.isArray(fsPerms.read) ? fsPerms.read : [];
+        const writePaths = Array.isArray(fsPerms.write) ? fsPerms.write : [];
+        const allPaths = [...readPaths, ...writePaths];
+
+        for (const p of allPaths) {
+          if (
+            typeof p === 'string' &&
+            !isSubpath(workspace, p) &&
+            workspace !== p
+          ) {
+            debugLogger.debug(
+              `[PolicyEngine.check] Additional permission path '${p}' is outside workspace '${workspace}'. Downgrading to ASK_USER.`,
+            );
+            decision = PolicyDecision.ASK_USER;
+            break;
+          }
+        }
+      }
+
+      // Build File Protection: Always require user confirmation when modifying build configuration files
+      const isFileEditTool = toolNamesToTry.some((name) => {
+        if (
+          EDIT_TOOL_NAMES.has(name) ||
+          name === 'replace' ||
+          name === 'write_file'
+        ) {
+          return true;
+        }
+        const editKeywords = new Set([
+          'write',
+          'edit',
+          'replace',
+          'patch',
+          'update',
+          'create',
+          'append',
+          'save',
+        ]);
+        const tokens = name.toLowerCase().split(/[^a-z0-9]+/);
+        return tokens.some((token) => editKeywords.has(token));
+      });
+      if (isFileEditTool) {
+        let targetPath = extractFilePathFromArgs(toolCall.args);
+        if (targetPath) {
+          targetPath = targetPath.trim();
+          if (process.platform === 'win32') {
+            let end = targetPath.length;
+            while (
+              end > 0 &&
+              (targetPath[end - 1] === '.' || targetPath[end - 1] === ' ')
+            ) {
+              end--;
+            }
+            targetPath = targetPath.slice(0, end);
+          }
+        }
+        if (targetPath && isBuildFile(targetPath)) {
+          debugLogger.debug(
+            `[PolicyEngine.check] Target path '${targetPath}' is a build file. Downgrading to ASK_USER.`,
+          );
+          decision = this.nonInteractive
+            ? PolicyDecision.DENY
+            : PolicyDecision.ASK_USER;
+          matchedRule = {
+            toolName: toolCall.name ?? 'replace',
+            decision,
+            priority: Number.MAX_SAFE_INTEGER,
+            source: 'Build File Protection',
+            denyMessage:
+              'Modifying build configuration files requires explicit user confirmation',
+          };
+        }
+      }
+    }
+
+    // Safety checks
+    if (decision !== PolicyDecision.DENY && this.checkerRunner) {
+      for (const checkerRule of this.checkers) {
+        if (
+          ruleMatches(
+            checkerRule,
+            toolCall,
+            stringifiedArgs,
+            serverName,
+            this.approvalMode,
+            this.nonInteractive,
+            toolAnnotations,
+            subagent,
+          )
+        ) {
+          debugLogger.debug(
+            `[PolicyEngine.check] Running safety checker: ${checkerRule.checker.name}`,
+          );
+          try {
+            const result = await this.checkerRunner.runChecker(
+              toolCall,
+              checkerRule.checker,
+            );
+            if (result.decision === SafetyCheckDecision.DENY) {
+              debugLogger.debug(
+                `[PolicyEngine.check] Safety checker '${checkerRule.checker.name}' denied execution: ${result.reason}`,
+              );
+              return {
+                decision: PolicyDecision.DENY,
+                rule: matchedRule,
+              };
+            } else if (result.decision === SafetyCheckDecision.ASK_USER) {
+              debugLogger.debug(
+                `[PolicyEngine.check] Safety checker requested ASK_USER: ${result.reason}`,
+              );
+              decision = PolicyDecision.ASK_USER;
+            }
+          } catch (error) {
+            debugLogger.debug(
+              `[PolicyEngine.check] Safety checker '${checkerRule.checker.name}' threw an error:`,
+              error,
+            );
+            return {
+              decision: PolicyDecision.DENY,
+              rule: matchedRule,
+            };
+          }
+        }
+      }
+    }
+
+    if (this.nonInteractive && decision === PolicyDecision.ASK_USER) {
+      decision = PolicyDecision.DENY;
+    }
+
+    return {
+      decision,
+      rule: matchedRule,
+    };
+  }
+
+  /**
+   * Add a new rule to the policy engine.
+   */
+  addRule(rule: PolicyRule): void {
+    assertSafeArgsPattern(rule, 'policy rule');
+    this.rules.push(rule);
+    // Re-sort rules by priority
+    this.rules.sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
+  }
+
+  addChecker(checker: SafetyCheckerRule): void {
+    assertSafeArgsPattern(checker, 'safety checker rule');
+    this.checkers.push(checker);
+    this.checkers.sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
+  }
+
+  /**
+   * Remove rules matching a specific tier (priority band).
+   */
+  removeRulesByTier(tier: number): void {
+    this.rules = this.rules.filter(
+      (rule) => Math.floor(rule.priority ?? 0) !== tier,
+    );
+  }
+
+  /**
+   * Remove rules matching a specific source.
+   */
+  removeRulesBySource(source: string): void {
+    this.rules = this.rules.filter((rule) => rule.source !== source);
+  }
+
+  /**
+   * Remove checkers matching a specific tier (priority band).
+   */
+  removeCheckersByTier(tier: number): void {
+    this.checkers = this.checkers.filter(
+      (checker) => Math.floor(checker.priority ?? 0) !== tier,
+    );
+  }
+
+  /**
+   * Remove checkers matching a specific source.
+   */
+  removeCheckersBySource(source: string): void {
+    this.checkers = this.checkers.filter(
+      (checker) => checker.source !== source,
+    );
+  }
+
+  /**
+   * Remove rules for a specific tool.
+   * If source is provided, only rules matching that source are removed.
+   */
+  removeRulesForTool(toolName: string, source?: string): void {
+    this.rules = this.rules.filter(
+      (rule) =>
+        rule.toolName !== toolName ||
+        (source !== undefined && rule.source !== source),
+    );
+  }
+
+  /**
+   * Get all current rules.
+   */
+  getRules(): readonly PolicyRule[] {
+    return this.rules;
+  }
+
+  /**
+   * Check if a rule for a specific tool already exists.
+   * If ignoreDynamic is true, it only returns true if a rule exists that was NOT added by AgentRegistry.
+   */
+  hasRuleForTool(toolName: string, ignoreDynamic = false): boolean {
+    return this.rules.some(
+      (rule) =>
+        rule.toolName === toolName &&
+        (!ignoreDynamic || rule.source !== 'AgentRegistry (Dynamic)'),
+    );
+  }
+
+  getCheckers(): readonly SafetyCheckerRule[] {
+    return this.checkers;
+  }
+
+  /**
+   * Get tools that are effectively denied by the current rules.
+   * This takes into account:
+   * 1. Global rules (no argsPattern)
+   * 2. Priority order (higher priority wins)
+   * 3. Non-interactive mode (ASK_USER becomes DENY)
+   * 4. Annotation-based rules (when toolMetadata is provided)
+   *
+   * @param toolMetadata Optional map of tool names to their annotations.
+   *   When provided, annotation-based rules can match tools by their metadata.
+   *   When not provided, rules with toolAnnotations are skipped (conservative fallback).
+   */
+  getExcludedTools(
+    toolMetadata?: Map<string, Record<string, unknown>>,
+    allToolNames?: Set<string>,
+  ): Set<string> {
+    const excludedTools = new Set<string>();
+
+    if (!allToolNames) {
+      return excludedTools;
+    }
+
+    for (const toolName of allToolNames) {
+      const annotations = toolMetadata?.get(toolName);
+      const serverName = isMcpToolAnnotation(annotations)
+        ? annotations._serverName
+        : undefined;
+
+      let staticallyExcluded = false;
+      let matchFound = false;
+
+      // Evaluate rules in priority order (they are already sorted in constructor)
+      for (const rule of this.rules) {
+        if (this.disableAlwaysAllow && this.isAlwaysAllowRule(rule)) {
+          continue;
+        }
+
+        // Create a copy of the rule without argsPattern to see if it targets the tool
+        // regardless of the runtime arguments it might receive.
+        const ruleWithoutArgs: PolicyRule = { ...rule, argsPattern: undefined };
+        const toolCall: FunctionCall = { name: toolName, args: {} };
+
+        const appliesToTool = ruleMatches(
+          ruleWithoutArgs,
+          toolCall,
+          undefined, // stringifiedArgs
+          serverName,
+          this.approvalMode,
+          this.nonInteractive,
+          annotations,
+        );
+
+        if (appliesToTool) {
+          if (rule.argsPattern) {
+            // Exclusions only apply statically before arguments are known.
+            if (rule.decision !== PolicyDecision.DENY) {
+              // Conditionally allowed/asked based on args. Therefore NOT statically excluded.
+              staticallyExcluded = false;
+              matchFound = true;
+              break;
+            }
+            // If it's conditionally DENIED based on args, it means it's not unconditionally denied.
+            // We must keep evaluating lower priority rules to see the default/unconditional state.
+            continue;
+          } else {
+            // Unconditional rule for this tool
+            const decision = rule.decision;
+            staticallyExcluded = decision === PolicyDecision.DENY;
+            matchFound = true;
+            break;
+          }
+        }
+      }
+
+      if (!matchFound) {
+        // Fallback to default decision if no rule matches
+        const defaultDec = this.defaultDecision;
+        if (defaultDec === PolicyDecision.DENY) {
+          staticallyExcluded = true;
+        }
+      }
+
+      if (staticallyExcluded) {
+        excludedTools.add(toolName);
+      }
+    }
+
+    return excludedTools;
+  }
+}

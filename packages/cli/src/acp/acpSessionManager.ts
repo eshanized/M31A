@@ -1,0 +1,430 @@
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import {
+  type Config,
+  AuthType,
+  MCPServerConfig,
+  debugLogger,
+  startupProfiler,
+  convertSessionToClientHistory,
+  createPolicyUpdater,
+  Storage,
+} from '@m31a/core';
+import * as acp from '@agentclientprotocol/sdk';
+import { randomUUID } from 'node:crypto';
+import { loadSettings, type LoadedSettings } from '../config/settings.js';
+import { SessionSelector } from '../utils/sessionUtils.js';
+import { Session } from './acpSession.js';
+import { AcpFileSystemService } from './acpFileSystemService.js';
+import { getAcpErrorMessage } from './acpErrors.js';
+import { buildAvailableModels, buildAvailableModes } from './acpUtils.js';
+import { loadCliConfig, type CliArgs } from '../config/config.js';
+import { startAutoMemoryIfEnabled } from '../utils/autoMemory.js';
+
+export interface AuthDetails {
+  apiKey?: string;
+  baseUrl?: string;
+  customHeaders?: Record<string, string>;
+}
+
+export class AcpSessionManager {
+  private sessions: Map<string, Session> = new Map();
+  private clientCapabilities: acp.ClientCapabilities | undefined;
+
+  constructor(
+    private settings: LoadedSettings,
+    private argv: CliArgs,
+    private connection: acp.AgentSideConnection,
+  ) {}
+
+  setClientCapabilities(capabilities: acp.ClientCapabilities) {
+    this.clientCapabilities = capabilities;
+  }
+
+  getSession(sessionId: string): Session | undefined {
+    return this.sessions.get(sessionId);
+  }
+
+  async dispose(): Promise<void> {
+    const disposePromises = Array.from(this.sessions.entries()).map(
+      async ([sessionId, session]) => {
+        try {
+          await session.dispose();
+        } catch (err) {
+          debugLogger.error(`Error disposing session ${sessionId}: ${err}`);
+        }
+      },
+    );
+    await Promise.all(disposePromises);
+    this.sessions.clear();
+  }
+
+  async newSession(
+    { cwd, mcpServers }: acp.NewSessionRequest,
+    authDetails: AuthDetails,
+  ): Promise<acp.NewSessionResponse> {
+    const sessionId = randomUUID();
+    const loadedSettings = loadSettings(cwd);
+    const config = await this.newSessionConfig(
+      sessionId,
+      cwd,
+      mcpServers,
+      loadedSettings,
+    );
+
+    const authType =
+      loadedSettings.merged.security.auth.selectedType ||
+      AuthType.USE_NVIDIA_NIM;
+
+    let isAuthenticated = false;
+    let authErrorMessage = '';
+    try {
+      await config.refreshAuth(
+        authType,
+        authDetails.apiKey,
+        authDetails.baseUrl,
+        authDetails.customHeaders,
+      );
+      isAuthenticated = true;
+
+      // Validate NVIDIA NIM API key
+      const contentGeneratorConfig = config.getContentGeneratorConfig();
+      if (
+        authType === AuthType.USE_NVIDIA_NIM &&
+        (!contentGeneratorConfig || !contentGeneratorConfig.apiKey)
+      ) {
+        isAuthenticated = false;
+        authErrorMessage = 'NVIDIA API key is missing or not configured.';
+      }
+    } catch (e) {
+      isAuthenticated = false;
+      authErrorMessage = getAcpErrorMessage(e);
+      debugLogger.error(
+        `Authentication failed: ${e instanceof Error ? e.stack : e}`,
+      );
+    }
+
+    if (!isAuthenticated) {
+      try {
+        await config?.dispose?.();
+      } catch (disposeError) {
+        debugLogger.error(`Error disposing config: ${disposeError}`);
+      }
+      throw new acp.RequestError(
+        -32000,
+        authErrorMessage || 'Authentication required.',
+      );
+    }
+
+    let session: Session | undefined;
+    try {
+      if (this.clientCapabilities?.fs) {
+        const acpFileSystemService = new AcpFileSystemService(
+          this.connection,
+          sessionId,
+          this.clientCapabilities.fs,
+          config.getFileSystemService(),
+          cwd,
+        );
+        config.setFileSystemService(acpFileSystemService);
+      }
+
+      await config.initialize();
+      startupProfiler.flush(config);
+      startAutoMemoryIfEnabled(config);
+
+      const m31aClient = config.getM31aClient();
+
+      const chat = m31aClient.isInitialized?.()
+        ? m31aClient.getChat()
+        : await m31aClient.startChat();
+
+      session = new Session(
+        sessionId,
+        chat,
+        config,
+        this.connection,
+        this.settings,
+      );
+      this.sessions.set(sessionId, session);
+
+      const { availableModels, currentModelId } = buildAvailableModels(
+        config,
+        loadedSettings,
+      );
+
+      const response = {
+        sessionId,
+        modes: {
+          availableModes: buildAvailableModes(config.isPlanEnabled()),
+          currentModeId: config.getApprovalMode(),
+        },
+        models: {
+          availableModels,
+          currentModelId,
+        },
+      };
+
+      setTimeout(() => {
+        session?.sendAvailableCommands().catch((err) => {
+          debugLogger.error(`Error sending available commands: ${err}`);
+        });
+      }, 0);
+
+      return response;
+    } catch (error) {
+      if (session) {
+        this.sessions.delete(sessionId);
+        try {
+          await session.dispose();
+        } catch (disposeError) {
+          debugLogger.error(
+            `Error disposing session in newSession: ${disposeError}`,
+          );
+        }
+      } else if (config) {
+        try {
+          await config.dispose?.();
+        } catch (disposeError) {
+          debugLogger.error(
+            `Error disposing config in newSession: ${disposeError}`,
+          );
+        }
+      }
+      throw error;
+    }
+  }
+
+  async loadSession(
+    { sessionId, cwd, mcpServers }: acp.LoadSessionRequest,
+    authDetails: AuthDetails,
+  ): Promise<acp.LoadSessionResponse> {
+    if (!/^[a-zA-Z0-9-_]+$/.test(sessionId)) {
+      throw new acp.RequestError(-32602, 'Invalid session identifier format.');
+    }
+
+    const storage = new Storage(cwd);
+    await storage.initialize();
+    const sessionSelector = new SessionSelector(storage);
+
+    const { sessionData, sessionPath } = await sessionSelector.resolveSession(
+      sessionId,
+      { allowEmpty: true },
+    );
+
+    const existingSession = this.sessions.get(sessionId);
+    if (existingSession) {
+      try {
+        await existingSession.dispose();
+      } catch (err) {
+        debugLogger.error(
+          `Error disposing existing session ${sessionId}: ${err}`,
+        );
+      } finally {
+        this.sessions.delete(sessionId);
+      }
+    }
+
+    let config: Config | undefined;
+    let session: Session | undefined;
+    try {
+      config = await this.prepareSessionConfig(
+        sessionId,
+        cwd,
+        mcpServers,
+        authDetails,
+      );
+
+      await config.initialize();
+      startupProfiler.flush(config);
+      startAutoMemoryIfEnabled(config);
+
+      const messages = sessionData.messages ?? [];
+      const clientHistory = convertSessionToClientHistory(messages);
+
+      const m31aClient = config.getM31aClient();
+      await m31aClient.resumeChat(clientHistory, {
+        conversation: sessionData,
+        filePath: sessionPath,
+      });
+
+      session = new Session(
+        sessionId,
+        m31aClient.getChat(),
+        config,
+        this.connection,
+        this.settings,
+      );
+
+      this.sessions.set(sessionId, session);
+
+      const { availableModels, currentModelId } = buildAvailableModels(
+        config,
+        this.settings,
+      );
+
+      const response = {
+        modes: {
+          availableModes: buildAvailableModes(config.isPlanEnabled()),
+          currentModeId: config.getApprovalMode(),
+        },
+        models: {
+          availableModels,
+          currentModelId,
+        },
+      };
+
+      // Stream history back to client
+      try {
+        await session.streamHistory(messages);
+      } catch (err) {
+        debugLogger.error(`Error streaming history: ${err}`);
+      }
+
+      setTimeout(() => {
+        session?.sendAvailableCommands().catch((err) => {
+          debugLogger.error(`Error sending available commands: ${err}`);
+        });
+      }, 0);
+
+      return response;
+    } catch (error) {
+      if (session) {
+        this.sessions.delete(sessionId);
+        try {
+          await session.dispose();
+        } catch (disposeError) {
+          debugLogger.error(
+            `Error disposing session in loadSession: ${disposeError}`,
+          );
+        }
+      } else if (config) {
+        try {
+          await config.dispose?.();
+        } catch (disposeError) {
+          debugLogger.error(`Error disposing config: ${disposeError}`);
+        }
+      }
+      throw error;
+    }
+  }
+
+  private async prepareSessionConfig(
+    sessionId: string,
+    cwd: string,
+    mcpServers: acp.McpServer[],
+    authDetails: AuthDetails,
+  ): Promise<Config> {
+    const selectedAuthType =
+      this.settings.merged.security.auth.selectedType ||
+      AuthType.USE_NVIDIA_NIM;
+
+    // 1. Create config WITHOUT initializing it (no MCP servers started yet)
+    const config = await this.newSessionConfig(sessionId, cwd, mcpServers);
+
+    // 2. Authenticate BEFORE initializing configuration or starting MCP servers.
+    // This satisfies the security requirement to verify the user before executing
+    // potentially unsafe server definitions.
+    try {
+      await config.refreshAuth(
+        selectedAuthType,
+        authDetails.apiKey,
+        authDetails.baseUrl,
+        authDetails.customHeaders,
+      );
+    } catch (e) {
+      debugLogger.error(`Authentication failed: ${e}`);
+      try {
+        await config?.dispose?.();
+      } catch (disposeError) {
+        debugLogger.error(`Error disposing config: ${disposeError}`);
+      }
+      throw acp.RequestError.authRequired();
+    }
+
+    // 3. Set the ACP FileSystemService (if supported) before config initialization
+    try {
+      if (this.clientCapabilities?.fs) {
+        const acpFileSystemService = new AcpFileSystemService(
+          this.connection,
+          sessionId,
+          this.clientCapabilities.fs,
+          config.getFileSystemService(),
+          cwd,
+        );
+        config.setFileSystemService(acpFileSystemService);
+      }
+    } catch (e) {
+      try {
+        await config?.dispose?.();
+      } catch (disposeError) {
+        debugLogger.error(`Error disposing config: ${disposeError}`);
+      }
+      throw e;
+    }
+
+    return config;
+  }
+
+  async newSessionConfig(
+    sessionId: string,
+    cwd: string,
+    mcpServers: acp.McpServer[],
+    loadedSettings?: LoadedSettings,
+  ): Promise<Config> {
+    const currentSettings = loadedSettings || this.settings;
+    const mergedMcpServers = { ...currentSettings.merged.mcpServers };
+
+    for (const server of mcpServers) {
+      if (
+        'type' in server &&
+        (server.type === 'sse' || server.type === 'http')
+      ) {
+        // HTTP or SSE MCP server
+        const headers = Object.fromEntries(
+          server.headers.map(({ name, value }) => [name, value]),
+        );
+        mergedMcpServers[server.name] = new MCPServerConfig(
+          undefined, // command
+          undefined, // args
+          undefined, // env
+          undefined, // cwd
+          server.type === 'sse' ? server.url : undefined, // url (sse)
+          server.type === 'http' ? server.url : undefined, // httpUrl
+          headers,
+        );
+      } else if ('command' in server) {
+        // Stdio MCP server
+        const env: Record<string, string> = {};
+        for (const { name: envName, value } of server.env) {
+          env[envName] = value;
+        }
+        mergedMcpServers[server.name] = new MCPServerConfig(
+          server.command,
+          server.args,
+          env,
+          cwd,
+        );
+      }
+    }
+
+    const settings = {
+      ...currentSettings.merged,
+      mcpServers: mergedMcpServers,
+    };
+
+    const config = await loadCliConfig(settings, sessionId, this.argv, { cwd });
+
+    createPolicyUpdater(
+      config.getPolicyEngine(),
+      config.messageBus,
+      config.storage,
+    );
+
+    return config;
+  }
+}

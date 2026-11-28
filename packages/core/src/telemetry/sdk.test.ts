@@ -1,0 +1,351 @@
+/**
+ * @license
+ * Copyright 2025 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import type { Config } from '../config/config.js';
+import {
+  initializeTelemetry,
+  shutdownTelemetry,
+  bufferTelemetryEvent,
+} from './sdk.js';
+import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-grpc';
+import { OTLPLogExporter } from '@opentelemetry/exporter-logs-otlp-grpc';
+import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-grpc';
+import { OTLPTraceExporter as OTLPTraceExporterHttp } from '@opentelemetry/exporter-trace-otlp-http';
+import { OTLPLogExporter as OTLPLogExporterHttp } from '@opentelemetry/exporter-logs-otlp-http';
+import { OTLPMetricExporter as OTLPMetricExporterHttp } from '@opentelemetry/exporter-metrics-otlp-http';
+import { Metadata } from '@grpc/grpc-js';
+import { NodeSDK } from '@opentelemetry/sdk-node';
+import { TelemetryTarget } from './index.js';
+
+import * as os from 'node:os';
+import * as path from 'node:path';
+
+import { debugLogger } from '../utils/debugLogger.js';
+
+vi.mock('@opentelemetry/exporter-trace-otlp-grpc');
+vi.mock('@opentelemetry/exporter-logs-otlp-grpc');
+vi.mock('@opentelemetry/exporter-metrics-otlp-grpc');
+vi.mock('@opentelemetry/exporter-trace-otlp-http');
+vi.mock('@opentelemetry/exporter-logs-otlp-http');
+vi.mock('@opentelemetry/exporter-metrics-otlp-http');
+vi.mock('@opentelemetry/sdk-trace-node');
+vi.mock('@opentelemetry/sdk-node');
+vi.mock('../utils/debugLogger.js', () => ({
+  debugLogger: {
+    log: vi.fn(),
+    error: vi.fn(),
+    warn: vi.fn(),
+    debug: vi.fn(),
+  },
+}));
+
+describe('Telemetry SDK', () => {
+  let mockConfig: Config;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockConfig = {
+      getTelemetryEnabled: () => true,
+      getTelemetryOtlpEndpoint: () => 'http://localhost:4317',
+      getTelemetryOtlpProtocol: () => 'grpc',
+      getTelemetryOtlpHeaders: () => ({}),
+      getTelemetryTarget: () => 'local',
+      getTelemetryUseCollector: () => false,
+      getTelemetryOutfile: () => undefined,
+      getDebugMode: () => false,
+      getSessionId: () => 'test-session',
+      getTelemetryUseCliAuth: () => false,
+      isInteractive: () => false,
+      getExperiments: () => undefined,
+      getExperimentsAsync: async () => undefined,
+      getContentGeneratorConfig: () => undefined,
+    } as unknown as Config;
+  });
+
+  afterEach(async () => {
+    await shutdownTelemetry(mockConfig);
+  });
+
+  it('should use gRPC exporters when protocol is grpc', async () => {
+    await initializeTelemetry(mockConfig);
+
+    expect(OTLPTraceExporter).toHaveBeenCalledWith({
+      url: 'http://localhost:4317',
+      compression: 'gzip',
+    });
+    expect(OTLPLogExporter).toHaveBeenCalledWith({
+      url: 'http://localhost:4317',
+      compression: 'gzip',
+    });
+    expect(OTLPMetricExporter).toHaveBeenCalledWith({
+      url: 'http://localhost:4317',
+      compression: 'gzip',
+    });
+    expect(NodeSDK.prototype.start).toHaveBeenCalled();
+  });
+
+  it('should use HTTP exporters when protocol is http', async () => {
+    vi.spyOn(mockConfig, 'getTelemetryEnabled').mockReturnValue(true);
+    vi.spyOn(mockConfig, 'getTelemetryOtlpProtocol').mockReturnValue('http');
+    vi.spyOn(mockConfig, 'getTelemetryOtlpEndpoint').mockReturnValue(
+      'http://localhost:4318',
+    );
+
+    await initializeTelemetry(mockConfig);
+
+    expect(OTLPTraceExporterHttp).toHaveBeenCalledWith({
+      url: 'http://localhost:4318/v1/traces',
+    });
+    expect(OTLPLogExporterHttp).toHaveBeenCalledWith({
+      url: 'http://localhost:4318/v1/logs',
+    });
+    expect(OTLPMetricExporterHttp).toHaveBeenCalledWith({
+      url: 'http://localhost:4318/v1/metrics',
+    });
+    expect(NodeSDK.prototype.start).toHaveBeenCalled();
+  });
+
+  it('should pass custom headers to HTTP exporters when otlpHeaders is configured', async () => {
+    const customHeaders = {
+      Authorization: 'Bearer secret-token',
+      'x-api-key': 'my-api-key',
+    };
+    vi.spyOn(mockConfig, 'getTelemetryOtlpProtocol').mockReturnValue('http');
+    vi.spyOn(mockConfig, 'getTelemetryOtlpEndpoint').mockReturnValue(
+      'http://localhost:4318',
+    );
+    vi.spyOn(mockConfig, 'getTelemetryOtlpHeaders').mockReturnValue(
+      customHeaders,
+    );
+
+    await initializeTelemetry(mockConfig);
+
+    expect(OTLPTraceExporterHttp).toHaveBeenCalledWith({
+      url: 'http://localhost:4318/v1/traces',
+      headers: customHeaders,
+    });
+    expect(OTLPLogExporterHttp).toHaveBeenCalledWith({
+      url: 'http://localhost:4318/v1/logs',
+      headers: customHeaders,
+    });
+    expect(OTLPMetricExporterHttp).toHaveBeenCalledWith({
+      url: 'http://localhost:4318/v1/metrics',
+      headers: customHeaders,
+    });
+  });
+
+  it('should pass custom metadata to gRPC exporters when otlpHeaders is configured', async () => {
+    const customHeaders = {
+      Authorization: 'Bearer secret-token',
+      'x-api-key': 'my-api-key',
+    };
+    vi.spyOn(mockConfig, 'getTelemetryOtlpProtocol').mockReturnValue('grpc');
+    vi.spyOn(mockConfig, 'getTelemetryOtlpEndpoint').mockReturnValue(
+      'http://localhost:4317',
+    );
+    vi.spyOn(mockConfig, 'getTelemetryOtlpHeaders').mockReturnValue(
+      customHeaders,
+    );
+
+    await initializeTelemetry(mockConfig);
+
+    for (const ExporterMock of [
+      OTLPTraceExporter,
+      OTLPLogExporter,
+      OTLPMetricExporter,
+    ]) {
+      expect(ExporterMock).toHaveBeenCalledTimes(1);
+      const callArg = vi.mocked(ExporterMock).mock.calls[0]?.[0] as {
+        url?: string;
+        compression?: string;
+        metadata?: Metadata;
+      };
+      expect(callArg?.url).toBe('http://localhost:4317');
+      expect(callArg?.compression).toBe('gzip');
+      expect(callArg?.metadata).toBeInstanceOf(Metadata);
+      expect(callArg?.metadata?.get('authorization')).toEqual([
+        'Bearer secret-token',
+      ]);
+      expect(callArg?.metadata?.get('x-api-key')).toEqual(['my-api-key']);
+    }
+  });
+
+  it('should skip invalid gRPC metadata keys and log a warning without crashing', async () => {
+    const customHeaders = {
+      bad$key: 'invalid-for-grpc',
+      'x-valid-key': 'valid-value',
+    };
+    vi.spyOn(mockConfig, 'getTelemetryOtlpProtocol').mockReturnValue('grpc');
+    vi.spyOn(mockConfig, 'getTelemetryOtlpEndpoint').mockReturnValue(
+      'http://localhost:4317',
+    );
+    vi.spyOn(mockConfig, 'getTelemetryOtlpHeaders').mockReturnValue(
+      customHeaders,
+    );
+
+    await initializeTelemetry(mockConfig);
+
+    expect(debugLogger.warn).toHaveBeenCalledWith(
+      expect.stringContaining(
+        '[Telemetry] Skipping invalid gRPC metadata key "bad$key":',
+      ),
+      expect.any(Error),
+    );
+    const callArg = vi.mocked(OTLPTraceExporter).mock.calls[0]?.[0] as {
+      metadata?: Metadata;
+    };
+    expect(callArg?.metadata).toBeInstanceOf(Metadata);
+    expect(callArg?.metadata?.get('x-valid-key')).toEqual(['valid-value']);
+  });
+
+  it('should parse gRPC endpoint correctly', async () => {
+    vi.spyOn(mockConfig, 'getTelemetryOtlpEndpoint').mockReturnValue(
+      'https://my-collector.com',
+    );
+    await initializeTelemetry(mockConfig);
+    expect(OTLPTraceExporter).toHaveBeenCalledWith(
+      expect.objectContaining({ url: 'https://my-collector.com' }),
+    );
+  });
+
+  it('should parse HTTP endpoint correctly', async () => {
+    vi.spyOn(mockConfig, 'getTelemetryOtlpProtocol').mockReturnValue('http');
+    vi.spyOn(mockConfig, 'getTelemetryOtlpEndpoint').mockReturnValue(
+      'https://my-collector.com',
+    );
+    await initializeTelemetry(mockConfig);
+    expect(OTLPTraceExporterHttp).toHaveBeenCalledWith(
+      expect.objectContaining({ url: 'https://my-collector.com/v1/traces' }),
+    );
+  });
+
+  it('should use direct GCP exporters when target is gcp, project ID is set, and useCollector is false', async () => {
+    vi.spyOn(mockConfig, 'getTelemetryTarget').mockReturnValue(
+      TelemetryTarget.GCP,
+    );
+    vi.spyOn(mockConfig, 'getTelemetryUseCollector').mockReturnValue(false);
+    vi.spyOn(mockConfig, 'getTelemetryOtlpEndpoint').mockReturnValue('');
+
+    const originalEnv = process.env['OTLP_GOOGLE_CLOUD_PROJECT'];
+    process.env['OTLP_GOOGLE_CLOUD_PROJECT'] = 'test-project';
+
+    try {
+      await initializeTelemetry(mockConfig);
+      expect(NodeSDK.prototype.start).toHaveBeenCalled();
+    } finally {
+      if (originalEnv) {
+        process.env['OTLP_GOOGLE_CLOUD_PROJECT'] = originalEnv;
+      } else {
+        delete process.env['OTLP_GOOGLE_CLOUD_PROJECT'];
+      }
+    }
+  });
+
+  it('should use OTLP exporters when target is gcp but useCollector is true', async () => {
+    vi.spyOn(mockConfig, 'getTelemetryTarget').mockReturnValue(
+      TelemetryTarget.GCP,
+    );
+    vi.spyOn(mockConfig, 'getTelemetryUseCollector').mockReturnValue(true);
+
+    await initializeTelemetry(mockConfig);
+
+    expect(OTLPTraceExporter).toHaveBeenCalledWith({
+      url: 'http://localhost:4317',
+      compression: 'gzip',
+    });
+    expect(OTLPLogExporter).toHaveBeenCalledWith({
+      url: 'http://localhost:4317',
+      compression: 'gzip',
+    });
+    expect(OTLPMetricExporter).toHaveBeenCalledWith({
+      url: 'http://localhost:4317',
+      compression: 'gzip',
+    });
+  });
+
+  it('should use GCP exporters even when project ID environment variable is not set', async () => {
+    vi.spyOn(mockConfig, 'getTelemetryTarget').mockReturnValue(
+      TelemetryTarget.GCP,
+    );
+    vi.spyOn(mockConfig, 'getTelemetryUseCollector').mockReturnValue(false);
+    vi.spyOn(mockConfig, 'getTelemetryOtlpEndpoint').mockReturnValue('');
+
+    await initializeTelemetry(mockConfig);
+    expect(NodeSDK.prototype.start).toHaveBeenCalled();
+  });
+
+  it('should not use OTLP exporters when telemetryOutfile is set', async () => {
+    vi.spyOn(mockConfig, 'getTelemetryOutfile').mockReturnValue(
+      path.join(os.tmpdir(), 'test.log'),
+    );
+    await initializeTelemetry(mockConfig);
+
+    expect(OTLPTraceExporter).not.toHaveBeenCalled();
+    expect(OTLPLogExporter).not.toHaveBeenCalled();
+    expect(OTLPMetricExporter).not.toHaveBeenCalled();
+    expect(OTLPTraceExporterHttp).not.toHaveBeenCalled();
+    expect(OTLPLogExporterHttp).not.toHaveBeenCalled();
+    expect(OTLPMetricExporterHttp).not.toHaveBeenCalled();
+    expect(NodeSDK.prototype.start).toHaveBeenCalled();
+  });
+
+  describe('bufferTelemetryEvent', () => {
+    it('should execute immediately if SDK is initialized', async () => {
+      await initializeTelemetry(mockConfig);
+      const callback = vi.fn();
+      bufferTelemetryEvent(callback);
+      expect(callback).toHaveBeenCalled();
+    });
+
+    it('should buffer if SDK is not initialized, and flush on initialization', async () => {
+      const callback = vi.fn();
+      bufferTelemetryEvent(callback);
+      expect(callback).not.toHaveBeenCalled();
+
+      await initializeTelemetry(mockConfig);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(callback).toHaveBeenCalled();
+    });
+
+    it('should drop events and not buffer if telemetry is disabled in config', async () => {
+      vi.spyOn(mockConfig, 'getTelemetryEnabled').mockReturnValue(false);
+      const callback = vi.fn();
+      bufferTelemetryEvent(callback, mockConfig);
+      expect(callback).not.toHaveBeenCalled();
+
+      // Re-enable and initialize to verify nothing was queued in telemetryBuffer
+      vi.spyOn(mockConfig, 'getTelemetryEnabled').mockReturnValue(true);
+      await initializeTelemetry(mockConfig);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(callback).not.toHaveBeenCalled();
+
+      // If telemetry is subsequently disabled at runtime, events must not execute even when initialized
+      vi.spyOn(mockConfig, 'getTelemetryEnabled').mockReturnValue(false);
+      bufferTelemetryEvent(callback, mockConfig);
+      expect(callback).not.toHaveBeenCalled();
+    });
+
+    it('should cap buffered events at MAX_TELEMETRY_BUFFER_SIZE before SDK initialization', async () => {
+      const callbacks = Array.from({ length: 120 }, () => vi.fn());
+      for (const cb of callbacks) {
+        bufferTelemetryEvent(cb, mockConfig);
+      }
+
+      await initializeTelemetry(mockConfig);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      const calledCount = callbacks.filter(
+        (cb) => cb.mock.calls.length > 0,
+      ).length;
+      expect(calledCount).toBe(100);
+      expect(callbacks[0]).not.toHaveBeenCalled();
+      expect(callbacks[19]).not.toHaveBeenCalled();
+      expect(callbacks[20]).toHaveBeenCalled();
+      expect(callbacks[119]).toHaveBeenCalled();
+    });
+  });
+});

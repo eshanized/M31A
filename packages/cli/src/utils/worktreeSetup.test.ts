@@ -1,0 +1,225 @@
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { setupWorktree } from './worktreeSetup.js';
+import * as coreFunctions from '@m31a/core';
+
+// Mock dependencies
+vi.mock('@m31a/core', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@m31a/core')>();
+  return {
+    ...actual,
+    getProjectRootForWorktree: vi.fn(),
+    createWorktreeService: vi.fn(),
+    debugLogger: {
+      log: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+    },
+    writeToStdout: vi.fn(),
+    writeToStderr: vi.fn(),
+  };
+});
+
+describe('setupWorktree', () => {
+  const originalCwd = process.cwd;
+
+  const mockService = {
+    setup: vi.fn(),
+    maybeCleanup: vi.fn(),
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubEnv('M31A_WORKTREE_HANDLED', '');
+
+    // Mock process.cwd and process.chdir
+    let currentPath = '/mock/project';
+    process.cwd = vi.fn().mockImplementation(() => currentPath);
+    process.chdir = vi.fn().mockImplementation((newPath) => {
+      currentPath = newPath;
+    });
+
+    // Mock successful execution of core utilities
+    vi.mocked(coreFunctions.getProjectRootForWorktree).mockResolvedValue(
+      '/mock/project',
+    );
+    vi.mocked(coreFunctions.createWorktreeService).mockResolvedValue(
+      mockService as never,
+    );
+    mockService.setup.mockResolvedValue({
+      name: 'my-feature',
+      path: '/mock/project/.m31a/worktrees/my-feature',
+      baseSha: 'base-sha',
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    process.cwd = originalCwd;
+    delete (process as { chdir?: typeof process.chdir }).chdir;
+  });
+
+  it('should create and switch to a new worktree', async () => {
+    await setupWorktree('my-feature');
+
+    expect(coreFunctions.getProjectRootForWorktree).toHaveBeenCalledWith(
+      '/mock/project',
+    );
+    expect(coreFunctions.createWorktreeService).toHaveBeenCalledWith(
+      '/mock/project',
+    );
+    expect(mockService.setup).toHaveBeenCalledWith('my-feature');
+    expect(process.chdir).toHaveBeenCalledWith(
+      '/mock/project/.m31a/worktrees/my-feature',
+    );
+    expect(process.env['M31A_WORKTREE_HANDLED']).toBe('1');
+  });
+
+  it('should generate a name if worktreeName is undefined', async () => {
+    mockService.setup.mockResolvedValue({
+      name: 'generated-name',
+      path: '/mock/project/.m31a/worktrees/generated-name',
+      baseSha: 'base-sha',
+    });
+
+    await setupWorktree(undefined);
+
+    expect(mockService.setup).toHaveBeenCalledWith(undefined);
+  });
+
+  it('should skip worktree creation if M31A_WORKTREE_HANDLED is set', async () => {
+    vi.stubEnv('M31A_WORKTREE_HANDLED', '1');
+
+    await setupWorktree('my-feature');
+
+    expect(coreFunctions.createWorktreeService).not.toHaveBeenCalled();
+    expect(process.chdir).not.toHaveBeenCalled();
+  });
+
+  it('should handle errors gracefully and exit', async () => {
+    const mockExit = vi.spyOn(process, 'exit').mockImplementation(() => {
+      throw new Error('PROCESS_EXIT');
+    });
+
+    mockService.setup.mockRejectedValue(new Error('Git failure'));
+
+    await expect(setupWorktree('my-feature')).rejects.toThrow('PROCESS_EXIT');
+
+    expect(coreFunctions.writeToStderr).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'Failed to create or switch to worktree: Git failure',
+      ),
+    );
+    expect(mockExit).toHaveBeenCalledWith(1);
+
+    mockExit.mockRestore();
+  });
+
+  it('should notify supervisor of selected worktree via IPC with callback', async () => {
+    const originalSend = process.send;
+    const sendMock = vi.fn((_msg: unknown, cb?: () => void) => {
+      if (cb) cb();
+      return true;
+    });
+    Object.defineProperty(process, 'send', {
+      value: sendMock,
+      configurable: true,
+      writable: true,
+    });
+
+    try {
+      const result = await setupWorktree('my-feature');
+
+      expect(sendMock).toHaveBeenCalledWith(
+        {
+          type: 'worktree-selected',
+          path: '/mock/project/.m31a/worktrees/my-feature',
+        },
+        expect.any(Function),
+      );
+      expect(result).toEqual({
+        name: 'my-feature',
+        path: '/mock/project/.m31a/worktrees/my-feature',
+        baseSha: 'base-sha',
+      });
+    } finally {
+      Object.defineProperty(process, 'send', {
+        value: originalSend,
+        configurable: true,
+        writable: true,
+      });
+    }
+  });
+
+  it('should resolve after bounded timeout if process.send callback is never called', async () => {
+    vi.useFakeTimers();
+    const originalSend = process.send;
+    const sendMock = vi.fn(() => false);
+    Object.defineProperty(process, 'send', {
+      value: sendMock,
+      configurable: true,
+      writable: true,
+    });
+
+    try {
+      const setupPromise = setupWorktree('my-feature');
+      await vi.advanceTimersByTimeAsync(500);
+      const result = await setupPromise;
+
+      expect(sendMock).toHaveBeenCalledWith(
+        {
+          type: 'worktree-selected',
+          path: '/mock/project/.m31a/worktrees/my-feature',
+        },
+        expect.any(Function),
+      );
+      expect(result).toEqual({
+        name: 'my-feature',
+        path: '/mock/project/.m31a/worktrees/my-feature',
+        baseSha: 'base-sha',
+      });
+    } finally {
+      Object.defineProperty(process, 'send', {
+        value: originalSend,
+        configurable: true,
+        writable: true,
+      });
+      vi.useRealTimers();
+    }
+  });
+
+  it('should resolve cleanly if process.send throws synchronously', async () => {
+    const originalSend = process.send;
+    const sendMock = vi.fn(() => {
+      throw new Error('IPC channel closed');
+    });
+    Object.defineProperty(process, 'send', {
+      value: sendMock,
+      configurable: true,
+      writable: true,
+    });
+
+    try {
+      const result = await setupWorktree('my-feature');
+
+      expect(sendMock).toHaveBeenCalledTimes(1);
+      expect(result).toEqual({
+        name: 'my-feature',
+        path: '/mock/project/.m31a/worktrees/my-feature',
+        baseSha: 'base-sha',
+      });
+    } finally {
+      Object.defineProperty(process, 'send', {
+        value: originalSend,
+        configurable: true,
+        writable: true,
+      });
+    }
+  });
+});

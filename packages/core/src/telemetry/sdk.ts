@@ -1,0 +1,422 @@
+/**
+ * @license
+ * Copyright 2025 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import {
+  DiagLogLevel,
+  diag,
+  trace,
+  context,
+  metrics,
+  propagation,
+} from '@opentelemetry/api';
+import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-grpc';
+import { OTLPLogExporter } from '@opentelemetry/exporter-logs-otlp-grpc';
+import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-grpc';
+import { OTLPTraceExporter as OTLPTraceExporterHttp } from '@opentelemetry/exporter-trace-otlp-http';
+import { OTLPLogExporter as OTLPLogExporterHttp } from '@opentelemetry/exporter-logs-otlp-http';
+import { OTLPMetricExporter as OTLPMetricExporterHttp } from '@opentelemetry/exporter-metrics-otlp-http';
+import { CompressionAlgorithm } from '@opentelemetry/otlp-exporter-base';
+import { Metadata } from '@grpc/grpc-js';
+import { NodeSDK } from '@opentelemetry/sdk-node';
+import { SemanticResourceAttributes } from '@opentelemetry/semantic-conventions';
+import { resourceFromAttributes } from '@opentelemetry/resources';
+import {
+  BatchSpanProcessor,
+  ConsoleSpanExporter,
+} from '@opentelemetry/sdk-trace-node';
+import {
+  BatchLogRecordProcessor,
+  ConsoleLogRecordExporter,
+} from '@opentelemetry/sdk-logs';
+import {
+  ConsoleMetricExporter,
+  PeriodicExportingMetricReader,
+} from '@opentelemetry/sdk-metrics';
+import { HttpInstrumentation } from '@opentelemetry/instrumentation-http';
+import type { Config } from '../config/config.js';
+import { SERVICE_NAME } from './constants.js';
+import { initializeMetrics } from './metrics.js';
+import {
+  FileLogExporter,
+  FileMetricExporter,
+  FileSpanExporter,
+} from './file-exporters.js';
+import { debugLogger } from '../utils/debugLogger.js';
+import { startGlobalMemoryMonitoring } from './memory-monitor.js';
+import { startGlobalEventLoopMonitoring } from './event-loop-monitor.js';
+import { coreEvents, CoreEvent } from '../utils/events.js';
+import {
+  logKeychainAvailability,
+  logTokenStorageInitialization,
+} from './loggers.js';
+import type {
+  KeychainAvailabilityEvent,
+  TokenStorageInitializationEvent,
+} from './types.js';
+
+// For troubleshooting, set the log level to DiagLogLevel.DEBUG
+class DiagLoggerAdapter {
+  error(message: string, ...args: unknown[]): void {
+    debugLogger.error(message, ...args);
+  }
+
+  warn(message: string, ...args: unknown[]): void {
+    debugLogger.warn(message, ...args);
+  }
+
+  info(message: string, ...args: unknown[]): void {
+    debugLogger.log(message, ...args);
+  }
+
+  debug(message: string, ...args: unknown[]): void {
+    debugLogger.debug(message, ...args);
+  }
+
+  verbose(message: string, ...args: unknown[]): void {
+    debugLogger.debug(message, ...args);
+  }
+}
+
+diag.setLogger(new DiagLoggerAdapter(), DiagLogLevel.INFO);
+
+let sdk: NodeSDK | undefined;
+let spanProcessor: BatchSpanProcessor | undefined;
+let logRecordProcessor: BatchLogRecordProcessor | undefined;
+let metricReader: PeriodicExportingMetricReader | undefined;
+let telemetryInitialized = false;
+let keychainAvailabilityListener:
+  | ((event: KeychainAvailabilityEvent) => void)
+  | undefined = undefined;
+let tokenStorageTypeListener:
+  | ((event: TokenStorageInitializationEvent) => void)
+  | undefined = undefined;
+const MAX_TELEMETRY_BUFFER_SIZE = 100;
+const telemetryBuffer: Array<() => void | Promise<void>> = [];
+
+export function isTelemetrySdkInitialized(): boolean {
+  return telemetryInitialized;
+}
+
+export function bufferTelemetryEvent(
+  fn: () => void | Promise<void>,
+  config?: Config,
+): void {
+  if (
+    config &&
+    typeof config.getTelemetryEnabled === 'function' &&
+    !config.getTelemetryEnabled()
+  ) {
+    return;
+  }
+  if (telemetryInitialized) {
+    try {
+      const result = fn();
+      if (result instanceof Promise) {
+        result.catch((e) => {
+          debugLogger.error('Error executing telemetry event promise', e);
+        });
+      }
+    } catch (e) {
+      debugLogger.error('Error executing telemetry event', e);
+    }
+    return;
+  }
+  if (telemetryBuffer.length >= MAX_TELEMETRY_BUFFER_SIZE) {
+    telemetryBuffer.shift();
+  }
+  telemetryBuffer.push(fn);
+}
+
+async function flushTelemetryBuffer(): Promise<void> {
+  if (!telemetryInitialized) return;
+  while (telemetryBuffer.length > 0) {
+    const fn = telemetryBuffer.shift();
+    if (fn) {
+      try {
+        await fn();
+      } catch (e) {
+        debugLogger.error('Error executing buffered telemetry event', e);
+      }
+    }
+  }
+}
+
+function parseOtlpEndpoint(
+  otlpEndpointSetting: string | undefined,
+  protocol: 'grpc' | 'http',
+): string | undefined {
+  if (!otlpEndpointSetting) {
+    return undefined;
+  }
+  // Trim leading/trailing quotes that might come from env variables
+  const trimmedEndpoint = otlpEndpointSetting.replace(/^["']|["']$/g, '');
+
+  try {
+    const url = new URL(trimmedEndpoint);
+    if (protocol === 'grpc') {
+      // OTLP gRPC exporters expect an endpoint in the format scheme://host:port
+      // The `origin` property provides this, stripping any path, query, or hash.
+      return url.origin;
+    }
+    // For http, use the full href.
+    return url.href;
+  } catch (error) {
+    diag.error('Invalid OTLP endpoint URL provided:', trimmedEndpoint, error);
+    return undefined;
+  }
+}
+
+export async function initializeTelemetry(config: Config): Promise<void> {
+  if (!config.getTelemetryEnabled()) {
+    return;
+  }
+
+  if (telemetryInitialized) {
+    return;
+  }
+
+  const resource = resourceFromAttributes({
+    [SemanticResourceAttributes.SERVICE_NAME]: SERVICE_NAME,
+    [SemanticResourceAttributes.SERVICE_VERSION]: process.version,
+    'session.id': config.getSessionId(),
+  });
+
+  if (!keychainAvailabilityListener) {
+    keychainAvailabilityListener = (event: KeychainAvailabilityEvent) => {
+      logKeychainAvailability(config, event);
+    };
+    coreEvents.on(
+      CoreEvent.TelemetryKeychainAvailability,
+      keychainAvailabilityListener,
+    );
+  }
+
+  if (!tokenStorageTypeListener) {
+    tokenStorageTypeListener = (event: TokenStorageInitializationEvent) => {
+      logTokenStorageInitialization(config, event);
+    };
+    coreEvents.on(
+      CoreEvent.TelemetryTokenStorageType,
+      tokenStorageTypeListener,
+    );
+  }
+
+  const otlpEndpoint = config.getTelemetryOtlpEndpoint();
+  const otlpProtocol = config.getTelemetryOtlpProtocol();
+
+  const parsedEndpoint = parseOtlpEndpoint(otlpEndpoint, otlpProtocol);
+  const telemetryOutfile = config.getTelemetryOutfile();
+  const useOtlp = !!parsedEndpoint && !telemetryOutfile;
+
+  let spanExporter:
+    | OTLPTraceExporter
+    | OTLPTraceExporterHttp
+    | FileSpanExporter
+    | ConsoleSpanExporter;
+  let logExporter:
+    | OTLPLogExporter
+    | OTLPLogExporterHttp
+    | FileLogExporter
+    | ConsoleLogRecordExporter;
+
+  if (useOtlp) {
+    const otlpHeaders = config.getTelemetryOtlpHeaders?.() ?? {};
+    const hasHeaders = Object.keys(otlpHeaders).length > 0;
+
+    if (otlpProtocol === 'http') {
+      const buildUrl = (path: string) => {
+        const url = new URL(parsedEndpoint);
+        // Join the existing pathname with the new path, handling trailing slashes.
+        url.pathname = [url.pathname.replace(/\/$/, ''), path].join('/');
+        return url.href;
+      };
+      spanExporter = new OTLPTraceExporterHttp({
+        url: buildUrl('v1/traces'),
+        headers: hasHeaders ? otlpHeaders : undefined,
+      });
+      logExporter = new OTLPLogExporterHttp({
+        url: buildUrl('v1/logs'),
+        headers: hasHeaders ? otlpHeaders : undefined,
+      });
+      metricReader = new PeriodicExportingMetricReader({
+        exporter: new OTLPMetricExporterHttp({
+          url: buildUrl('v1/metrics'),
+          headers: hasHeaders ? otlpHeaders : undefined,
+        }),
+        exportIntervalMillis: 10000,
+      });
+    } else {
+      // grpc
+      let metadata: Metadata | undefined;
+      if (hasHeaders) {
+        const candidateMetadata = new Metadata();
+        let validCount = 0;
+        for (const [key, value] of Object.entries(otlpHeaders)) {
+          try {
+            candidateMetadata.set(key, value);
+            validCount++;
+          } catch (error) {
+            debugLogger.warn(
+              `[Telemetry] Skipping invalid gRPC metadata key "${key}":`,
+              error,
+            );
+          }
+        }
+        if (validCount > 0) {
+          metadata = candidateMetadata;
+        }
+      }
+      spanExporter = new OTLPTraceExporter({
+        url: parsedEndpoint,
+        compression: CompressionAlgorithm.GZIP,
+        ...(metadata && { metadata }),
+      });
+      logExporter = new OTLPLogExporter({
+        url: parsedEndpoint,
+        compression: CompressionAlgorithm.GZIP,
+        ...(metadata && { metadata }),
+      });
+      metricReader = new PeriodicExportingMetricReader({
+        exporter: new OTLPMetricExporter({
+          url: parsedEndpoint,
+          compression: CompressionAlgorithm.GZIP,
+          ...(metadata && { metadata }),
+        }),
+        exportIntervalMillis: 10000,
+      });
+    }
+  } else if (telemetryOutfile) {
+    spanExporter = new FileSpanExporter(telemetryOutfile);
+    logExporter = new FileLogExporter(telemetryOutfile);
+    metricReader = new PeriodicExportingMetricReader({
+      exporter: new FileMetricExporter(telemetryOutfile),
+      exportIntervalMillis: 10000,
+    });
+  } else {
+    spanExporter = new ConsoleSpanExporter();
+    logExporter = new ConsoleLogRecordExporter();
+    metricReader = new PeriodicExportingMetricReader({
+      exporter: new ConsoleMetricExporter(),
+      exportIntervalMillis: 10000,
+    });
+  }
+
+  // Store processor references for manual flushing
+  spanProcessor = new BatchSpanProcessor(spanExporter);
+  logRecordProcessor = new BatchLogRecordProcessor({ exporter: logExporter });
+
+  sdk = new NodeSDK({
+    resource,
+    spanProcessors: [spanProcessor],
+    logRecordProcessors: [logRecordProcessor],
+    metricReader,
+    instrumentations: [new HttpInstrumentation()],
+  });
+
+  try {
+    sdk.start();
+    if (config.getDebugMode()) {
+      debugLogger.log('OpenTelemetry SDK started successfully.');
+    }
+    initializeMetrics(config);
+
+    // Start memory monitoring if interval is specified via environment variable
+    const monitorInterval = process.env['M31A_MEMORY_MONITOR_INTERVAL'];
+    debugLogger.log(
+      `[TELEMETRY] M31A_MEMORY_MONITOR_INTERVAL: ${monitorInterval}`,
+    );
+    if (monitorInterval) {
+      const intervalMs = parseInt(monitorInterval, 10);
+      if (!isNaN(intervalMs) && intervalMs > 0) {
+        startGlobalMemoryMonitoring(config, intervalMs);
+        startGlobalEventLoopMonitoring(config, intervalMs);
+      }
+    }
+
+    telemetryInitialized = true;
+    void flushTelemetryBuffer();
+  } catch (error) {
+    debugLogger.error('Error starting OpenTelemetry SDK:', error);
+  }
+
+  // Note: We don't use process.on('exit') here because that callback is synchronous
+  // and won't wait for the async shutdownTelemetry() to complete.
+  // Instead, telemetry shutdown is handled in runExitCleanup() in cleanup.ts
+  process.on('SIGTERM', () => {
+    // eslint-disable-next-line @typescript-eslint/no-floating-promises
+    shutdownTelemetry(config);
+  });
+  process.on('SIGINT', () => {
+    // eslint-disable-next-line @typescript-eslint/no-floating-promises
+    shutdownTelemetry(config);
+  });
+}
+
+/**
+ * Force flush all pending telemetry data to disk.
+ * This is useful for ensuring telemetry is written before critical operations like /clear.
+ */
+export async function flushTelemetry(config: Config): Promise<void> {
+  if (!telemetryInitialized || !spanProcessor || !logRecordProcessor) {
+    return;
+  }
+  try {
+    // Force flush all pending telemetry to disk
+    await Promise.all([
+      spanProcessor.forceFlush(),
+      logRecordProcessor.forceFlush(),
+      metricReader ? metricReader.forceFlush() : Promise.resolve(),
+    ]);
+    if (config.getDebugMode()) {
+      debugLogger.log('OpenTelemetry SDK flushed successfully.');
+    }
+  } catch (error) {
+    debugLogger.error('Error flushing SDK:', error);
+  }
+}
+
+export async function shutdownTelemetry(
+  config: Config,
+  fromProcessExit = true,
+): Promise<void> {
+  if (!telemetryInitialized || !sdk) {
+    return;
+  }
+  try {
+    await sdk.shutdown();
+    if (config.getDebugMode() && fromProcessExit) {
+      debugLogger.log('OpenTelemetry SDK shut down successfully.');
+    }
+  } catch (error) {
+    debugLogger.error('Error shutting down SDK:', error);
+  } finally {
+    telemetryInitialized = false;
+    telemetryBuffer.length = 0;
+    sdk = undefined;
+    // Fully reset the global APIs to allow for re-initialization.
+    // This is primarily for testing environments where the SDK is started
+    // and stopped multiple times in the same process.
+    trace.disable();
+    context.disable();
+    metrics.disable();
+    propagation.disable();
+    diag.disable();
+    if (keychainAvailabilityListener) {
+      coreEvents.off(
+        CoreEvent.TelemetryKeychainAvailability,
+        keychainAvailabilityListener,
+      );
+      keychainAvailabilityListener = undefined;
+    }
+    if (tokenStorageTypeListener) {
+      coreEvents.off(
+        CoreEvent.TelemetryTokenStorageType,
+        tokenStorageTypeListener,
+      );
+      tokenStorageTypeListener = undefined;
+    }
+  }
+}

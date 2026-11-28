@@ -1,0 +1,700 @@
+/**
+ * @license
+ * Copyright 2025 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { act } from 'react';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import * as os from 'node:os';
+import { renderHook } from '../../test-utils/render.js';
+import { waitFor } from '../../test-utils/async.js';
+import { useSessionResume } from './useSessionResume.js';
+import {
+  WorkspaceContext,
+  resolveToRealPath,
+  type Config,
+  type ResumedSessionData,
+  type ConversationRecord,
+  type MessageRecord,
+  type HistoryTurn,
+} from '@m31a/core';
+import type { UseHistoryManagerReturn } from './useHistoryManager.js';
+import type { HistoryItemWithoutId } from '../types.js';
+
+describe('useSessionResume', () => {
+  // Mock dependencies
+  const mockGeminiClient = {
+    resumeChat: vi.fn(),
+  };
+
+  const mockConfig = {
+    getM31aClient: vi.fn().mockReturnValue(mockGeminiClient),
+  };
+
+  const createMockHistoryManager = (): UseHistoryManagerReturn => ({
+    history: [],
+    addItem: vi.fn(),
+    updateItem: vi.fn(),
+    clearItems: vi.fn(),
+    loadHistory: vi.fn(),
+  });
+
+  let mockHistoryManager: UseHistoryManagerReturn;
+
+  const mockRefreshStatic = vi.fn();
+  const mockSetQuittingMessages = vi.fn();
+
+  const getDefaultProps = () => ({
+    config: mockConfig as unknown as Config,
+    historyManager: mockHistoryManager,
+    refreshStatic: mockRefreshStatic,
+    isM31aClientInitialized: true,
+    setQuittingMessages: mockSetQuittingMessages,
+    resumedSessionData: undefined,
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockHistoryManager = createMockHistoryManager();
+  });
+
+  describe('loadHistoryForResume', () => {
+    it('should return a loadHistoryForResume callback', async () => {
+      const { result } = await renderHook(() =>
+        useSessionResume(getDefaultProps()),
+      );
+
+      expect(result.current.loadHistoryForResume).toBeInstanceOf(Function);
+    });
+
+    it('should clear history and add items when loading history', async () => {
+      const { result } = await renderHook(() =>
+        useSessionResume(getDefaultProps()),
+      );
+
+      const uiHistory: HistoryItemWithoutId[] = [
+        { type: 'user', text: 'Hello' },
+        { type: 'gemini', text: 'Hi there!' },
+      ];
+
+      const clientHistory = [
+        { role: 'user' as const, parts: [{ text: 'Hello' }] },
+        { role: 'model' as const, parts: [{ text: 'Hi there!' }] },
+      ];
+
+      const resumedData: ResumedSessionData = {
+        conversation: {
+          sessionId: 'test-123',
+          projectHash: 'project-123',
+          startTime: '2025-01-01T00:00:00Z',
+          lastUpdated: '2025-01-01T01:00:00Z',
+          messages: [] as MessageRecord[],
+        },
+        filePath: '/path/to/session.json',
+      };
+
+      await act(async () => {
+        await result.current.loadHistoryForResume(
+          uiHistory,
+          clientHistory,
+          resumedData,
+        );
+      });
+
+      expect(mockSetQuittingMessages).toHaveBeenCalledWith(null);
+      expect(mockHistoryManager.clearItems).toHaveBeenCalled();
+      expect(mockHistoryManager.addItem).toHaveBeenCalledTimes(2);
+      expect(mockHistoryManager.addItem).toHaveBeenNthCalledWith(
+        1,
+        { type: 'user', text: 'Hello' },
+        0,
+        true,
+      );
+      expect(mockHistoryManager.addItem).toHaveBeenNthCalledWith(
+        2,
+        { type: 'gemini', text: 'Hi there!' },
+        1,
+        true,
+      );
+      expect(mockRefreshStatic).toHaveBeenCalledTimes(1);
+      expect(mockGeminiClient.resumeChat).toHaveBeenCalledWith(
+        clientHistory,
+        resumedData,
+      );
+    });
+
+    it('should not load history if Gemini client is not initialized', async () => {
+      const { result } = await renderHook(() =>
+        useSessionResume({
+          ...getDefaultProps(),
+          isM31aClientInitialized: false,
+        }),
+      );
+
+      const uiHistory: HistoryItemWithoutId[] = [
+        { type: 'user', text: 'Hello' },
+      ];
+      const clientHistory = [
+        { role: 'user' as const, parts: [{ text: 'Hello' }] },
+      ];
+      const resumedData: ResumedSessionData = {
+        conversation: {
+          sessionId: 'test-123',
+          projectHash: 'project-123',
+          startTime: '2025-01-01T00:00:00Z',
+          lastUpdated: '2025-01-01T01:00:00Z',
+          messages: [] as MessageRecord[],
+        },
+        filePath: '/path/to/session.json',
+      };
+
+      await act(async () => {
+        await result.current.loadHistoryForResume(
+          uiHistory,
+          clientHistory,
+          resumedData,
+        );
+      });
+
+      expect(mockHistoryManager.clearItems).not.toHaveBeenCalled();
+      expect(mockHistoryManager.addItem).not.toHaveBeenCalled();
+      expect(mockGeminiClient.resumeChat).not.toHaveBeenCalled();
+    });
+
+    it('should emit error and not mutate UI history or directories if getM31aClient returns undefined', async () => {
+      const mockAddDirectories = vi.fn();
+      const mockWorkspaceContext = {
+        addDirectories: mockAddDirectories,
+      };
+      const configWithoutClient = {
+        ...mockConfig,
+        getM31aClient: vi.fn().mockReturnValue(undefined),
+        getWorkspaceContext: vi.fn().mockReturnValue(mockWorkspaceContext),
+      };
+
+      const { result } = await renderHook(() =>
+        useSessionResume({
+          ...getDefaultProps(),
+          config: configWithoutClient as unknown as Config,
+          isM31aClientInitialized: true,
+        }),
+      );
+
+      const uiHistory: HistoryItemWithoutId[] = [
+        { type: 'user', text: 'Hello' },
+      ];
+      const clientHistory = [
+        { role: 'user' as const, parts: [{ text: 'Hello' }] },
+      ];
+      const resumedData: ResumedSessionData = {
+        conversation: {
+          sessionId: 'test-123',
+          projectHash: 'project-123',
+          startTime: '2025-01-01T00:00:00Z',
+          lastUpdated: '2025-01-01T01:00:00Z',
+          messages: [] as MessageRecord[],
+          directories: ['/restored/dir1'],
+        },
+        filePath: '/path/to/session.json',
+      };
+
+      await act(async () => {
+        await result.current.loadHistoryForResume(
+          uiHistory,
+          clientHistory,
+          resumedData,
+        );
+      });
+
+      expect(mockHistoryManager.clearItems).not.toHaveBeenCalled();
+      expect(mockHistoryManager.addItem).not.toHaveBeenCalled();
+      expect(mockAddDirectories).not.toHaveBeenCalled();
+    });
+
+    it('should handle empty history arrays', async () => {
+      const { result } = await renderHook(() =>
+        useSessionResume(getDefaultProps()),
+      );
+
+      const resumedData: ResumedSessionData = {
+        conversation: {
+          sessionId: 'test-123',
+          projectHash: 'project-123',
+          startTime: '2025-01-01T00:00:00Z',
+          lastUpdated: '2025-01-01T01:00:00Z',
+          messages: [] as MessageRecord[],
+        },
+        filePath: '/path/to/session.json',
+      };
+
+      await act(async () => {
+        await result.current.loadHistoryForResume([], [], resumedData);
+      });
+
+      expect(mockHistoryManager.clearItems).toHaveBeenCalled();
+      expect(mockHistoryManager.addItem).not.toHaveBeenCalled();
+      expect(mockRefreshStatic).toHaveBeenCalledTimes(1);
+      expect(mockGeminiClient.resumeChat).toHaveBeenCalledWith([], resumedData);
+    });
+
+    it('should restore directories from resumed session data', async () => {
+      const mockAddDirectories = vi
+        .fn()
+        .mockReturnValue({ added: [], failed: [] });
+      const mockWorkspaceContext = {
+        addDirectories: mockAddDirectories,
+      };
+      const configWithWorkspace = {
+        ...mockConfig,
+        getWorkspaceContext: vi.fn().mockReturnValue(mockWorkspaceContext),
+      };
+
+      const { result } = await renderHook(() =>
+        useSessionResume({
+          ...getDefaultProps(),
+          config: configWithWorkspace as unknown as Config,
+        }),
+      );
+
+      const resumedData: ResumedSessionData = {
+        conversation: {
+          sessionId: 'test-123',
+          projectHash: 'project-123',
+          startTime: '2025-01-01T00:00:00Z',
+          lastUpdated: '2025-01-01T01:00:00Z',
+          messages: [] as MessageRecord[],
+          directories: ['/restored/dir1', '/restored/dir2'],
+        },
+        filePath: '/path/to/session.json',
+      };
+
+      await act(async () => {
+        await result.current.loadHistoryForResume([], [], resumedData);
+      });
+
+      expect(configWithWorkspace.getWorkspaceContext).toHaveBeenCalled();
+      expect(mockAddDirectories).toHaveBeenCalledWith([
+        '/restored/dir1',
+        '/restored/dir2',
+      ]);
+    });
+
+    it('should not call addDirectories when no directories in resumed session', async () => {
+      const mockAddDirectories = vi.fn();
+      const mockWorkspaceContext = {
+        addDirectories: mockAddDirectories,
+      };
+      const configWithWorkspace = {
+        ...mockConfig,
+        getWorkspaceContext: vi.fn().mockReturnValue(mockWorkspaceContext),
+      };
+
+      const { result } = await renderHook(() =>
+        useSessionResume({
+          ...getDefaultProps(),
+          config: configWithWorkspace as unknown as Config,
+        }),
+      );
+
+      const resumedData: ResumedSessionData = {
+        conversation: {
+          sessionId: 'test-123',
+          projectHash: 'project-123',
+          startTime: '2025-01-01T00:00:00Z',
+          lastUpdated: '2025-01-01T01:00:00Z',
+          messages: [] as MessageRecord[],
+          // No directories field
+        },
+        filePath: '/path/to/session.json',
+      };
+
+      await act(async () => {
+        await result.current.loadHistoryForResume([], [], resumedData);
+      });
+
+      expect(mockAddDirectories).not.toHaveBeenCalled();
+    });
+
+    it('should not restore directories if resumeChat fails', async () => {
+      const mockAddDirectories = vi
+        .fn()
+        .mockReturnValue({ added: [], failed: [] });
+      const mockWorkspaceContext = {
+        addDirectories: mockAddDirectories,
+      };
+      const configWithWorkspace = {
+        ...mockConfig,
+        getWorkspaceContext: vi.fn().mockReturnValue(mockWorkspaceContext),
+      };
+
+      mockGeminiClient.resumeChat.mockRejectedValueOnce(
+        new Error('Failed to resume chat'),
+      );
+
+      const { result } = await renderHook(() =>
+        useSessionResume({
+          ...getDefaultProps(),
+          config: configWithWorkspace as unknown as Config,
+        }),
+      );
+
+      const resumedData: ResumedSessionData = {
+        conversation: {
+          sessionId: 'test-123',
+          projectHash: 'project-123',
+          startTime: '2025-01-01T00:00:00Z',
+          lastUpdated: '2025-01-01T01:00:00Z',
+          messages: [] as MessageRecord[],
+          directories: ['/restored/dir1', '/restored/dir2'],
+        },
+        filePath: '/path/to/session.json',
+      };
+
+      await act(async () => {
+        await result.current.loadHistoryForResume([], [], resumedData);
+      });
+
+      expect(mockGeminiClient.resumeChat).toHaveBeenCalled();
+      expect(mockHistoryManager.clearItems).not.toHaveBeenCalled();
+      expect(mockHistoryManager.addItem).not.toHaveBeenCalled();
+      expect(mockAddDirectories).not.toHaveBeenCalled();
+    });
+
+    it('should restore directories only after resumeChat succeeds', async () => {
+      const callOrder: string[] = [];
+      const mockAddDirectories = vi.fn().mockImplementation(() => {
+        callOrder.push('addDirectories');
+        return { added: [], failed: [] };
+      });
+      const mockWorkspaceContext = {
+        addDirectories: mockAddDirectories,
+      };
+      const configWithWorkspace = {
+        ...mockConfig,
+        getWorkspaceContext: vi.fn().mockReturnValue(mockWorkspaceContext),
+      };
+
+      mockGeminiClient.resumeChat.mockImplementationOnce(async () => {
+        callOrder.push('resumeChat');
+      });
+
+      const { result } = await renderHook(() =>
+        useSessionResume({
+          ...getDefaultProps(),
+          config: configWithWorkspace as unknown as Config,
+        }),
+      );
+
+      const resumedData: ResumedSessionData = {
+        conversation: {
+          sessionId: 'test-123',
+          projectHash: 'project-123',
+          startTime: '2025-01-01T00:00:00Z',
+          lastUpdated: '2025-01-01T01:00:00Z',
+          messages: [] as MessageRecord[],
+          directories: ['/restored/dir1'],
+        },
+        filePath: '/path/to/session.json',
+      };
+
+      await act(async () => {
+        await result.current.loadHistoryForResume([], [], resumedData);
+      });
+
+      expect(callOrder).toEqual(['resumeChat', 'addDirectories']);
+    });
+
+    it('should filter out stale saved directories that no longer exist when restoring', async () => {
+      const tempDir = resolveToRealPath(
+        fs.mkdtempSync(path.join(os.tmpdir(), 'gemini-test-ws-')),
+      );
+      try {
+        const existingDir = path.join(tempDir, 'existing');
+        const missingDir = path.join(tempDir, 'missing');
+        fs.mkdirSync(existingDir);
+
+        const expectedExistingDir = resolveToRealPath(existingDir);
+        const workspaceContext = new WorkspaceContext(tempDir);
+        const configWithWorkspace = {
+          ...mockConfig,
+          getWorkspaceContext: vi.fn().mockReturnValue(workspaceContext),
+        };
+
+        const { result } = await renderHook(() =>
+          useSessionResume({
+            ...getDefaultProps(),
+            config: configWithWorkspace as unknown as Config,
+          }),
+        );
+
+        const resumedData: ResumedSessionData = {
+          conversation: {
+            sessionId: 'test-123',
+            projectHash: 'project-123',
+            startTime: '2025-01-01T00:00:00Z',
+            lastUpdated: '2025-01-01T01:00:00Z',
+            messages: [] as MessageRecord[],
+            directories: [existingDir, missingDir],
+          },
+          filePath: '/path/to/session.json',
+        };
+
+        await act(async () => {
+          await result.current.loadHistoryForResume([], [], resumedData);
+        });
+
+        const dirs = workspaceContext.getDirectories();
+        expect(dirs).toContain(expectedExistingDir);
+        expect(dirs).not.toContain(missingDir);
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  describe('callback stability', () => {
+    it('should maintain stable loadHistoryForResume reference across renders', async () => {
+      const { result, rerender } = await renderHook(() =>
+        useSessionResume(getDefaultProps()),
+      );
+
+      const initialCallback = result.current.loadHistoryForResume;
+
+      rerender();
+
+      expect(result.current.loadHistoryForResume).toBe(initialCallback);
+    });
+
+    it('should update callback when config changes', async () => {
+      const { result, rerender } = await renderHook(
+        ({ config }: { config: Config }) =>
+          useSessionResume({
+            ...getDefaultProps(),
+            config,
+          }),
+        {
+          initialProps: { config: mockConfig as unknown as Config },
+        },
+      );
+
+      const initialCallback = result.current.loadHistoryForResume;
+
+      const newMockConfig = {
+        getM31aClient: vi.fn().mockReturnValue(mockGeminiClient),
+      };
+
+      rerender({ config: newMockConfig as unknown as Config });
+
+      expect(result.current.loadHistoryForResume).not.toBe(initialCallback);
+    });
+  });
+
+  describe('automatic resume on mount', () => {
+    it('should not resume when resumedSessionData is not provided', async () => {
+      await renderHook(() => useSessionResume(getDefaultProps()));
+
+      expect(mockHistoryManager.clearItems).not.toHaveBeenCalled();
+      expect(mockHistoryManager.addItem).not.toHaveBeenCalled();
+      expect(mockGeminiClient.resumeChat).not.toHaveBeenCalled();
+    });
+
+    it('should not resume when Gemini client is not initialized', async () => {
+      const conversation: ConversationRecord = {
+        sessionId: 'auto-resume-123',
+        projectHash: 'project-123',
+        startTime: '2025-01-01T00:00:00Z',
+        lastUpdated: '2025-01-01T01:00:00Z',
+        messages: [
+          {
+            id: 'msg-1',
+            timestamp: '2025-01-01T00:01:00Z',
+            content: 'Test message',
+            type: 'user',
+          },
+        ] as MessageRecord[],
+      };
+
+      await renderHook(() =>
+        useSessionResume({
+          ...getDefaultProps(),
+          resumedSessionData: {
+            conversation,
+            filePath: '/path/to/session.json',
+          },
+          isM31aClientInitialized: false,
+        }),
+      );
+
+      expect(mockHistoryManager.clearItems).not.toHaveBeenCalled();
+      expect(mockHistoryManager.addItem).not.toHaveBeenCalled();
+      expect(mockGeminiClient.resumeChat).not.toHaveBeenCalled();
+    });
+
+    it('should automatically resume session when resumedSessionData is provided', async () => {
+      const conversation: ConversationRecord = {
+        sessionId: 'auto-resume-123',
+        projectHash: 'project-123',
+        startTime: '2025-01-01T00:00:00Z',
+        lastUpdated: '2025-01-01T01:00:00Z',
+        messages: [
+          {
+            id: 'msg-1',
+            timestamp: '2025-01-01T00:01:00Z',
+            content: 'Hello from resumed session',
+            type: 'user',
+          },
+          {
+            id: 'msg-2',
+            timestamp: '2025-01-01T00:02:00Z',
+            content: 'Welcome back!',
+            type: 'gemini',
+          },
+        ] as MessageRecord[],
+      };
+
+      await act(async () => {
+        await renderHook(() =>
+          useSessionResume({
+            ...getDefaultProps(),
+            resumedSessionData: {
+              conversation,
+              filePath: '/path/to/session.json',
+            },
+          }),
+        );
+      });
+
+      await waitFor(() => {
+        expect(mockHistoryManager.clearItems).toHaveBeenCalled();
+      });
+
+      expect(mockHistoryManager.addItem).toHaveBeenCalledTimes(2);
+      expect(mockHistoryManager.addItem).toHaveBeenNthCalledWith(
+        1,
+        { type: 'user', text: 'Hello from resumed session' },
+        0,
+        true,
+      );
+      expect(mockHistoryManager.addItem).toHaveBeenNthCalledWith(
+        2,
+        { type: 'gemini', text: 'Welcome back!' },
+        1,
+        true,
+      );
+      expect(mockRefreshStatic).toHaveBeenCalledTimes(1);
+      expect(mockGeminiClient.resumeChat).toHaveBeenCalled();
+    });
+
+    it('should only resume once even if props change', async () => {
+      const conversation: ConversationRecord = {
+        sessionId: 'auto-resume-123',
+        projectHash: 'project-123',
+        startTime: '2025-01-01T00:00:00Z',
+        lastUpdated: '2025-01-01T01:00:00Z',
+        messages: [
+          {
+            id: 'msg-1',
+            timestamp: '2025-01-01T00:01:00Z',
+            content: 'Test message',
+            type: 'user',
+          },
+        ] as MessageRecord[],
+      };
+
+      let rerenderFunc: (props: { refreshStatic: () => void }) => void;
+      await act(async () => {
+        const { rerender } = await renderHook(
+          ({ refreshStatic }: { refreshStatic: () => void }) =>
+            useSessionResume({
+              ...getDefaultProps(),
+              refreshStatic,
+              resumedSessionData: {
+                conversation,
+                filePath: '/path/to/session.json',
+              },
+            }),
+          {
+            initialProps: { refreshStatic: mockRefreshStatic as () => void },
+          },
+        );
+        rerenderFunc = rerender;
+      });
+
+      await waitFor(() => {
+        expect(mockHistoryManager.clearItems).toHaveBeenCalled();
+      });
+
+      const clearItemsCallCount = (
+        mockHistoryManager.clearItems as ReturnType<typeof vi.fn>
+      ).mock.calls.length;
+
+      // Rerender with different refreshStatic
+      const newRefreshStatic = vi.fn();
+      await act(async () => {
+        rerenderFunc({ refreshStatic: newRefreshStatic });
+      });
+
+      // Should not resume again
+      expect(mockHistoryManager.clearItems).toHaveBeenCalledTimes(
+        clearItemsCallCount,
+      );
+    });
+
+    it('should convert session messages correctly during auto-resume', async () => {
+      const conversation: ConversationRecord = {
+        sessionId: 'auto-resume-with-tools',
+        projectHash: 'project-123',
+        startTime: '2025-01-01T00:00:00Z',
+        lastUpdated: '2025-01-01T01:00:00Z',
+        messages: [
+          {
+            id: 'msg-1',
+            timestamp: '2025-01-01T00:01:00Z',
+            content: '/help',
+            type: 'user',
+          },
+          {
+            id: 'msg-2',
+            timestamp: '2025-01-01T00:02:00Z',
+            content: 'Regular message',
+            type: 'user',
+          },
+        ] as MessageRecord[],
+      };
+
+      await act(async () => {
+        await renderHook(() =>
+          useSessionResume({
+            ...getDefaultProps(),
+            resumedSessionData: {
+              conversation,
+              filePath: '/path/to/session.json',
+            },
+          }),
+        );
+      });
+
+      await waitFor(() => {
+        expect(mockGeminiClient.resumeChat).toHaveBeenCalled();
+      });
+
+      // Check that the client history was called with filtered messages
+      // (slash commands should be filtered out)
+      const clientHistory = mockGeminiClient.resumeChat.mock.calls[0][0];
+
+      // Should only have the non-slash-command message
+      expect(clientHistory).toHaveLength(1);
+      expect(clientHistory.map((h: HistoryTurn) => h.content)).toEqual([
+        {
+          role: 'user',
+          parts: [{ text: 'Regular message' }],
+        },
+      ]);
+
+      // But UI history should have both
+      expect(mockHistoryManager.addItem).toHaveBeenCalledTimes(2);
+    });
+  });
+});

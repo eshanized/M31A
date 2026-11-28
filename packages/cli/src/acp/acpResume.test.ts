@@ -1,0 +1,370 @@
+/**
+ * @license
+ * Copyright 2026 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import {
+  describe,
+  it,
+  expect,
+  vi,
+  beforeEach,
+  type Mocked,
+  type Mock,
+} from 'vitest';
+import { GeminiAgent } from './acpRpcDispatcher.js';
+import * as acp from '@agentclientprotocol/sdk';
+import {
+  ApprovalMode,
+  AuthType,
+  type Config,
+  CoreToolCallStatus,
+} from '@m31a/core';
+import { loadCliConfig, type CliArgs } from '../config/config.js';
+import {
+  SessionSelector,
+  convertSessionToHistoryFormats,
+} from '../utils/sessionUtils.js';
+import { convertSessionToClientHistory } from '@m31a/core';
+import type { LoadedSettings } from '../config/settings.js';
+
+vi.mock('../config/config.js', () => ({
+  loadCliConfig: vi.fn(),
+}));
+
+vi.mock('../utils/sessionUtils.js', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../utils/sessionUtils.js')>();
+  return {
+    ...actual,
+    SessionSelector: vi.fn(),
+    convertSessionToHistoryFormats: vi.fn(),
+  };
+});
+
+vi.mock('@m31a/core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@m31a/core')>();
+  return {
+    ...actual,
+    CoreToolCallStatus: {
+      Validating: 'validating',
+      Scheduled: 'scheduled',
+      Error: 'error',
+      Success: 'success',
+      Executing: 'executing',
+      Cancelled: 'cancelled',
+      AwaitingApproval: 'awaiting_approval',
+    },
+    LlmRole: {
+      MAIN: 'main',
+      SUBAGENT: 'subagent',
+      UTILITY_TOOL: 'utility_tool',
+      USER: 'user',
+      MODEL: 'model',
+      SYSTEM: 'system',
+      TOOL: 'tool',
+    },
+    convertSessionToClientHistory: vi.fn(),
+  };
+});
+
+describe('GeminiAgent Session Resume', () => {
+  let mockConfig: Mocked<Config>;
+  let mockSettings: Mocked<LoadedSettings>;
+  let mockArgv: CliArgs;
+  let mockConnection: Mocked<acp.AgentSideConnection>;
+  let agent: GeminiAgent;
+
+  beforeEach(() => {
+    mockConfig = {
+      refreshAuth: vi.fn().mockResolvedValue(undefined),
+      initialize: vi.fn().mockResolvedValue(undefined),
+      getFileSystemService: vi.fn(),
+      setFileSystemService: vi.fn(),
+      getM31aClient: vi.fn().mockReturnValue({
+        initialize: vi.fn().mockResolvedValue(undefined),
+        resumeChat: vi.fn().mockResolvedValue(undefined),
+        getChat: vi.fn().mockReturnValue({}),
+      }),
+      storage: {
+        getProjectTempDir: vi.fn().mockReturnValue('/tmp/project'),
+      },
+      getPolicyEngine: vi.fn().mockReturnValue({
+        addRule: vi.fn(),
+      }),
+      messageBus: {
+        publish: vi.fn(),
+        subscribe: vi.fn(),
+        unsubscribe: vi.fn(),
+      },
+      getMessageBus: vi.fn().mockReturnValue({
+        publish: vi.fn(),
+        subscribe: vi.fn(),
+        unsubscribe: vi.fn(),
+      }),
+      getApprovalMode: vi.fn().mockReturnValue('default'),
+      isAutoMemoryEnabled: vi.fn().mockReturnValue(false),
+      isPlanEnabled: vi.fn().mockReturnValue(true),
+      getModel: vi.fn().mockReturnValue('gemini-pro'),
+      getCheckpointingEnabled: vi.fn().mockReturnValue(false),
+      toolRegistry: {
+        getTool: vi.fn().mockReturnValue({ kind: 'read' }),
+      },
+      get config() {
+        return this;
+      },
+    } as unknown as Mocked<Config>;
+    mockSettings = {
+      merged: {
+        security: { auth: { selectedType: AuthType.USE_NVIDIA_NIM } },
+        mcpServers: {},
+      },
+      setValue: vi.fn(),
+    } as unknown as Mocked<LoadedSettings>;
+    mockArgv = {} as unknown as CliArgs;
+    mockConnection = {
+      sessionUpdate: vi.fn().mockResolvedValue(undefined),
+    } as unknown as Mocked<acp.AgentSideConnection>;
+
+    (loadCliConfig as Mock).mockResolvedValue(mockConfig);
+
+    agent = new GeminiAgent(mockConfig, mockSettings, mockArgv, mockConnection);
+  });
+
+  it('should advertise loadSession capability', async () => {
+    const response = await agent.initialize({
+      protocolVersion: acp.PROTOCOL_VERSION,
+    });
+    expect(response.agentCapabilities?.loadSession).toBe(true);
+  });
+
+  it('should load a session, resume chat, and stream all message types', async () => {
+    const sessionId = 'existing-session-id';
+    const sessionData = {
+      sessionId,
+      messages: [
+        { type: 'user', content: [{ text: 'Hello' }] },
+        {
+          type: 'gemini',
+          content: [{ text: 'Hi there' }],
+          thoughts: [{ subject: 'Thinking', description: 'about greeting' }],
+          toolCalls: [
+            {
+              id: 'call-1',
+              name: 'test_tool',
+              displayName: 'Test Tool',
+              status: CoreToolCallStatus.Success,
+              resultDisplay: 'Tool output',
+            },
+          ],
+        },
+        {
+          type: 'gemini',
+          content: [{ text: 'Trying a write' }],
+          toolCalls: [
+            {
+              id: 'call-2',
+              name: 'write_file',
+              displayName: 'Write File',
+              status: CoreToolCallStatus.Error,
+              resultDisplay: 'Permission denied',
+            },
+          ],
+        },
+      ],
+    };
+
+    (SessionSelector as unknown as Mock).mockImplementation(() => ({
+      resolveSession: vi.fn().mockResolvedValue({
+        sessionData,
+        sessionPath: '/path/to/session.json',
+      }),
+    }));
+
+    const mockClientHistory = [
+      { role: 'user', parts: [{ text: 'Hello' }] },
+      { role: 'model', parts: [{ text: 'Hi there' }] },
+    ];
+    (convertSessionToHistoryFormats as unknown as Mock).mockReturnValue({
+      uiHistory: [],
+    });
+    (convertSessionToClientHistory as unknown as Mock).mockReturnValue(
+      mockClientHistory,
+    );
+
+    const response = await agent.loadSession({
+      sessionId,
+      cwd: '/tmp',
+      mcpServers: [],
+    });
+
+    expect(response).toEqual({
+      modes: {
+        availableModes: [
+          {
+            id: ApprovalMode.DEFAULT,
+            name: 'Default',
+            description: 'Prompts for approval',
+          },
+          {
+            id: ApprovalMode.AUTO_EDIT,
+            name: 'Auto Edit',
+            description: 'Auto-approves edit tools',
+          },
+          {
+            id: ApprovalMode.YOLO,
+            name: 'YOLO',
+            description: 'Auto-approves all tools',
+          },
+          {
+            id: ApprovalMode.PLAN,
+            name: 'Plan',
+            description: 'Read-only mode',
+          },
+        ],
+        currentModeId: ApprovalMode.DEFAULT,
+      },
+      models: {
+        availableModels: expect.any(Array) as unknown,
+        currentModelId: 'gemini-pro',
+      },
+    });
+
+    // Verify resumeChat received the correct arguments
+    expect(mockConfig.getM31aClient().resumeChat).toHaveBeenCalledWith(
+      mockClientHistory,
+      expect.objectContaining({
+        conversation: sessionData,
+        filePath: '/path/to/session.json',
+      }),
+    );
+
+    // User message
+    expect(mockConnection.sessionUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({
+          sessionUpdate: 'user_message_chunk',
+          content: expect.objectContaining({ text: 'Hello' }),
+        }),
+      }),
+    );
+
+    // Agent thought
+    expect(mockConnection.sessionUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({
+          sessionUpdate: 'agent_thought_chunk',
+          content: expect.objectContaining({
+            text: '**Thinking**\nabout greeting',
+          }),
+        }),
+      }),
+    );
+
+    // Agent message
+    expect(mockConnection.sessionUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({
+          sessionUpdate: 'agent_message_chunk',
+          content: expect.objectContaining({ text: 'Hi there' }),
+        }),
+      }),
+    );
+
+    // Successful tool call → 'completed'
+    expect(mockConnection.sessionUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({
+          sessionUpdate: 'tool_call',
+          toolCallId: 'call-1',
+          status: 'completed',
+          title: 'Test Tool',
+          kind: 'read',
+          content: [
+            {
+              type: 'content',
+              content: { type: 'text', text: 'Tool output' },
+            },
+          ],
+        }),
+      }),
+    );
+
+    // Failed tool call → 'failed'
+    expect(mockConnection.sessionUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({
+          sessionUpdate: 'tool_call',
+          toolCallId: 'call-2',
+          status: 'failed',
+          title: 'Write File',
+          kind: 'read',
+        }),
+      }),
+    );
+  });
+
+  it('should resolve session before initializing config or fresh chat recording', async () => {
+    const callOrder: string[] = [];
+    const resolveSessionMock = vi.fn().mockImplementation(async () => {
+      callOrder.push('resolveSession');
+      return {
+        sessionData: {
+          sessionId: 'same-minute-session-id',
+          messages: [{ type: 'user', content: [{ text: 'Hello' }] }],
+        },
+        sessionPath: '/path/to/session.jsonl',
+      };
+    });
+
+    (SessionSelector as unknown as Mock).mockImplementation(() => ({
+      resolveSession: resolveSessionMock,
+    }));
+    mockConfig.initialize.mockImplementation(async () => {
+      callOrder.push('config.initialize');
+    });
+    vi.mocked(mockConfig.getM31aClient().resumeChat).mockImplementation(
+      async () => {
+        callOrder.push('m31aClient.resumeChat');
+      },
+    );
+    (convertSessionToClientHistory as unknown as Mock).mockReturnValue([
+      { role: 'user', parts: [{ text: 'Hello' }] },
+    ]);
+
+    await agent.loadSession({
+      sessionId: 'same-minute-session-id',
+      cwd: '/tmp',
+      mcpServers: [],
+    });
+
+    expect(callOrder).toEqual([
+      'resolveSession',
+      'config.initialize',
+      'm31aClient.resumeChat',
+    ]);
+    expect(mockConfig.getM31aClient().initialize).not.toHaveBeenCalled();
+  });
+
+  it('should not initialize config if session resolution fails', async () => {
+    (SessionSelector as unknown as Mock).mockImplementation(() => ({
+      resolveSession: vi
+        .fn()
+        .mockRejectedValue(
+          new Error('No previous sessions found for this project.'),
+        ),
+    }));
+
+    await expect(
+      agent.loadSession({
+        sessionId: 'missing-session-id',
+        cwd: '/tmp',
+        mcpServers: [],
+      }),
+    ).rejects.toThrow('No previous sessions found for this project.');
+
+    expect(mockConfig.initialize).not.toHaveBeenCalled();
+    expect(mockConfig.getM31aClient().resumeChat).not.toHaveBeenCalled();
+  });
+});

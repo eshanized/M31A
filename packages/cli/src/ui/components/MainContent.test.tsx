@@ -1,0 +1,1622 @@
+/**
+ * @license
+ * Copyright 2025 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { renderWithProviders } from '../../test-utils/render.js';
+import { createMockSettings } from '../../test-utils/settings.js';
+import { makeFakeConfig, CoreToolCallStatus } from '@m31a/core';
+import { waitFor } from '../../test-utils/async.js';
+import { MainContent } from './MainContent.js';
+import { Composer } from './Composer.js';
+import { getToolGroupBorderAppearance } from '../utils/borderStyles.js';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { Box, Text } from 'ink';
+import { act, useState, type JSX } from 'react';
+import { useAlternateBuffer } from '../hooks/useAlternateBuffer.js';
+import { SHELL_COMMAND_NAME } from '../constants.js';
+
+const scrollableListMocks = vi.hoisted(() => ({
+  scrollToEnd: vi.fn(),
+  getScrollState: vi.fn(() => ({
+    scrollTop: 80,
+    scrollHeight: 100,
+    innerHeight: 20,
+  })),
+}));
+
+vi.mock('@m31a/core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@m31a/core')>();
+  return {
+    ...actual,
+    validatePlanPath: vi
+      .fn()
+      .mockResolvedValue('Storage must be initialized before use'),
+    validatePlanContent: vi
+      .fn()
+      .mockResolvedValue('Storage must be initialized before use'),
+  };
+});
+import {
+  UIStateContext,
+  useUIState,
+  type UIState,
+} from '../contexts/UIStateContext.js';
+import { type HistoryItem, type IndividualToolCallDisplay } from '../types.js';
+import {
+  type ConfirmingToolState,
+  useConfirmingTool,
+} from '../hooks/useConfirmingTool.js';
+
+// Mock dependencies
+vi.mock('ink-spinner', () => ({
+  default: () => <Text>⠋</Text>,
+}));
+
+const mockUseSettings = vi.fn().mockReturnValue({
+  merged: {
+    ui: {
+      inlineThinkingMode: 'off',
+    },
+  },
+});
+
+vi.mock('../contexts/SettingsContext.js', async () => {
+  const actual = await vi.importActual('../contexts/SettingsContext.js');
+  return {
+    ...actual,
+    useSettings: () => mockUseSettings(),
+  };
+});
+
+vi.mock('../contexts/AppContext.js', async () => {
+  const actual = await vi.importActual('../contexts/AppContext.js');
+  return {
+    ...actual,
+    useAppContext: () => ({
+      version: '1.0.0',
+    }),
+  };
+});
+
+vi.mock('../hooks/useAlternateBuffer.js', () => ({
+  useAlternateBuffer: vi.fn(),
+}));
+
+vi.mock('../hooks/useConfirmingTool.js', () => ({
+  useConfirmingTool: vi.fn(),
+}));
+
+vi.mock('./AppHeader.js', () => ({
+  AppHeader: ({ showDetails = true }: { showDetails?: boolean }) => (
+    <Text>{showDetails ? 'AppHeader(full)' : 'AppHeader(minimal)'}</Text>
+  ),
+}));
+
+// Pass-through spy so tests can observe which history items are (re)rendered.
+vi.mock('./HistoryItemDisplay.js', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('./HistoryItemDisplay.js')>();
+  return {
+    ...actual,
+    HistoryItemDisplay: vi.fn(actual.HistoryItemDisplay),
+  };
+});
+
+const mockScrollableList = vi.fn();
+
+vi.mock('./shared/ScrollableList.js', async () => {
+  const { forwardRef, useImperativeHandle } =
+    await vi.importActual<typeof import('react')>('react');
+  const ScrollableList = forwardRef(
+    (
+      props: {
+        data: unknown[];
+        renderItem: (props: { item: unknown }) => JSX.Element;
+        isStaticItem?: (item: unknown) => boolean;
+        renderStatic?: boolean;
+      },
+      ref,
+    ) => {
+      mockScrollableList(props);
+      const { data, renderItem } = props;
+      useImperativeHandle(ref, () => ({
+        scrollToEnd: scrollableListMocks.scrollToEnd,
+        getScrollState: scrollableListMocks.getScrollState,
+      }));
+      return (
+        <Box flexDirection="column">
+          <Text>ScrollableList</Text>
+          {data.map((item: unknown, index: number) => (
+            <Box key={index}>{renderItem({ item })}</Box>
+          ))}
+        </Box>
+      );
+    },
+  );
+  ScrollableList.displayName = 'ScrollableList';
+  return {
+    ScrollableList,
+    SCROLL_TO_ITEM_END: 0,
+  };
+});
+
+import { theme } from '../semantic-colors.js';
+import { type BackgroundTask } from '../hooks/shellReducer.js';
+import { HistoryItemDisplay } from './HistoryItemDisplay.js';
+
+describe('getToolGroupBorderAppearance', () => {
+  const mockBackgroundTasks = new Map<number, BackgroundTask>();
+  const activeShellPtyId = 123;
+
+  it('returns default empty values for non-tool_group items', () => {
+    const item = { type: 'user' as const, text: 'Hello', id: 1 };
+    const result = getToolGroupBorderAppearance(
+      item,
+      null,
+      false,
+      [],
+      mockBackgroundTasks,
+    );
+    expect(result).toEqual({ borderColor: '', borderDimColor: false });
+  });
+
+  it('inspects only the last pending tool_group item if current has no tools', () => {
+    const item = { type: 'tool_group' as const, tools: [], id: -1 };
+    const pendingItems = [
+      {
+        type: 'tool_group' as const,
+        tools: [
+          {
+            callId: '1',
+            name: 'some_tool',
+            description: '',
+            status: CoreToolCallStatus.Executing,
+            ptyId: undefined,
+            resultDisplay: undefined,
+            confirmationDetails: undefined,
+          } as IndividualToolCallDisplay,
+        ],
+      },
+      {
+        type: 'tool_group' as const,
+        tools: [
+          {
+            callId: '2',
+            name: 'other_tool',
+            description: '',
+            status: CoreToolCallStatus.Success,
+            ptyId: undefined,
+            resultDisplay: undefined,
+            confirmationDetails: undefined,
+          } as IndividualToolCallDisplay,
+        ],
+      },
+    ];
+
+    // Only the last item (Success) should be inspected, so hasPending = false.
+    // The previous item was Executing (pending) but it shouldn't be counted.
+    const result = getToolGroupBorderAppearance(
+      item,
+      null,
+      false,
+      pendingItems,
+      mockBackgroundTasks,
+    );
+    expect(result).toEqual({
+      borderColor: theme.border.default,
+      borderDimColor: false,
+    });
+  });
+
+  it('returns default border for completed normal tools', () => {
+    const item = {
+      type: 'tool_group' as const,
+      tools: [
+        {
+          callId: '1',
+          name: 'some_tool',
+          description: '',
+          status: CoreToolCallStatus.Success,
+          ptyId: undefined,
+          resultDisplay: undefined,
+          confirmationDetails: undefined,
+        } as IndividualToolCallDisplay,
+      ],
+      id: -1,
+    };
+    const result = getToolGroupBorderAppearance(
+      item,
+      null,
+      false,
+      [],
+      mockBackgroundTasks,
+    );
+    expect(result).toEqual({
+      borderColor: theme.border.default,
+      borderDimColor: false,
+    });
+  });
+
+  it('returns warning border for pending normal tools', () => {
+    const item = {
+      type: 'tool_group' as const,
+      tools: [
+        {
+          callId: '1',
+          name: 'some_tool',
+          description: '',
+          status: CoreToolCallStatus.Executing,
+          ptyId: undefined,
+          resultDisplay: undefined,
+          confirmationDetails: undefined,
+        } as IndividualToolCallDisplay,
+      ],
+      id: -1,
+    };
+    const result = getToolGroupBorderAppearance(
+      item,
+      null,
+      false,
+      [],
+      mockBackgroundTasks,
+    );
+    expect(result).toEqual({
+      borderColor: theme.status.warning,
+      borderDimColor: true,
+    });
+  });
+
+  it('returns active border for executing shell commands', () => {
+    const item = {
+      type: 'tool_group' as const,
+      tools: [
+        {
+          callId: '1',
+          name: SHELL_COMMAND_NAME,
+          description: '',
+          status: CoreToolCallStatus.Executing,
+          ptyId: activeShellPtyId,
+          resultDisplay: undefined,
+          confirmationDetails: undefined,
+        } as IndividualToolCallDisplay,
+      ],
+      id: 1,
+    };
+    // While executing shell commands, it's dim false, border active
+    const result = getToolGroupBorderAppearance(
+      item,
+      activeShellPtyId,
+      false,
+      [],
+      mockBackgroundTasks,
+    );
+    expect(result).toEqual({
+      borderColor: theme.ui.active,
+      borderDimColor: true,
+    });
+  });
+
+  it('returns focus border for focused executing shell commands', () => {
+    const item = {
+      type: 'tool_group' as const,
+      tools: [
+        {
+          callId: '1',
+          name: SHELL_COMMAND_NAME,
+          description: '',
+          status: CoreToolCallStatus.Executing,
+          ptyId: activeShellPtyId,
+          resultDisplay: undefined,
+          confirmationDetails: undefined,
+        } as IndividualToolCallDisplay,
+      ],
+      id: 1,
+    };
+    // When focused, it's dim false, border focus
+    const result = getToolGroupBorderAppearance(
+      item,
+      activeShellPtyId,
+      true,
+      [],
+      mockBackgroundTasks,
+    );
+    expect(result).toEqual({
+      borderColor: theme.ui.focus,
+      borderDimColor: false,
+    });
+  });
+
+  it('returns active border and dims color for background executing shell command when another shell is active', () => {
+    const item = {
+      type: 'tool_group' as const,
+      tools: [
+        {
+          callId: '1',
+          name: SHELL_COMMAND_NAME,
+          description: '',
+          status: CoreToolCallStatus.Executing,
+          ptyId: 456, // Different ptyId, not active
+          resultDisplay: undefined,
+          confirmationDetails: undefined,
+        } as IndividualToolCallDisplay,
+      ],
+      id: -1,
+    };
+    const result = getToolGroupBorderAppearance(
+      item,
+      activeShellPtyId,
+      false,
+      [],
+      mockBackgroundTasks,
+    );
+    expect(result).toEqual({
+      borderColor: theme.ui.active,
+      borderDimColor: true,
+    });
+  });
+
+  it('handles empty tools with active shell turn (isCurrentlyInShellTurn)', () => {
+    const item = { type: 'tool_group' as const, tools: [], id: -1 };
+
+    // active shell turn
+    const result = getToolGroupBorderAppearance(
+      item,
+      activeShellPtyId,
+      true,
+      [],
+      mockBackgroundTasks,
+    );
+    // Since there are no tools to inspect, it falls back to empty pending, but isCurrentlyInShellTurn=true
+    // so it counts as pending shell.
+    expect(result.borderColor).toEqual(theme.ui.focus);
+    // It shouldn't be dim because there are no tools to say it isEmbeddedShellFocused = false
+    expect(result.borderDimColor).toBe(false);
+  });
+});
+
+describe('MainContent', () => {
+  const defaultMockUiState = {
+    history: [
+      { id: 1, type: 'user', text: 'Hello' },
+      { id: 2, type: 'gemini', text: 'Hi there' },
+    ],
+    pendingHistoryItems: [],
+    mainAreaWidth: 80,
+    staticAreaMaxItemHeight: 20,
+    availableTerminalHeight: 24,
+    slashCommands: [],
+    constrainHeight: false,
+    thought: null,
+    isEditorDialogOpen: false,
+    activePtyId: undefined,
+    embeddedShellFocused: false,
+    historyRemountKey: 0,
+    cleanUiDetailsVisible: true,
+    bannerData: { defaultText: '', warningText: '' },
+    bannerVisible: false,
+    copyModeEnabled: false,
+    terminalWidth: 100,
+  };
+
+  beforeEach(() => {
+    vi.mocked(useAlternateBuffer).mockReturnValue(false);
+    mockUseSettings.mockReturnValue({
+      merged: {
+        ui: {
+          inlineThinkingMode: 'off',
+        },
+      },
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('renders in normal buffer mode', async () => {
+    const { lastFrame, unmount } = await renderWithProviders(<MainContent />, {
+      uiState: defaultMockUiState as Partial<UIState>,
+    });
+    await waitFor(() => expect(lastFrame()).toContain('AppHeader(full)'));
+    const output = lastFrame();
+
+    expect(output).toContain('AppHeader');
+    expect(output).toContain('Hello');
+    expect(output).toContain('Hi there');
+    unmount();
+  });
+
+  it('renders in alternate buffer mode', async () => {
+    vi.mocked(useAlternateBuffer).mockReturnValue(true);
+    const { lastFrame, unmount } = await renderWithProviders(<MainContent />, {
+      uiState: defaultMockUiState as Partial<UIState>,
+    });
+    const output = lastFrame();
+    expect(output).toContain('AppHeader(full)');
+    expect(output).toContain('Hello');
+    expect(output).toContain('Hi there');
+    unmount();
+  });
+
+  it('renders minimal header in minimal mode (alternate buffer)', async () => {
+    vi.mocked(useAlternateBuffer).mockReturnValue(true);
+
+    const { lastFrame, unmount } = await renderWithProviders(<MainContent />, {
+      uiState: {
+        ...defaultMockUiState,
+        cleanUiDetailsVisible: false,
+      } as Partial<UIState>,
+    });
+    await waitFor(() => expect(lastFrame()).toContain('Hello'));
+    const output = lastFrame();
+
+    expect(output).toContain('AppHeader(minimal)');
+    expect(output).not.toContain('AppHeader(full)');
+    expect(output).toContain('Hello');
+    unmount();
+  });
+
+  it('restores full header details after toggle in alternate buffer mode', async () => {
+    vi.mocked(useAlternateBuffer).mockReturnValue(true);
+
+    let setShowDetails: ((visible: boolean) => void) | undefined;
+    const ToggleHarness = () => {
+      const outerState = useUIState();
+      const [showDetails, setShowDetailsState] = useState(
+        outerState.cleanUiDetailsVisible,
+      );
+      setShowDetails = setShowDetailsState;
+
+      return (
+        <UIStateContext.Provider
+          value={{ ...outerState, cleanUiDetailsVisible: showDetails }}
+        >
+          <MainContent />
+        </UIStateContext.Provider>
+      );
+    };
+
+    const { lastFrame } = await renderWithProviders(<ToggleHarness />, {
+      uiState: {
+        ...defaultMockUiState,
+        cleanUiDetailsVisible: false,
+      } as Partial<UIState>,
+    });
+
+    await waitFor(() => expect(lastFrame()).toContain('AppHeader(minimal)'));
+    if (!setShowDetails) {
+      throw new Error('setShowDetails was not initialized');
+    }
+    const setShowDetailsSafe = setShowDetails;
+
+    act(() => {
+      setShowDetailsSafe(true);
+    });
+
+    await waitFor(() => expect(lastFrame()).toContain('AppHeader(full)'));
+  });
+
+  it('always renders full header details in normal buffer mode', async () => {
+    vi.mocked(useAlternateBuffer).mockReturnValue(false);
+    const { lastFrame } = await renderWithProviders(<MainContent />, {
+      uiState: {
+        ...defaultMockUiState,
+        cleanUiDetailsVisible: false,
+      } as Partial<UIState>,
+    });
+
+    await waitFor(() => expect(lastFrame()).toContain('AppHeader(full)'));
+    expect(lastFrame()).not.toContain('AppHeader(minimal)');
+  });
+
+  it('does not constrain height in alternate buffer mode', async () => {
+    vi.mocked(useAlternateBuffer).mockReturnValue(true);
+    const { lastFrame, unmount } = await renderWithProviders(<MainContent />, {
+      uiState: defaultMockUiState as Partial<UIState>,
+    });
+    const output = lastFrame();
+    expect(output).toContain('AppHeader(full)');
+    expect(output).toContain('Hello');
+    expect(output).toContain('Hi there');
+    unmount();
+  });
+
+  it('renders multiple history items with single line padding between them', async () => {
+    vi.mocked(useAlternateBuffer).mockReturnValue(true);
+    const uiState = {
+      ...defaultMockUiState,
+      history: [
+        { id: 1, type: 'gemini', text: 'Gemini message 1\n'.repeat(10) },
+        { id: 2, type: 'gemini', text: 'Gemini message 2\n'.repeat(10) },
+      ],
+      constrainHeight: true,
+      staticAreaMaxItemHeight: 5,
+    };
+
+    const { lastFrame, unmount } = await renderWithProviders(<MainContent />, {
+      uiState: uiState as Partial<UIState>,
+      config: makeFakeConfig({ useAlternateBuffer: true }),
+      settings: createMockSettings({ ui: { useAlternateBuffer: true } }),
+    });
+
+    const output = lastFrame();
+    expect(output).toMatchSnapshot();
+    unmount();
+  });
+
+  it('renders mixed history items (user + gemini) with single line padding between them', async () => {
+    vi.mocked(useAlternateBuffer).mockReturnValue(true);
+    const uiState = {
+      ...defaultMockUiState,
+      history: [
+        { id: 1, type: 'user', text: 'User message' },
+        { id: 2, type: 'gemini', text: 'Gemini response\n'.repeat(10) },
+      ],
+      constrainHeight: true,
+      staticAreaMaxItemHeight: 5,
+    };
+
+    const { lastFrame, unmount } = await renderWithProviders(<MainContent />, {
+      uiState: uiState as unknown as Partial<UIState>,
+      config: makeFakeConfig({ useAlternateBuffer: true }),
+      settings: createMockSettings({ ui: { useAlternateBuffer: true } }),
+    });
+
+    const output = lastFrame();
+    expect(output).toMatchSnapshot();
+    unmount();
+  });
+
+  it('renders a subagent with a complete box including bottom border', async () => {
+    const subagentCall = {
+      callId: 'subagent-1',
+      name: 'codebase_investigator',
+      description: 'Investigating codebase',
+      status: CoreToolCallStatus.Executing,
+      kind: 'agent',
+      resultDisplay: {
+        isSubagentProgress: true,
+        agentName: 'codebase_investigator',
+        recentActivity: [
+          {
+            id: '1',
+            type: 'tool_call',
+            content: 'run_shell_command',
+            args: '{"command": "echo hello"}',
+            status: 'running',
+          },
+        ],
+        state: 'running',
+      },
+    } as Partial<IndividualToolCallDisplay> as IndividualToolCallDisplay;
+
+    const uiState = {
+      ...defaultMockUiState,
+      history: [{ id: 1, type: 'user', text: 'Investigate' }],
+      pendingHistoryItems: [
+        {
+          type: 'tool_group' as const,
+          tools: [subagentCall],
+          borderBottom: true,
+        },
+      ],
+    };
+
+    const { lastFrame, unmount } = await renderWithProviders(<MainContent />, {
+      uiState: uiState as Partial<UIState>,
+      config: makeFakeConfig({ useAlternateBuffer: false }),
+    });
+
+    await waitFor(() => {
+      expect(lastFrame()).toContain('codebase_investigator');
+    });
+
+    expect(lastFrame()).toMatchSnapshot();
+    unmount();
+  });
+
+  it('renders a split tool group without a gap between static and pending areas', async () => {
+    const toolCalls = [
+      {
+        callId: 'tool-1',
+        name: 'test-tool',
+        description: 'A tool for testing',
+        resultDisplay: 'Part 1',
+        status: CoreToolCallStatus.Success,
+      } as IndividualToolCallDisplay,
+    ];
+
+    const pendingToolCalls = [
+      {
+        callId: 'tool-2',
+        name: 'test-tool',
+        description: 'A tool for testing',
+        resultDisplay: 'Part 2',
+        status: CoreToolCallStatus.Success,
+      } as IndividualToolCallDisplay,
+    ];
+
+    const uiState = {
+      ...defaultMockUiState,
+      history: [
+        {
+          id: 1,
+          type: 'tool_group' as const,
+          tools: toolCalls,
+          borderBottom: false,
+        },
+      ],
+      pendingHistoryItems: [
+        {
+          type: 'tool_group' as const,
+          tools: pendingToolCalls,
+          borderTop: false,
+          borderBottom: true,
+        },
+      ],
+    };
+
+    const { lastFrame, unmount } = await renderWithProviders(<MainContent />, {
+      uiState: uiState as Partial<UIState>,
+    });
+
+    await waitFor(() => {
+      const output = lastFrame();
+      // Verify Part 1 and Part 2 are rendered.
+      expect(output).toContain('Part 1');
+      expect(output).toContain('Part 2');
+    });
+
+    // The snapshot will be the best way to verify there is no gap (empty line) between them.
+    expect(lastFrame()).toMatchSnapshot();
+    unmount();
+  });
+
+  it('renders a ToolConfirmationQueue without an extra line when preceded by hidden tools', async () => {
+    const { ApprovalMode, WRITE_FILE_DISPLAY_NAME } = await import(
+      '@m31a/core'
+    );
+    const hiddenToolCalls = [
+      {
+        callId: 'tool-hidden',
+        name: WRITE_FILE_DISPLAY_NAME,
+        approvalMode: ApprovalMode.PLAN,
+        status: CoreToolCallStatus.Success,
+        resultDisplay: 'Hidden content',
+      } as Partial<IndividualToolCallDisplay> as IndividualToolCallDisplay,
+    ];
+
+    const confirmingTool = {
+      tool: {
+        callId: 'call-1',
+        name: 'exit_plan_mode',
+        status: CoreToolCallStatus.AwaitingApproval,
+        confirmationDetails: {
+          type: 'exit_plan_mode' as const,
+          planPath: '/path/to/plan',
+        },
+      },
+      index: 1,
+      total: 1,
+    };
+
+    const uiState = {
+      ...defaultMockUiState,
+      history: [{ id: 1, type: 'user', text: 'Apply plan' }],
+      pendingHistoryItems: [
+        {
+          type: 'tool_group' as const,
+          tools: hiddenToolCalls,
+          borderBottom: true,
+        },
+      ],
+    };
+
+    // We need to mock useConfirmingTool to return our confirmingTool
+    vi.mocked(useConfirmingTool).mockReturnValue(
+      confirmingTool as unknown as ConfirmingToolState,
+    );
+
+    mockUseSettings.mockReturnValue(
+      createMockSettings({
+        security: { enablePermanentToolApproval: true },
+        ui: { errorVerbosity: 'full' },
+      }),
+    );
+
+    let lastFrame!: () => string;
+    let unmount!: () => void;
+    await act(async () => {
+      const res = await renderWithProviders(<MainContent />, {
+        uiState: uiState as Partial<UIState>,
+        config: makeFakeConfig({ useAlternateBuffer: false }),
+      });
+      lastFrame = res.lastFrame;
+      unmount = res.unmount;
+    });
+
+    await waitFor(() => {
+      const output = lastFrame();
+      // The output should NOT contain 'Hidden content'
+      expect(output).not.toContain('Hidden content');
+      // The output should contain the confirmation header
+      expect(output).toContain('Ready to start implementation?');
+      // Wait for the async error message to appear
+      expect(output).toContain('File not found: /path/to/plan');
+    });
+
+    // Snapshot will reveal if there are extra blank lines
+    expect(lastFrame()).toMatchSnapshot();
+    unmount();
+  });
+
+  it('renders a spurious line when a tool group has only hidden tools and borderBottom true', async () => {
+    const { ApprovalMode, WRITE_FILE_DISPLAY_NAME } = await import(
+      '@m31a/core'
+    );
+    const uiState = {
+      ...defaultMockUiState,
+      history: [{ id: 1, type: 'user', text: 'Apply plan' }],
+      pendingHistoryItems: [
+        {
+          type: 'tool_group' as const,
+          tools: [
+            {
+              callId: 'tool-1',
+              name: WRITE_FILE_DISPLAY_NAME,
+              approvalMode: ApprovalMode.PLAN,
+              status: CoreToolCallStatus.Success,
+              resultDisplay: 'hidden',
+            } as Partial<IndividualToolCallDisplay> as IndividualToolCallDisplay,
+          ],
+          borderBottom: true,
+        },
+      ],
+    };
+
+    const { lastFrame, unmount } = await renderWithProviders(<MainContent />, {
+      uiState: uiState as Partial<UIState>,
+      config: makeFakeConfig({ useAlternateBuffer: false }),
+    });
+
+    await waitFor(() => {
+      expect(lastFrame()).toContain('Apply plan');
+    });
+
+    // This snapshot will show no spurious line because the group is now correctly suppressed.
+    expect(lastFrame()).toMatchSnapshot();
+    unmount();
+  });
+
+  it('renders multiple thinking messages sequentially correctly', async () => {
+    mockUseSettings.mockReturnValue({
+      merged: {
+        ui: {
+          inlineThinkingMode: 'expanded',
+        },
+      },
+    });
+    vi.mocked(useAlternateBuffer).mockReturnValue(true);
+
+    const uiState = {
+      ...defaultMockUiState,
+      history: [
+        { id: 0, type: 'user' as const, text: 'Plan a solution' },
+        {
+          id: 1,
+          type: 'thinking' as const,
+          thought: {
+            subject: 'Initial analysis',
+            description:
+              'This is a multiple line paragraph for the first thinking message of how the model analyzes the problem.',
+          },
+        },
+        {
+          id: 2,
+          type: 'thinking' as const,
+          thought: {
+            subject: 'Planning execution',
+            description:
+              'This a second multiple line paragraph for the second thinking message explaining the plan in detail so that it wraps around the terminal display.',
+          },
+        },
+        {
+          id: 3,
+          type: 'thinking' as const,
+          thought: {
+            subject: 'Refining approach',
+            description:
+              'And finally a third multiple line paragraph for the third thinking message to refine the solution.',
+          },
+        },
+      ],
+    };
+
+    const renderResult = await renderWithProviders(<MainContent />, {
+      uiState: uiState as Partial<UIState>,
+    });
+
+    const output = renderResult.lastFrame();
+    expect(output).toContain('Initial analysis');
+    expect(output).toContain('Planning execution');
+    expect(output).toContain('Refining approach');
+    expect(output).toMatchSnapshot();
+    await expect(renderResult).toMatchSvgSnapshot();
+    renderResult.unmount();
+  });
+
+  it('aggregates per-thinking token counts across contiguous thinking items in off and full modes', async () => {
+    vi.mocked(useAlternateBuffer).mockReturnValue(true);
+
+    const uiState = {
+      ...defaultMockUiState,
+      history: [
+        { id: 0, type: 'user' as const, text: 'Solve task' },
+        {
+          id: 1,
+          type: 'thinking' as const,
+          thought: { subject: 'Step 1', description: 'Analyze' },
+          tokenCount: 60,
+        },
+        {
+          id: 2,
+          type: 'thinking' as const,
+          thought: { subject: 'Step 2', description: 'Verify' },
+          tokenCount: 40,
+        },
+        { id: 3, type: 'gemini' as const, text: 'First answer' },
+        {
+          id: 4,
+          type: 'thinking' as const,
+          thought: { subject: 'Follow-up', description: 'Refine' },
+          tokenCount: 25,
+        },
+        { id: 5, type: 'gemini' as const, text: 'Second answer' },
+      ],
+    };
+
+    const offRender = await renderWithProviders(<MainContent />, {
+      uiState: uiState as Partial<UIState>,
+    });
+    const offOutput = offRender.lastFrame();
+    expect(offOutput).toContain('◇ Thinking: Step 1 (100 tokens)');
+    expect(offOutput).toContain('◇ Thinking: Follow-up (25 tokens)');
+    expect(offOutput).not.toContain('Verify');
+    offRender.unmount();
+
+    mockUseSettings.mockReturnValue({
+      merged: {
+        ui: {
+          inlineThinkingMode: 'full',
+        },
+      },
+    });
+    const fullRender = await renderWithProviders(<MainContent />, {
+      uiState: uiState as Partial<UIState>,
+    });
+    const fullOutput = fullRender.lastFrame();
+    expect(fullOutput).toContain('Thinking... (100 tokens)');
+    expect(fullOutput).toContain('Thinking... (25 tokens)');
+    fullRender.unmount();
+  });
+
+  describe('MainContent Tool Output Height Logic', () => {
+    const testCases = [
+      {
+        name: 'ASB mode - Focused shell should expand',
+        isAlternateBuffer: true,
+        embeddedShellFocused: true,
+        constrainHeight: true,
+        shouldShowLine1: false,
+        staticAreaMaxItemHeight: 15,
+      },
+      {
+        name: 'ASB mode - Unfocused shell',
+        isAlternateBuffer: true,
+        embeddedShellFocused: false,
+        constrainHeight: true,
+        shouldShowLine1: false,
+        staticAreaMaxItemHeight: 15,
+      },
+      {
+        name: 'Normal mode - Constrained height',
+        isAlternateBuffer: false,
+        embeddedShellFocused: false,
+        constrainHeight: true,
+        shouldShowLine1: false,
+        staticAreaMaxItemHeight: 15,
+      },
+      {
+        name: 'Normal mode - Unconstrained height',
+        isAlternateBuffer: false,
+        embeddedShellFocused: false,
+        constrainHeight: false,
+        shouldShowLine1: true,
+        staticAreaMaxItemHeight: 15,
+      },
+    ];
+
+    it.each(testCases)(
+      '$name',
+      async ({
+        isAlternateBuffer,
+        embeddedShellFocused,
+        constrainHeight,
+        shouldShowLine1,
+        staticAreaMaxItemHeight,
+      }) => {
+        vi.mocked(useAlternateBuffer).mockReturnValue(isAlternateBuffer);
+        const ptyId = 123;
+        const uiState = {
+          ...defaultMockUiState,
+          history: [],
+          pendingHistoryItems: [
+            {
+              type: 'tool_group',
+              id: -1,
+              tools: [
+                {
+                  callId: 'call_1',
+                  name: SHELL_COMMAND_NAME,
+                  status: CoreToolCallStatus.Executing,
+                  description: 'Running a long command...',
+                  // 20 lines of output.
+                  // Default max is 15, so Line 1-5 will be truncated/scrolled out if not expanded.
+                  resultDisplay: Array.from(
+                    { length: 20 },
+                    (_, i) => `Line ${i + 1}`,
+                  ).join('\n'),
+                  ptyId,
+                  confirmationDetails: undefined,
+                },
+              ],
+            },
+          ],
+          availableTerminalHeight: 30, // In ASB mode, focused shell should get ~28 lines
+          staticAreaMaxItemHeight,
+          terminalHeight: 50,
+          terminalWidth: 100,
+          mainAreaWidth: 100,
+          thought: null,
+          embeddedShellFocused,
+          activePtyId: embeddedShellFocused ? ptyId : undefined,
+          constrainHeight,
+          isEditorDialogOpen: false,
+          slashCommands: [],
+          historyRemountKey: 0,
+          cleanUiDetailsVisible: true,
+          bannerData: {
+            defaultText: '',
+            warningText: '',
+          },
+          bannerVisible: false,
+        };
+
+        const { lastFrame, unmount } = await renderWithProviders(
+          <MainContent />,
+          {
+            uiState: uiState as Partial<UIState>,
+            config: makeFakeConfig({ useAlternateBuffer: isAlternateBuffer }),
+            settings: createMockSettings({
+              ui: { useAlternateBuffer: isAlternateBuffer },
+            }),
+          },
+        );
+
+        const output = lastFrame();
+
+        // Sanity checks - Use regex with word boundary to avoid matching "Line 10" etc.
+        const line1Regex = /\bLine 1\b/;
+        if (shouldShowLine1) {
+          expect(output).toMatch(line1Regex);
+        } else {
+          expect(output).not.toMatch(line1Regex);
+        }
+
+        // All cases should show the last line
+        expect(output).toContain('Line 20');
+
+        // Snapshots for visual verification
+        expect(output).toMatchSnapshot();
+        unmount();
+      },
+    );
+  });
+  describe('Scroll position preservation and dynamic height partitioning', () => {
+    beforeEach(() => {
+      scrollableListMocks.scrollToEnd.mockClear();
+      scrollableListMocks.getScrollState.mockReset();
+      vi.mocked(useConfirmingTool).mockReturnValue(null);
+      mockUseSettings.mockReturnValue(
+        createMockSettings({
+          security: { enablePermanentToolApproval: true },
+          ui: { errorVerbosity: 'full' },
+        }),
+      );
+    });
+
+    it('calls scrollToEnd when tool confirmation arrives and user is at the bottom', async () => {
+      vi.mocked(useAlternateBuffer).mockReturnValue(true);
+      scrollableListMocks.getScrollState.mockReturnValue({
+        scrollTop: 80,
+        scrollHeight: 100,
+        innerHeight: 20,
+      });
+
+      const confirmingTool = {
+        tool: {
+          callId: 'call-bottom',
+          name: SHELL_COMMAND_NAME,
+          description: 'echo test',
+          status: CoreToolCallStatus.AwaitingApproval,
+          confirmationDetails: {
+            type: 'exec' as const,
+            title: 'Confirm Shell',
+            command: 'echo test',
+            rootCommand: 'echo',
+            rootCommands: ['echo'],
+          },
+        },
+        index: 1,
+        total: 1,
+      };
+      vi.mocked(useConfirmingTool).mockReturnValue(
+        confirmingTool as unknown as ConfirmingToolState,
+      );
+
+      const { unmount } = await renderWithProviders(<MainContent />, {
+        uiState: defaultMockUiState as Partial<UIState>,
+        config: makeFakeConfig({ useAlternateBuffer: true }),
+        settings: createMockSettings({ ui: { useAlternateBuffer: true } }),
+      });
+
+      expect(scrollableListMocks.getScrollState).toHaveBeenCalled();
+      expect(scrollableListMocks.scrollToEnd).toHaveBeenCalledTimes(1);
+      unmount();
+    });
+
+    it('preserves scroll position and does not call scrollToEnd when user has scrolled up', async () => {
+      vi.mocked(useAlternateBuffer).mockReturnValue(true);
+      scrollableListMocks.getScrollState.mockReturnValue({
+        scrollTop: 30,
+        scrollHeight: 100,
+        innerHeight: 20,
+      });
+
+      const confirmingTool = {
+        tool: {
+          callId: 'call-scrolled-up',
+          name: SHELL_COMMAND_NAME,
+          description: 'echo test',
+          status: CoreToolCallStatus.AwaitingApproval,
+          confirmationDetails: {
+            type: 'exec' as const,
+            title: 'Confirm Shell',
+            command: 'echo test',
+            rootCommand: 'echo',
+            rootCommands: ['echo'],
+          },
+        },
+        index: 1,
+        total: 1,
+      };
+      vi.mocked(useConfirmingTool).mockReturnValue(
+        confirmingTool as unknown as ConfirmingToolState,
+      );
+
+      const { unmount } = await renderWithProviders(<MainContent />, {
+        uiState: defaultMockUiState as Partial<UIState>,
+        config: makeFakeConfig({ useAlternateBuffer: true }),
+        settings: createMockSettings({ ui: { useAlternateBuffer: true } }),
+      });
+
+      expect(scrollableListMocks.getScrollState).toHaveBeenCalled();
+      expect(scrollableListMocks.scrollToEnd).not.toHaveBeenCalled();
+      unmount();
+    });
+
+    it('preserves scroll position when rendered alongside Composer during a pending tool confirmation', async () => {
+      vi.mocked(useAlternateBuffer).mockReturnValue(true);
+      scrollableListMocks.getScrollState.mockReturnValue({
+        scrollTop: 30,
+        scrollHeight: 100,
+        innerHeight: 20,
+      });
+
+      const confirmingTool = {
+        tool: {
+          callId: 'call-composer-scrolled-up',
+          name: SHELL_COMMAND_NAME,
+          description: 'echo test',
+          status: CoreToolCallStatus.AwaitingApproval,
+          resultDisplay: undefined,
+          confirmationDetails: {
+            type: 'exec' as const,
+            title: 'Confirm Shell',
+            command: 'echo test',
+            rootCommand: 'echo',
+            rootCommands: ['echo'],
+          },
+        },
+        index: 1,
+        total: 1,
+      };
+      vi.mocked(useConfirmingTool).mockReturnValue(
+        confirmingTool as unknown as ConfirmingToolState,
+      );
+
+      const uiStateWithPendingTool = {
+        ...defaultMockUiState,
+        activeHooks: [],
+        sessionStats: {
+          sessionId: 'test-session',
+          sessionStartTime: new Date(),
+          metrics: {} as never,
+          lastPromptTokenCount: 0,
+          promptCount: 0,
+        },
+        pendingHistoryItems: [
+          {
+            type: 'tool_group' as const,
+            id: -1,
+            tools: [confirmingTool.tool],
+          },
+        ],
+      };
+
+      const { unmount } = await renderWithProviders(
+        <>
+          <MainContent />
+          <Composer />
+        </>,
+        {
+          uiState: uiStateWithPendingTool as Partial<UIState>,
+          config: makeFakeConfig({ useAlternateBuffer: true }),
+          settings: createMockSettings({ ui: { useAlternateBuffer: true } }),
+        },
+      );
+
+      expect(scrollableListMocks.getScrollState).toHaveBeenCalled();
+      expect(scrollableListMocks.scrollToEnd).not.toHaveBeenCalled();
+      unmount();
+    });
+
+    it('partitions availableTerminalHeight between pendingHistoryItems and ToolConfirmationQueue in standard buffer mode', async () => {
+      vi.mocked(useAlternateBuffer).mockReturnValue(false);
+
+      const longDiff = '@@ -1,1 +1,40 @@\n' + '+added line\n'.repeat(40);
+      const confirmingTool = {
+        tool: {
+          callId: 'call-partition',
+          name: 'replace',
+          description: 'Editing src/app.ts',
+          status: CoreToolCallStatus.AwaitingApproval,
+          confirmationDetails: {
+            type: 'edit' as const,
+            title: 'Confirm edit',
+            fileName: 'app.ts',
+            filePath: '/src/app.ts',
+            fileDiff: longDiff,
+            originalContent: 'old',
+            newContent: 'new',
+          },
+        },
+        index: 1,
+        total: 1,
+      };
+      vi.mocked(useConfirmingTool).mockReturnValue(
+        confirmingTool as unknown as ConfirmingToolState,
+      );
+
+      const uiState = {
+        ...defaultMockUiState,
+        history: [{ id: 1, type: 'user' as const, text: 'Update file' }],
+        pendingHistoryItems: [
+          {
+            type: 'tool_group' as const,
+            id: -1,
+            tools: [
+              {
+                callId: 'call-shell',
+                name: SHELL_COMMAND_NAME,
+                status: CoreToolCallStatus.Executing,
+                description: 'Running build...',
+                resultDisplay: Array.from(
+                  { length: 20 },
+                  (_, i) => `Build output line ${i + 1}`,
+                ).join('\n'),
+                ptyId: 789,
+                confirmationDetails: undefined,
+              },
+            ],
+          },
+        ],
+        availableTerminalHeight: 20,
+        terminalHeight: 24,
+        constrainHeight: true,
+      };
+
+      const { lastFrame, unmount } = await renderWithProviders(
+        <MainContent />,
+        {
+          uiState: uiState as Partial<UIState>,
+          config: makeFakeConfig({ useAlternateBuffer: false }),
+          settings: createMockSettings({ ui: { useAlternateBuffer: false } }),
+        },
+      );
+
+      await waitFor(() => {
+        const output = lastFrame();
+        expect(output).toContain('Build output line 20');
+        expect(output).toContain('Editing src/app.ts');
+      });
+
+      const renderedLines = lastFrame().split('\n').length;
+      expect(renderedLines).toBeLessThanOrEqual(uiState.terminalHeight);
+      unmount();
+    });
+  });
+
+  it('marks header and non-interactive history items as static in terminalBuffer mode', async () => {
+    vi.mocked(useAlternateBuffer).mockReturnValue(true);
+    mockScrollableList.mockClear();
+
+    const { unmount } = await renderWithProviders(<MainContent />, {
+      uiState: defaultMockUiState as Partial<UIState>,
+      config: makeFakeConfig({
+        useAlternateBuffer: false,
+        useTerminalBuffer: true,
+      }),
+      settings: createMockSettings({
+        ui: { useAlternateBuffer: false, terminalBuffer: true },
+      }),
+    });
+
+    expect(mockScrollableList).toHaveBeenCalled();
+    const lastCallProps =
+      mockScrollableList.mock.calls[
+        mockScrollableList.mock.calls.length - 1
+      ][0];
+    expect(lastCallProps.renderStatic).toBe(true);
+    const isStaticItem = lastCallProps.isStaticItem as (
+      item: unknown,
+    ) => boolean;
+    expect(isStaticItem).toBeTypeOf('function');
+
+    expect(isStaticItem({ type: 'header' })).toBe(true);
+    expect(
+      isStaticItem({
+        type: 'history',
+        item: { id: 1, type: 'user', text: 'Hello' },
+      }),
+    ).toBe(true);
+    expect(
+      isStaticItem({
+        type: 'history',
+        item: { id: 2, type: 'gemini', text: 'Response' },
+      }),
+    ).toBe(true);
+    expect(
+      isStaticItem({
+        type: 'history',
+        item: { id: 3, type: 'gemini_content', text: 'Chunk' },
+      }),
+    ).toBe(true);
+    expect(
+      isStaticItem({
+        type: 'history',
+        item: {
+          id: 4,
+          type: 'thinking',
+          thought: { subject: 'S', description: 'D' },
+        },
+      }),
+    ).toBe(true);
+    expect(
+      isStaticItem({
+        type: 'history',
+        item: { id: 5, type: 'tool_group', tools: [] },
+      }),
+    ).toBe(false);
+    expect(
+      isStaticItem({
+        type: 'history',
+        item: { id: 6, type: 'compression', compression: { isPending: false } },
+      }),
+    ).toBe(false);
+    expect(isStaticItem({ type: 'pending' })).toBe(false);
+
+    const keyExtractor = lastCallProps.keyExtractor as (
+      item: unknown,
+      index: number,
+    ) => string;
+    expect(keyExtractor({ type: 'header' }, 0)).toContain('undefined');
+
+    unmount();
+  });
+
+  it('marks header as non-static and updates header key when updateInfo.isUpdating is true', async () => {
+    vi.mocked(useAlternateBuffer).mockReturnValue(true);
+    mockScrollableList.mockClear();
+
+    const { unmount } = await renderWithProviders(<MainContent />, {
+      uiState: {
+        ...defaultMockUiState,
+        updateInfo: {
+          isUpdating: true,
+          message: 'Updating...',
+          update: {
+            latest: '2.0.0',
+            current: '1.0.0',
+            name: '@m31a/cli',
+          },
+        },
+      } as Partial<UIState>,
+      config: makeFakeConfig({
+        useAlternateBuffer: false,
+        useTerminalBuffer: true,
+      }),
+      settings: createMockSettings({
+        ui: { useAlternateBuffer: false, terminalBuffer: true },
+      }),
+    });
+
+    const lastCallProps =
+      mockScrollableList.mock.calls[
+        mockScrollableList.mock.calls.length - 1
+      ][0];
+    const isStaticItem = lastCallProps.isStaticItem as (
+      item: unknown,
+    ) => boolean;
+    const keyExtractor = lastCallProps.keyExtractor as (
+      item: unknown,
+      index: number,
+    ) => string;
+
+    expect(isStaticItem({ type: 'header' })).toBe(false);
+    expect(keyExtractor({ type: 'header' }, 0)).toContain('-true-');
+
+    unmount();
+  });
+
+  describe('static history refresh on terminal width change', () => {
+    const LINES_PER_MESSAGE = 8;
+
+    const createLongHistory = (count: number): HistoryItem[] =>
+      Array.from(
+        { length: count },
+        (_, index): HistoryItem => ({
+          id: index + 1,
+          type: index % 2 === 0 ? 'user' : 'gemini',
+          text: Array.from(
+            { length: LINES_PER_MESSAGE },
+            (_, line) => `message ${index + 1} line ${line + 1}`,
+          ).join('\n'),
+        }),
+      );
+
+    const renderedHistoryItemIds = () =>
+      new Set(
+        vi
+          .mocked(HistoryItemDisplay)
+          .mock.calls.map(([props]) => props.item.id),
+      );
+
+    // Renders MainContent in inline mode with UI state that the test can
+    // update the way AppContainer does on resize and on refreshStatic().
+    const renderInlineMainContent = async (history: HistoryItem[]) => {
+      let applyLayout: ((layout: Partial<UIState>) => void) | undefined;
+      const LayoutHarness = () => {
+        const outerState = useUIState();
+        const [layout, setLayout] = useState<Partial<UIState>>({});
+        applyLayout = (next) => setLayout((prev) => ({ ...prev, ...next }));
+        return (
+          <UIStateContext.Provider value={{ ...outerState, ...layout }}>
+            <MainContent />
+          </UIStateContext.Provider>
+        );
+      };
+
+      vi.mocked(HistoryItemDisplay).mockClear();
+      const { unmount } = await renderWithProviders(<LayoutHarness />, {
+        uiState: {
+          ...defaultMockUiState,
+          history,
+          terminalWidth: 100,
+          mainAreaWidth: 100,
+        } as Partial<UIState>,
+        config: makeFakeConfig({ useAlternateBuffer: false }),
+      });
+      if (!applyLayout) {
+        throw new Error('applyLayout was not initialized');
+      }
+      const applyLayoutSafe = applyLayout;
+      const updateLayout = (layout: Partial<UIState>) => {
+        act(() => {
+          applyLayoutSafe(layout);
+        });
+      };
+      return { updateLayout, unmount };
+    };
+
+    it('re-renders only a bounded trailing window of history when the static area remounts after a terminal width change', async () => {
+      // 40 multi-line items (~140 characters each) exceed the 1,000 character
+      // budget for re-printing history after a resize.
+      const history = createLongHistory(40);
+      const { updateLayout, unmount } = await renderInlineMainContent(history);
+
+      // The initial mount prints the full history.
+      expect(renderedHistoryItemIds().size).toBe(history.length);
+
+      // 1. The terminal width changes; <Static> does not re-render yet.
+      updateLayout({ terminalWidth: 80, mainAreaWidth: 80 });
+      vi.mocked(HistoryItemDisplay).mockClear();
+
+      // 2. The debounced refreshStatic() remounts the static history.
+      updateLayout({ historyRemountKey: 1 });
+
+      const rerenderedIds = renderedHistoryItemIds();
+      expect(rerenderedIds.has(history[history.length - 1].id)).toBe(true);
+      expect(rerenderedIds.has(history[0].id)).toBe(false);
+      expect(rerenderedIds.size).toBeLessThan(history.length);
+      unmount();
+    });
+
+    it('re-renders only the newest part of a long single response after a terminal width change', async () => {
+      // A long streamed response is stored as many history items after the
+      // prompt, so the whole session can be a single turn.
+      const history: HistoryItem[] = [
+        { id: 1, type: 'user', text: 'Write a long essay' },
+        ...Array.from(
+          { length: 30 },
+          (_, index): HistoryItem => ({
+            id: index + 2,
+            type: index === 0 ? 'gemini' : 'gemini_content',
+            text: `Paragraph ${index + 1}: ${'lorem ipsum '.repeat(20)}`,
+          }),
+        ),
+      ];
+      const { updateLayout, unmount } = await renderInlineMainContent(history);
+      updateLayout({ terminalWidth: 80, mainAreaWidth: 80 });
+      vi.mocked(HistoryItemDisplay).mockClear();
+
+      updateLayout({ historyRemountKey: 1 });
+
+      const rerenderedIds = renderedHistoryItemIds();
+      expect(rerenderedIds.has(history[history.length - 1].id)).toBe(true);
+      // Neither the prompt nor the start of the response is re-rendered.
+      expect(rerenderedIds.has(history[0].id)).toBe(false);
+      expect(rerenderedIds.has(history[1].id)).toBe(false);
+      unmount();
+    });
+
+    it('re-renders the full history when the static area remounts without a terminal width change', async () => {
+      const history = createLongHistory(40);
+      const { updateLayout, unmount } = await renderInlineMainContent(history);
+      vi.mocked(HistoryItemDisplay).mockClear();
+
+      // For example, a theme or Markdown toggle calling refreshStatic().
+      updateLayout({ historyRemountKey: 1 });
+
+      expect(renderedHistoryItemIds().size).toBe(history.length);
+      unmount();
+    });
+
+    it('prints history items appended after a bounded refresh', async () => {
+      const history = createLongHistory(40);
+      const { updateLayout, unmount } = await renderInlineMainContent(history);
+      updateLayout({ terminalWidth: 80, mainAreaWidth: 80 });
+      updateLayout({ historyRemountKey: 1 });
+      vi.mocked(HistoryItemDisplay).mockClear();
+
+      const nextPrompt: HistoryItem = {
+        id: history.length + 1,
+        type: 'user',
+        text: 'next prompt',
+      };
+      updateLayout({ history: [...history, nextPrompt] });
+
+      expect(renderedHistoryItemIds()).toEqual(new Set([nextPrompt.id]));
+      unmount();
+    });
+  });
+
+  describe('StartScreen landing and transition', () => {
+    it('shows StartScreen when history and pendingHistoryItems are empty and transitions to AppHeader on first item', async () => {
+      vi.mocked(useAlternateBuffer).mockReturnValue(false);
+
+      let applyLayout: ((layout: Partial<UIState>) => void) | undefined;
+      const TransitionHarness = () => {
+        const outerState = useUIState();
+        const [layout, setLayout] = useState<Partial<UIState>>({});
+        applyLayout = (next) => setLayout((prev) => ({ ...prev, ...next }));
+        return (
+          <UIStateContext.Provider value={{ ...outerState, ...layout }}>
+            <MainContent />
+          </UIStateContext.Provider>
+        );
+      };
+
+      const { lastFrame, unmount } = await renderWithProviders(
+        <TransitionHarness />,
+        {
+          uiState: {
+            ...defaultMockUiState,
+            history: [],
+            pendingHistoryItems: [],
+            terminalWidth: 100,
+            mainAreaWidth: 100,
+          } as Partial<UIState>,
+          config: makeFakeConfig({ useAlternateBuffer: false }),
+        },
+      );
+
+      expect(lastFrame()).toContain('What can I help you build today?');
+      expect(lastFrame()).not.toContain('AppHeader(full)');
+
+      act(() => {
+        applyLayout?.({
+          history: [{ id: 1, type: 'user', text: 'First prompt' }],
+        });
+      });
+
+      await waitFor(() => {
+        const frame = lastFrame();
+        expect(frame).toContain('AppHeader(full)');
+        expect(frame).toContain('First prompt');
+        expect(frame).not.toContain('What can I help you build today?');
+      });
+
+      unmount();
+    });
+
+    it('transitions to chat view immediately when a pending history item is added', async () => {
+      vi.mocked(useAlternateBuffer).mockReturnValue(false);
+
+      let applyLayout: ((layout: Partial<UIState>) => void) | undefined;
+      const TransitionHarness = () => {
+        const outerState = useUIState();
+        const [layout, setLayout] = useState<Partial<UIState>>({});
+        applyLayout = (next) => setLayout((prev) => ({ ...prev, ...next }));
+        return (
+          <UIStateContext.Provider value={{ ...outerState, ...layout }}>
+            <MainContent />
+          </UIStateContext.Provider>
+        );
+      };
+
+      const { lastFrame, unmount } = await renderWithProviders(
+        <TransitionHarness />,
+        {
+          uiState: {
+            ...defaultMockUiState,
+            history: [],
+            pendingHistoryItems: [],
+            terminalWidth: 100,
+            mainAreaWidth: 100,
+          } as Partial<UIState>,
+          config: makeFakeConfig({ useAlternateBuffer: false }),
+        },
+      );
+
+      expect(lastFrame()).toContain('Quick start');
+
+      act(() => {
+        applyLayout?.({
+          pendingHistoryItems: [{ type: 'gemini', text: 'Streaming reply...' }],
+        });
+      });
+
+      await waitFor(() => {
+        const frame = lastFrame();
+        expect(frame).toContain('AppHeader(full)');
+        expect(frame).toContain('Streaming reply...');
+        expect(frame).not.toContain('Quick start');
+      });
+
+      unmount();
+    });
+  });
+});

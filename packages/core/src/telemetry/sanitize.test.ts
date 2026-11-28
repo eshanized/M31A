@@ -1,0 +1,744 @@
+/**
+ * @license
+ * Copyright 2025 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/**
+ * Tests for telemetry sanitization functions.
+ *
+ * This test file focuses on validating PII protection through sanitization,
+ * particularly for hook names that may contain sensitive information like
+ * API keys, credentials, file paths, and command arguments.
+ */
+
+import { describe, it, expect } from 'vitest';
+import { HookCallEvent, EVENT_HOOK_CALL } from './types.js';
+import { sanitizeHookName } from './sanitize.js';
+import { HookType } from '../hooks/types.js';
+import type { Config } from '../config/config.js';
+
+/**
+ * Create a mock config for testing.
+ *
+ * @param logPromptsEnabled Whether telemetry logging of prompts is enabled.
+ * @returns Mock config object.
+ */
+function createMockConfig(logPromptsEnabled: boolean): Config {
+  return {
+    getTelemetryLogPromptsEnabled: () => logPromptsEnabled,
+    getSessionId: () => 'test-session-id',
+    getExperiments: () => undefined,
+    getExperimentsAsync: async () => undefined,
+    getModel: () => 'gemini-1.5-flash',
+    isInteractive: () => true,
+    getUserEmail: () => undefined,
+    getContentGeneratorConfig: () => undefined,
+  } as unknown as Config;
+}
+
+describe('Telemetry Sanitization', () => {
+  describe('HookCallEvent', () => {
+    describe('constructor', () => {
+      it('should create an event with all fields', () => {
+        const event = new HookCallEvent(
+          'BeforeTool',
+          HookType.Command,
+          'test-hook',
+          { tool_name: 'ReadFile' },
+          100,
+          true,
+          { decision: 'allow' },
+          0,
+          'output',
+          'error',
+          undefined,
+        );
+
+        expect(event['event.name']).toBe('hook_call');
+        expect(event.hook_event_name).toBe('BeforeTool');
+        expect(event.hook_type).toBe('command');
+        expect(event.hook_name).toBe('test-hook');
+        expect(event.hook_input).toEqual({ tool_name: 'ReadFile' });
+        expect(event.hook_output).toEqual({ decision: 'allow' });
+        expect(event.exit_code).toBe(0);
+        expect(event.stdout).toBe('output');
+        expect(event.stderr).toBe('error');
+        expect(event.duration_ms).toBe(100);
+        expect(event.success).toBe(true);
+        expect(event.error).toBeUndefined();
+      });
+
+      it('should create an event with minimal fields', () => {
+        const event = new HookCallEvent(
+          'BeforeTool',
+          HookType.Command,
+          'test-hook',
+          { tool_name: 'ReadFile' },
+          100,
+          true,
+        );
+
+        expect(event.hook_output).toBeUndefined();
+        expect(event.exit_code).toBeUndefined();
+        expect(event.stdout).toBeUndefined();
+        expect(event.stderr).toBeUndefined();
+        expect(event.error).toBeUndefined();
+      });
+    });
+
+    describe('toOpenTelemetryAttributes with logPrompts=true', () => {
+      const config = createMockConfig(true);
+
+      it('should include all fields when logPrompts is enabled', () => {
+        const event = new HookCallEvent(
+          'BeforeTool',
+          HookType.Command,
+          '/path/to/.m31a/hooks/check-secrets.sh --api-key=abc123',
+          { tool_name: 'ReadFile', args: { file: 'secret.txt' } },
+          100,
+          true,
+          { decision: 'allow' },
+          0,
+          'hook executed successfully',
+          'no errors',
+        );
+
+        const attributes = event.toOpenTelemetryAttributes(config);
+
+        expect(attributes['event.name']).toBe(EVENT_HOOK_CALL);
+        expect(attributes['hook_event_name']).toBe('BeforeTool');
+        expect(attributes['hook_type']).toBe('command');
+        // With logPrompts=true, full hook name is included
+        expect(attributes['hook_name']).toBe(
+          '/path/to/.m31a/hooks/check-secrets.sh --api-key=abc123',
+        );
+        expect(attributes['duration_ms']).toBe(100);
+        expect(attributes['success']).toBe(true);
+        expect(attributes['exit_code']).toBe(0);
+        // PII-sensitive fields should be included
+        expect(attributes['hook_input']).toBeDefined();
+        expect(attributes['hook_output']).toBeDefined();
+        expect(attributes['stdout']).toBe('hook executed successfully');
+        expect(attributes['stderr']).toBe('no errors');
+      });
+
+      it('should include hook_input and hook_output as JSON strings', () => {
+        const event = new HookCallEvent(
+          'BeforeTool',
+          HookType.Command,
+          'test-hook',
+          { tool_name: 'ReadFile', args: { file: 'test.txt' } },
+          100,
+          true,
+          { decision: 'allow', reason: 'approved' },
+        );
+
+        const attributes = event.toOpenTelemetryAttributes(config);
+
+        // Should be JSON stringified
+        // eslint-disable-next-line no-restricted-syntax
+        expect(typeof attributes['hook_input']).toBe('string');
+        // eslint-disable-next-line no-restricted-syntax
+        expect(typeof attributes['hook_output']).toBe('string');
+
+        const parsedInput = JSON.parse(attributes['hook_input'] as string);
+        expect(parsedInput).toEqual({
+          tool_name: 'ReadFile',
+          args: { file: 'test.txt' },
+        });
+
+        const parsedOutput = JSON.parse(attributes['hook_output'] as string);
+        expect(parsedOutput).toEqual({ decision: 'allow', reason: 'approved' });
+      });
+    });
+
+    describe('toOpenTelemetryAttributes with logPrompts=false', () => {
+      const config = createMockConfig(false);
+
+      it('should exclude PII-sensitive fields when logPrompts is disabled', () => {
+        const event = new HookCallEvent(
+          'BeforeTool',
+          HookType.Command,
+          '/path/to/.m31a/hooks/check-secrets.sh --api-key=abc123',
+          { tool_name: 'ReadFile', args: { file: 'secret.txt' } },
+          100,
+          true,
+          { decision: 'allow' },
+          0,
+          'hook executed successfully',
+          'no errors',
+        );
+
+        const attributes = event.toOpenTelemetryAttributes(config);
+
+        expect(attributes['event.name']).toBe(EVENT_HOOK_CALL);
+        expect(attributes['hook_event_name']).toBe('BeforeTool');
+        expect(attributes['hook_type']).toBe('command');
+        expect(attributes['duration_ms']).toBe(100);
+        expect(attributes['success']).toBe(true);
+        expect(attributes['exit_code']).toBe(0);
+        // PII-sensitive fields should NOT be included
+        expect(attributes['hook_input']).toBeUndefined();
+        expect(attributes['hook_output']).toBeUndefined();
+        expect(attributes['stdout']).toBeUndefined();
+        expect(attributes['stderr']).toBeUndefined();
+      });
+
+      it('should sanitize hook_name when logPrompts is disabled', () => {
+        const testCases = [
+          {
+            input: '/path/to/.m31a/hooks/check-secrets.sh --api-key=abc123',
+            expected: 'check-secrets.sh',
+            description: 'full path with arguments',
+          },
+          {
+            input: 'python /home/user/script.py --token=xyz',
+            expected: 'python',
+            description: 'command with script path and token',
+          },
+          {
+            input: 'node index.js',
+            expected: 'node',
+            description: 'simple command with file',
+          },
+          {
+            input: '/usr/bin/bash -c "echo $SECRET"',
+            expected: 'bash',
+            description: 'path with inline script',
+          },
+          {
+            input: 'C:\\Windows\\System32\\cmd.exe /c secret.bat',
+            expected: 'cmd.exe',
+            description: 'Windows path with arguments',
+          },
+          {
+            input: './hooks/local-hook.sh',
+            expected: 'local-hook.sh',
+            description: 'relative path',
+          },
+          {
+            input: 'simple-command',
+            expected: 'simple-command',
+            description: 'command without path or args',
+          },
+          {
+            input: '',
+            expected: 'unknown-command',
+            description: 'empty string',
+          },
+          {
+            input: '   ',
+            expected: 'unknown-command',
+            description: 'whitespace only',
+          },
+        ];
+
+        for (const testCase of testCases) {
+          const event = new HookCallEvent(
+            'BeforeTool',
+            HookType.Command,
+            testCase.input,
+            { tool_name: 'ReadFile' },
+            100,
+            true,
+          );
+
+          const attributes = event.toOpenTelemetryAttributes(config);
+
+          expect(attributes['hook_name']).toBe(testCase.expected);
+        }
+      });
+
+      it('should still include error field even when logPrompts is disabled', () => {
+        const event = new HookCallEvent(
+          'BeforeTool',
+          HookType.Command,
+          'test-hook',
+          { tool_name: 'ReadFile' },
+          100,
+          false,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          'Hook execution failed',
+        );
+
+        const attributes = event.toOpenTelemetryAttributes(config);
+
+        // Error should be included for debugging
+        expect(attributes['error']).toBe('Hook execution failed');
+        // But other PII fields should not
+        expect(attributes['hook_input']).toBeUndefined();
+        expect(attributes['stdout']).toBeUndefined();
+      });
+    });
+
+    describe('sanitizeHookName edge cases', () => {
+      const config = createMockConfig(false);
+
+      it('should handle commands with multiple spaces', () => {
+        const event = new HookCallEvent(
+          'BeforeTool',
+          HookType.Command,
+          'python   script.py   --arg1   --arg2',
+          {},
+          100,
+          true,
+        );
+
+        const attributes = event.toOpenTelemetryAttributes(config);
+        expect(attributes['hook_name']).toBe('python');
+      });
+
+      it('should handle mixed path separators', () => {
+        const event = new HookCallEvent(
+          'BeforeTool',
+          HookType.Command,
+          '/path/to\\mixed\\separators.sh',
+          {},
+          100,
+          true,
+        );
+
+        const attributes = event.toOpenTelemetryAttributes(config);
+        expect(attributes['hook_name']).toBe('separators.sh');
+      });
+
+      it('should handle trailing slashes', () => {
+        const event = new HookCallEvent(
+          'BeforeTool',
+          HookType.Command,
+          '/path/to/directory/',
+          {},
+          100,
+          true,
+        );
+
+        const attributes = event.toOpenTelemetryAttributes(config);
+        expect(attributes['hook_name']).toBe('unknown-command');
+      });
+    });
+
+    describe('toLogBody', () => {
+      it('should format success message correctly', () => {
+        const event = new HookCallEvent(
+          'BeforeTool',
+          HookType.Command,
+          'test-hook',
+          {},
+          150,
+          true,
+        );
+
+        expect(event.toLogBody()).toBe(
+          'Hook call BeforeTool.test-hook succeeded in 150ms',
+        );
+      });
+
+      it('should format failure message correctly', () => {
+        const event = new HookCallEvent(
+          'AfterTool',
+          HookType.Command,
+          'validation-hook',
+          {},
+          75,
+          false,
+        );
+
+        expect(event.toLogBody()).toBe(
+          'Hook call AfterTool.validation-hook failed in 75ms',
+        );
+      });
+
+      it('should sanitize hook name in log body', () => {
+        const event = new HookCallEvent(
+          'BeforeTool',
+          HookType.Command,
+          'AWS_SECRET_KEY=abc123 /path/to/check.sh --token=xyz',
+          {},
+          42,
+          true,
+        );
+
+        expect(event.toLogBody()).toBe(
+          'Hook call BeforeTool.check.sh succeeded in 42ms',
+        );
+      });
+    });
+
+    describe('integration scenarios', () => {
+      it('should handle enterprise scenario with full logging', () => {
+        const enterpriseConfig = createMockConfig(true);
+
+        const event = new HookCallEvent(
+          'BeforeModel',
+          HookType.Command,
+          '$M31A_PROJECT_DIR/.m31a/hooks/add-context.sh',
+          {
+            llm_request: {
+              model: 'gemini-1.5-flash',
+              messages: [{ role: 'user', content: 'Hello' }],
+            },
+          },
+          250,
+          true,
+          {
+            hookSpecificOutput: {
+              llm_request: {
+                messages: [
+                  { role: 'user', content: 'Hello' },
+                  { role: 'system', content: 'Additional context...' },
+                ],
+              },
+            },
+          },
+          0,
+          'Context added successfully',
+        );
+
+        const attributes = event.toOpenTelemetryAttributes(enterpriseConfig);
+
+        // In enterprise mode, everything is logged
+        expect(attributes['hook_name']).toBe(
+          '$M31A_PROJECT_DIR/.m31a/hooks/add-context.sh',
+        );
+        expect(attributes['hook_input']).toBeDefined();
+        expect(attributes['hook_output']).toBeDefined();
+        expect(attributes['stdout']).toBe('Context added successfully');
+      });
+
+      it('should handle public telemetry scenario with minimal logging', () => {
+        const publicConfig = createMockConfig(false);
+
+        const event = new HookCallEvent(
+          'BeforeModel',
+          HookType.Command,
+          '$M31A_PROJECT_DIR/.m31a/hooks/add-context.sh',
+          {
+            llm_request: {
+              model: 'gemini-1.5-flash',
+              messages: [{ role: 'user', content: 'Hello' }],
+            },
+          },
+          250,
+          true,
+          {
+            hookSpecificOutput: {
+              llm_request: {
+                messages: [
+                  { role: 'user', content: 'Hello' },
+                  { role: 'system', content: 'Additional context...' },
+                ],
+              },
+            },
+          },
+          0,
+          'Context added successfully',
+        );
+
+        const attributes = event.toOpenTelemetryAttributes(publicConfig);
+
+        // In public mode, only metadata
+        expect(attributes['hook_name']).toBe('add-context.sh');
+        expect(attributes['hook_input']).toBeUndefined();
+        expect(attributes['hook_output']).toBeUndefined();
+        expect(attributes['stdout']).toBeUndefined();
+        // But metadata is still there
+        expect(attributes['hook_event_name']).toBe('BeforeModel');
+        expect(attributes['duration_ms']).toBe(250);
+        expect(attributes['success']).toBe(true);
+      });
+    });
+
+    describe('real-world sensitive command examples', () => {
+      const config = createMockConfig(false);
+
+      it('should sanitize commands with API keys', () => {
+        const event = new HookCallEvent(
+          'BeforeTool',
+          HookType.Command,
+          'curl https://api.example.com -H "Authorization: Bearer sk-abc123xyz"',
+          {},
+          100,
+          true,
+        );
+
+        const attributes = event.toOpenTelemetryAttributes(config);
+        expect(attributes['hook_name']).toBe('curl');
+      });
+
+      it('should sanitize commands with database credentials', () => {
+        const event = new HookCallEvent(
+          'BeforeTool',
+          HookType.Command,
+          'psql postgresql://user:password@localhost/db',
+          {},
+          100,
+          true,
+        );
+
+        const attributes = event.toOpenTelemetryAttributes(config);
+        expect(attributes['hook_name']).toBe('psql');
+      });
+
+      it('should sanitize commands with environment variables containing secrets', () => {
+        const event = new HookCallEvent(
+          'BeforeTool',
+          HookType.Command,
+          'AWS_SECRET_KEY=abc123 aws s3 ls',
+          {},
+          100,
+          true,
+        );
+
+        const attributes = event.toOpenTelemetryAttributes(config);
+        expect(attributes['hook_name']).toBe('aws');
+      });
+
+      it('should sanitize Python scripts with file paths', () => {
+        const event = new HookCallEvent(
+          'BeforeTool',
+          HookType.Command,
+          'python /home/john.doe/projects/secret-scanner/scan.py --config=/etc/secrets.yml',
+          {},
+          100,
+          true,
+        );
+
+        const attributes = event.toOpenTelemetryAttributes(config);
+        expect(attributes['hook_name']).toBe('python');
+      });
+    });
+  });
+
+  describe('sanitizeHookName', () => {
+    it('should skip single and multiple leading POSIX environment variable assignments', () => {
+      expect(
+        sanitizeHookName('AWS_SECRET_KEY=AKIAIOSFODNN7EXAMPLE aws s3 ls'),
+      ).toBe('aws');
+      expect(
+        sanitizeHookName(
+          'AWS_ACCESS_KEY_ID=key1 AWS_SECRET_ACCESS_KEY=secret2 /opt/hooks/run.sh --flag',
+        ),
+      ).toBe('run.sh');
+      expect(sanitizeHookName('EMPTY= ./hooks/run.sh')).toBe('run.sh');
+      expect(sanitizeHookName('_PRIVATE_1=val123 node hook.js')).toBe('node');
+    });
+
+    it('should skip quoted and escaped environment variable values containing spaces', () => {
+      expect(
+        sanitizeHookName(
+          'AUTH_HEADER="Bearer token-value" curl https://example.com',
+        ),
+      ).toBe('curl');
+      expect(
+        sanitizeHookName("API_TOKEN='part1 part2' /usr/local/bin/node hook.js"),
+      ).toBe('node');
+      expect(
+        sanitizeHookName('TOKEN="escaped \\"quote\\" value" python script.py'),
+      ).toBe('python');
+      expect(
+        sanitizeHookName('PASSWORD=my\\ secret\\ value python script.py'),
+      ).toBe('python');
+      expect(sanitizeHookName('TOKEN="unclosed value with spaces')).toBe(
+        'unknown-command',
+      );
+    });
+
+    it('should skip env assignments whose values contain slashes or equals signs', () => {
+      expect(
+        sanitizeHookName(
+          'DATABASE_URL=postgres://user:pass@localhost/db node migrate.js',
+        ),
+      ).toBe('node');
+      expect(sanitizeHookName('TOKEN=abc=def== node app.js')).toBe('node');
+      expect(sanitizeHookName('SECRET_PATH=/home/user/token.txt')).toBe(
+        'unknown-command',
+      );
+    });
+
+    it('should return unknown-command when only env assignments are provided', () => {
+      expect(sanitizeHookName('AWS_SECRET_KEY=abc123')).toBe('unknown-command');
+      expect(sanitizeHookName('FOO=1 BAR=2')).toBe('unknown-command');
+      expect(sanitizeHookName('"" aws s3 ls')).toBe('unknown-command');
+      expect(sanitizeHookName("''")).toBe('unknown-command');
+    });
+
+    it('should defensively drop non-POSIX tokens containing equals signs', () => {
+      expect(sanitizeHookName('(AWS_SECRET_KEY=abc123 aws s3 ls)')).toBe(
+        'unknown-command',
+      );
+      expect(sanitizeHookName('(API_KEY=https://host/secret123 aws)')).toBe(
+        'unknown-command',
+      );
+      expect(sanitizeHookName('$env:API_KEY="secret123"; aws s3 ls')).toBe(
+        'unknown-command',
+      );
+      expect(sanitizeHookName('--api-key=secret123')).toBe('unknown-command');
+      expect(sanitizeHookName('"AWS_SECRET_KEY=abc123" aws s3 ls')).toBe(
+        'unknown-command',
+      );
+      expect(sanitizeHookName('/path/to/key=value.sh')).toBe('unknown-command');
+    });
+
+    it('should extract basenames from quoted paths and paths with equals in parent directories', () => {
+      expect(
+        sanitizeHookName('"/path/to/my hooks/check.sh" --api-key=abc123'),
+      ).toBe('check.sh');
+      expect(
+        sanitizeHookName('"C:\\Program Files\\My App\\hook.exe" /c test.bat'),
+      ).toBe('hook.exe');
+      expect(
+        sanitizeHookName(
+          '"C:\\Program Files (x86)\\My App\\hook.exe" /c test.bat',
+        ),
+      ).toBe('hook.exe');
+      expect(
+        sanitizeHookName("'C:\\Program Files\\My App\\hook.exe' /c test.bat"),
+      ).toBe('hook.exe');
+      expect(sanitizeHookName('/tmp/dir=1/check-script.sh --flag')).toBe(
+        'check-script.sh',
+      );
+    });
+
+    it('should fail closed on unterminated quotes, trailing Windows backslash quotes, and wrapped command strings', () => {
+      expect(
+        sanitizeHookName('"/path/to/hook.sh --api-key sk-secret-12345'),
+      ).toBe('unknown-command');
+      expect(
+        sanitizeHookName(
+          '"C:\\Program Files\\My App\\" --token sk-secret-12345',
+        ),
+      ).toBe('unknown-command');
+      expect(
+        sanitizeHookName(
+          '"C:\\Program Files\\My App\\" --header "Bearer sk-secret-12345"',
+        ),
+      ).toBe('unknown-command');
+      expect(
+        sanitizeHookName(
+          '"python /home/alice/scan.py --token sk-secret-12345"',
+        ),
+      ).toBe('unknown-command');
+      expect(sanitizeHookName('"python /home/alice/scan.py"')).toBe(
+        'unknown-command',
+      );
+      expect(
+        sanitizeHookName('"/path/to/hook.sh --api-key sk-secret-12345"'),
+      ).toBe('unknown-command');
+      expect(sanitizeHookName('"/path/to/hook.sh /home/alice/secret"')).toBe(
+        'unknown-command',
+      );
+      expect(sanitizeHookName('"/path/to/hook.sh ./sk-secret-12345"')).toBe(
+        'unknown-command',
+      );
+      expect(sanitizeHookName('"/path/to/hook.sh ../sk-secret-12345"')).toBe(
+        'unknown-command',
+      );
+      expect(
+        sanitizeHookName('"curl https://api.example.com/sk-secret-12345"'),
+      ).toBe('unknown-command');
+    });
+
+    it('should keep command and parameter substitutions in env assignments as a single token', () => {
+      expect(
+        sanitizeHookName('API_KEY=$(echo sk-secret-12345) node hook.js'),
+      ).toBe('node');
+      expect(
+        sanitizeHookName('SECRET=$(cat /Users/alice/.netrc) python3 hook.py'),
+      ).toBe('python3');
+      expect(
+        sanitizeHookName(
+          'AUTH_TOKEN=$(gcloud auth print-access-token) /opt/hooks/run.sh',
+        ),
+      ).toBe('run.sh');
+      expect(
+        sanitizeHookName(
+          'AUTH="Bearer $(gcloud auth print-access-token)" /opt/hooks/run.sh',
+        ),
+      ).toBe('run.sh');
+      expect(
+        sanitizeHookName('TOKEN=$(echo $(cat /etc/secret)) /opt/hooks/run.sh'),
+      ).toBe('run.sh');
+      expect(sanitizeHookName('TOKEN=$(echo "a)b") node hook.js')).toBe('node');
+      expect(sanitizeHookName('COUNT=$((1 + 2)) node hook.js')).toBe('node');
+      expect(
+        sanitizeHookName(
+          'API_KEY=${API_KEY:-default sk-secret-12345} node hook.js',
+        ),
+      ).toBe('node');
+      expect(
+        sanitizeHookName(
+          'AUTH="prefix ${API_KEY:-"quoted default"}" /opt/hooks/run.sh',
+        ),
+      ).toBe('run.sh');
+      expect(
+        sanitizeHookName('API_KEY=${API_KEY:-unclosed sk-secret node hook.js'),
+      ).toBe('unknown-command');
+      expect(
+        sanitizeHookName('API_KEY=`echo sk-secret-12345` node hook.js'),
+      ).toBe('node');
+      expect(sanitizeHookName("API_KEY=`echo don\\'t` node hook.js")).toBe(
+        'node',
+      );
+      expect(
+        sanitizeHookName('API_KEY=$(echo sk-secret-12345 node hook.js'),
+      ).toBe('unknown-command');
+      expect(
+        sanitizeHookName('API_KEY=`echo sk-secret-12345 node hook.js'),
+      ).toBe('unknown-command');
+      expect(sanitizeHookName('$(echo sk-secret-12345)')).toBe(
+        'unknown-command',
+      );
+      expect(sanitizeHookName('`echo sk-secret-12345`')).toBe(
+        'unknown-command',
+      );
+      expect(
+        sanitizeHookName('${M31A_PROJECT_DIR}/.m31a/hooks/add-context.sh'),
+      ).toBe('add-context.sh');
+    });
+
+    it('should honor POSIX escapes and ANSI-C quoting in env assignment values', () => {
+      expect(
+        sanitizeHookName(
+          "MSG=don\\'t curl https://example.com -H 'Bearer sk-secret-12345'",
+        ),
+      ).toBe('curl');
+      expect(sanitizeHookName('FOO=bar\\\\ curl sk-secret-12345')).toBe('curl');
+      expect(sanitizeHookName('FOO=bar\\')).toBe('unknown-command');
+      expect(
+        sanitizeHookName('TOKEN="price is \\$5 and \\`literal\\`" node app.js'),
+      ).toBe('node');
+      expect(
+        sanitizeHookName("MSG=$'don\\'t fail' curl https://example.com"),
+      ).toBe('curl');
+      expect(sanitizeHookName("MSG=$'unclosed curl secret")).toBe(
+        'unknown-command',
+      );
+      expect(sanitizeHookName("echo don't fail")).toBe('echo');
+    });
+
+    it('should handle bash append assignments and reject bare shell operators', () => {
+      expect(sanitizeHookName('PATH+=/opt/bin /opt/hooks/run.sh')).toBe(
+        'run.sh',
+      );
+      expect(sanitizeHookName('FOO=bar && /opt/hooks/run.sh')).toBe(
+        'unknown-command',
+      );
+      expect(sanitizeHookName('FOO=bar || /opt/hooks/run.sh')).toBe(
+        'unknown-command',
+      );
+      expect(sanitizeHookName('FOO=bar | /opt/hooks/run.sh')).toBe(
+        'unknown-command',
+      );
+      expect(sanitizeHookName('FOO=bar ; /opt/hooks/run.sh')).toBe(
+        'unknown-command',
+      );
+      expect(sanitizeHookName('FOO=bar & /opt/hooks/run.sh')).toBe(
+        'unknown-command',
+      );
+    });
+  });
+});

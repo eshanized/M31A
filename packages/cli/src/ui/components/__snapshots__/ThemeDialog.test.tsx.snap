@@ -1,0 +1,202 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Initial Theme Selection > should default to a dark theme when terminal background is dark and no theme is set 1`] = `
+"╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                                                                  │
+│ > Select Theme                               Preview                                             │
+│ ▲                                            ┌─────────────────────────────────────────────────┐ │
+│    1. ANSI Dark                              │                                                 │ │
+│    2. Atom One Dark                          │ 1 # function                                    │ │
+│    3. Ayu Dark                               │ 2 def fibonacci(n):                             │ │
+│    4. Default Dark                           │ 3     a, b = 0, 1                               │ │
+│    5. Dracula Dark                           │ 4     for _ in range(n):                        │ │
+│ ●  6. Everblush Dark                         │ 5         a, b = b, a + b                       │ │
+│    7. GitHub Dark                            │ 6     return a                                  │ │
+│    8. GitHub Dark Colorblind Dark            │                                                 │ │
+│    9. Holiday Dark                           │ 1 - print("Hello, " + name)                     │ │
+│   10. Shades Of Purple Dark                  │ 1 + print(f"Hello, {name}!")                    │ │
+│   11. Solarized Dark                         │                                                 │ │
+│   12. Tokyo Night Dark                       └─────────────────────────────────────────────────┘ │
+│ ▼                                                                                                │
+│                                                                                                  │
+│ (Use Enter to select, Tab to configure scope, Esc to close)                                      │
+│                                                                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+"
+`;
+
+exports[`Initial Theme Selection > should default to a light theme when terminal background is light and no theme is set 1`] = `
+"╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                                                                  │
+│ > Select Theme                               Preview                                             │
+│ ▲                                            ┌─────────────────────────────────────────────────┐ │
+│    1. ANSI Light                             │                                                 │ │
+│    2. Ayu Light                              │ 1 # function                                    │ │
+│ ●  3. Default Light (Matches terminal)       │ 2 def fibonacci(n):                             │ │
+│    4. GitHub Light                           │ 3     a, b = 0, 1                               │ │
+│    5. GitHub Light Colorblind Light (Mat…    │ 4     for _ in range(n):                        │ │
+│    6. Google Code Light                      │ 5         a, b = b, a + b                       │ │
+│    7. Solarized Light                        │ 6     return a                                  │ │
+│    8. Xcode Light                            │                                                 │ │
+│    9. ANSI Dark (Incompatible)               │ 1 - print("Hello, " + name)                     │ │
+│   10. Atom One Dark (Incompatible)           │ 1 + print(f"Hello, {name}!")                    │ │
+│   11. Ayu Dark (Incompatible)                │                                                 │ │
+│   12. Default Dark (Incompatible)            └─────────────────────────────────────────────────┘ │
+│ ▼                                                                                                │
+│                                                                                                  │
+│ (Use Enter to select, Tab to configure scope, Esc to close)                                      │
+│                                                                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+"
+`;
+
+exports[`Initial Theme Selection > should use the theme from settings even if terminal background suggests a different theme type 1`] = `
+"╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                                                                  │
+│ > Select Theme                               Preview                                             │
+│ ▲                                            ┌─────────────────────────────────────────────────┐ │
+│ ●  1. ANSI Dark                              │                                                 │ │
+│    2. Atom One Dark                          │ 1 # function                                    │ │
+│    3. Ayu Dark                               │ 2 def fibonacci(n):                             │ │
+│    4. Default Dark                           │ 3     a, b = 0, 1                               │ │
+│    5. Dracula Dark                           │ 4     for _ in range(n):                        │ │
+│    6. Everblush Dark                         │ 5         a, b = b, a + b                       │ │
+│    7. GitHub Dark                            │ 6     return a                                  │ │
+│    8. GitHub Dark Colorblind Dark            │                                                 │ │
+│    9. Holiday Dark                           │ 1 - print("Hello, " + name)                     │ │
+│   10. Shades Of Purple Dark                  │ 1 + print(f"Hello, {name}!")                    │ │
+│   11. Solarized Dark                         │                                                 │ │
+│   12. Tokyo Night Dark                       └─────────────────────────────────────────────────┘ │
+│ ▼                                                                                                │
+│                                                                                                  │
+│ (Use Enter to select, Tab to configure scope, Esc to close)                                      │
+│                                                                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+"
+`;
+
+exports[`ThemeDialog Snapshots > should render correctly in scope selector mode 1`] = `
+"╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                                                                  │
+│ > Apply To                                                                                       │
+│ ● 1. User Settings                                                                               │
+│   2. Workspace Settings                                                                          │
+│   3. System Settings                                                                             │
+│                                                                                                  │
+│ (Use Enter to apply scope, Tab to select theme, Esc to close)                                    │
+│                                                                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+"
+`;
+
+exports[`ThemeDialog Snapshots > should render correctly in theme selection mode (isDevelopment: false) 1`] = `
+"╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                                                                  │
+│ > Select Theme                               Preview                                             │
+│ ▲                                            ┌─────────────────────────────────────────────────┐ │
+│ ●  1. ANSI Dark (Matches terminal)           │                                                 │ │
+│    2. Atom One Dark                          │ 1 # function                                    │ │
+│    3. Ayu Dark                               │ 2 def fibonacci(n):                             │ │
+│    4. Default Dark                           │ 3     a, b = 0, 1                               │ │
+│    5. Dracula Dark                           │ 4     for _ in range(n):                        │ │
+│    6. Everblush Dark                         │ 5         a, b = b, a + b                       │ │
+│    7. GitHub Dark                            │ 6     return a                                  │ │
+│    8. GitHub Dark Colorblind Dark            │                                                 │ │
+│    9. Holiday Dark                           │ 1 - print("Hello, " + name)                     │ │
+│   10. Shades Of Purple Dark                  │ 1 + print(f"Hello, {name}!")                    │ │
+│   11. Solarized Dark                         │                                                 │ │
+│   12. Tokyo Night Dark                       └─────────────────────────────────────────────────┘ │
+│ ▼                                                                                                │
+│                                                                                                  │
+│ (Use Enter to select, Tab to configure scope, Esc to close)                                      │
+│                                                                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+"
+`;
+
+exports[`ThemeDialog Snapshots > should render correctly in theme selection mode (isDevelopment: true) 1`] = `
+"╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                                                                  │
+│ > Select Theme                               Preview                                             │
+│ ▲                                            ┌─────────────────────────────────────────────────┐ │
+│ ●  1. ANSI Dark (Matches terminal)           │                                                 │ │
+│    2. Atom One Dark                          │ 1 # function                                    │ │
+│    3. Ayu Dark                               │ 2 def fibonacci(n):                             │ │
+│    4. Default Dark                           │ 3     a, b = 0, 1                               │ │
+│    5. Dracula Dark                           │ 4     for _ in range(n):                        │ │
+│    6. Everblush Dark                         │ 5         a, b = b, a + b                       │ │
+│    7. GitHub Dark                            │ 6     return a                                  │ │
+│    8. GitHub Dark Colorblind Dark            │                                                 │ │
+│    9. Holiday Dark                           │ 1 - print("Hello, " + name)                     │ │
+│   10. Shades Of Purple Dark                  │ 1 + print(f"Hello, {name}!")                    │ │
+│   11. Solarized Dark                         │                                                 │ │
+│   12. Tokyo Night Dark                       └─────────────────────────────────────────────────┘ │
+│ ▼                                                                                                │
+│                                              ╭─────────────────────────────────────────────────╮ │
+│                                              │ DEVELOPER TOOLS (Not visible to users)          │ │
+│                                              │                                                 │ │
+│                                              │ How do colors get applied?                      │ │
+│                                              │   • Hex: Rendered exactly by modern terminals.  │ │
+│                                              │   Not overridden by app themes.                 │ │
+│                                              │   • Blank: Uses your terminal's default         │ │
+│                                              │   foreground/background.                        │ │
+│                                              │   • Compatibility: On older terminals, hex is   │ │
+│                                              │   approximated to the nearest ANSI color.       │ │
+│                                              │   • ANSI Names: 'red', 'green', etc. are mapped │ │
+│                                              │   to your terminal app's palette.               │ │
+│                                              │                                                 │ │
+│                                              │  Value     Name                                 │ │
+│                                              │   #141b…  backgroun Main terminal background    │ │
+│                                              │           d.primary color                       │ │
+│                                              │   #232…  backgroun  Subtle background for       │ │
+│                                              │          d.message  message blocks              │ │
+│                                              │   #1e2…   backgroun Background for the input    │ │
+│                                              │           d.input   prompt                      │ │
+│                                              │   #23…   background. Background highlight for   │ │
+│                                              │          focus       selected/focused items     │ │
+│                                              │   #1d3…  backgrou Background for added lines    │ │
+│                                              │          nd.diff. in diffs                      │ │
+│                                              │          added                                  │ │
+│                                              │   #382…  backgroun Background for removed       │ │
+│                                              │          d.diff.re lines in diffs               │ │
+│                                              │          moved                                  │ │
+│                                              │  #dadad text.prim  Primary text color (uses     │ │
+│                                              │  a      ary        terminal default if blank)   │ │
+│                                              │  #b3b9b8  text.secon Secondary/dimmed text      │ │
+│                                              │           dary       color                      │ │
+│                                              │  #67b0e8 text.link Hyperlink and highlighting   │ │
+│                                              │                    color                        │ │
+│                                              │  #c47fd5  text.accen Accent color for           │ │
+│                                              │           t          emphasis                   │ │
+│                                              │  #dadada text.res  Color for model response     │ │
+│                                              │          ponse     text (uses terminal default  │ │
+│                                              │                    if blank)                    │ │
+│                                              │  #2d3437   border.def Standard border color     │ │
+│                                              │            ault                                 │ │
+│                                              │  #6c7477ui.comme  Color for code comments and   │ │
+│                                              │         nt        metadata                      │ │
+│                                              │  #b3b9b ui.symbol Color for technical symbols   │ │
+│                                              │  8                and UI icons                  │ │
+│                                              │  #67b0e ui.active Border color for active or    │ │
+│                                              │  8                running elements              │ │
+│                                              │  #2d343 ui.dark    Deeply dimmed color for      │ │
+│                                              │  7                 subtle UI elements           │ │
+│                                              │  #8ccf7 ui.focus   Color for focused elements   │ │
+│                                              │  e                 (e.g. selected menu items,   │ │
+│                                              │                    focused borders)             │ │
+│                                              │  #e57474status.err Color for error messages     │ │
+│                                              │         or         and critical status          │ │
+│                                              │  #8ccf7estatus.suc Color for success messages   │ │
+│                                              │         cess       and positive status          │ │
+│                                              │  #e5c76 status.wa Color for warnings and        │ │
+│                                              │  b      rning     cautionary status             │ │
+│                                              │  #8ccf7e   ui.gradien                           │ │
+│                                              │  #6cbfbf   t                                    │ │
+│                                              │  #67b0e8                                        │ │
+│                                              ╰─────────────────────────────────────────────────╯ │
+│                                                                                                  │
+│ (Use Enter to select, Tab to configure scope, Esc to close)                                      │
+│                                                                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+"
+`;

@@ -1,0 +1,2562 @@
+/**
+ * @license
+ * Copyright 2025 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { expect, it, describe, vi, beforeEach, afterEach } from 'vitest';
+import * as fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  const fsModule = {
+    ...actual,
+    mkdirSync: vi.fn(actual.mkdirSync),
+    appendFileSync: vi.fn(actual.appendFileSync),
+    writeFileSync: vi.fn(actual.writeFileSync),
+    readFileSync: vi.fn(actual.readFileSync),
+    unlinkSync: vi.fn(actual.unlinkSync),
+    existsSync: vi.fn(actual.existsSync),
+    readdirSync: vi.fn(actual.readdirSync),
+    promises: {
+      ...actual.promises,
+      stat: vi.fn(actual.promises.stat),
+      readFile: vi.fn(actual.promises.readFile),
+      unlink: vi.fn(actual.promises.unlink),
+      readdir: vi.fn(actual.promises.readdir),
+      open: vi.fn(actual.promises.open),
+      rm: vi.fn(actual.promises.rm),
+      mkdir: vi.fn(actual.promises.mkdir),
+      writeFile: vi.fn(actual.promises.writeFile),
+    },
+  };
+  return {
+    ...fsModule,
+    default: fsModule,
+  };
+});
+
+import {
+  ChatRecordingService,
+  SESSION_FILE_PREFIX,
+  hasResumableConversationContent,
+  isResumableMessageRecord,
+  loadConversationRecord,
+  MAX_HISTORY_MESSAGES,
+  type ConversationRecord,
+  type ToolCallRecord,
+  type MessageRecord,
+} from './chatRecordingService.js';
+import type { WorkspaceContext } from '../utils/workspaceContext.js';
+import { CoreToolCallStatus } from '../scheduler/types.js';
+import type { Part } from '@m31a/genai';
+import type { Config } from '../config/config.js';
+import { getProjectHash } from '../utils/paths.js';
+import type { HistoryTurn } from '../core/agentChatHistory.js';
+
+vi.mock('../utils/paths.js');
+vi.mock('node:crypto', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:crypto')>();
+  let count = 0;
+  return {
+    ...actual,
+    randomUUID: vi.fn(() => `test-uuid-${count++}`),
+    createHash: vi.fn(() => ({
+      update: vi.fn(() => ({
+        digest: vi.fn(() => 'mocked-hash'),
+      })),
+    })),
+  };
+});
+
+describe('ChatRecordingService', () => {
+  let chatRecordingService: ChatRecordingService;
+  let mockConfig: Config;
+  let testTempDir: string;
+
+  function createTestMockConfig(promptId: string = 'test-session-id'): Config {
+    const configObj = {
+      toolRegistry: {
+        getTool: vi.fn(),
+      },
+      promptId,
+      getSessionId: vi.fn().mockReturnValue(promptId),
+      getProjectRoot: vi.fn().mockReturnValue('/test/project/root'),
+      storage: {
+        getProjectTempDir: vi.fn().mockReturnValue(testTempDir),
+      },
+      getModel: vi.fn().mockReturnValue('gemini-pro'),
+      getDebugMode: vi.fn().mockReturnValue(false),
+      getWorkspaceContext: vi.fn().mockReturnValue({
+        getDirectories: vi.fn().mockReturnValue([]),
+      }),
+      getToolRegistry: vi.fn().mockReturnValue({
+        getTool: vi.fn().mockReturnValue({
+          displayName: 'Test Tool',
+          description: 'A test tool',
+          isOutputMarkdown: false,
+        }),
+      }),
+    };
+
+    // Ensure configObj.config points to itself for AgentLoopContext parity
+    Object.defineProperty(configObj, 'config', {
+      get() {
+        return configObj;
+      },
+    });
+
+    return configObj as unknown as Config;
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+  beforeEach(async () => {
+    testTempDir = await fs.promises.mkdtemp(
+      path.join(os.tmpdir(), 'chat-recording-test-'),
+    );
+
+    mockConfig = createTestMockConfig('test-session-id');
+
+    vi.mocked(getProjectHash).mockReturnValue('test-project-hash');
+    chatRecordingService = new ChatRecordingService(mockConfig);
+  });
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    if (testTempDir) {
+      await fs.promises.rm(testTempDir, { recursive: true, force: true });
+    }
+  });
+
+  describe('isResumableMessageRecord', () => {
+    it('should treat malformed messages without content as non-resumable', () => {
+      const message = {
+        id: 'malformed-message',
+        timestamp: '2024-01-01T00:00:00.000Z',
+        type: 'user',
+      } as MessageRecord;
+
+      expect(() => isResumableMessageRecord(message)).not.toThrow();
+      expect(isResumableMessageRecord(message)).toBe(false);
+    });
+
+    it('should return false for command-only messages', () => {
+      const messages = [
+        {
+          type: 'user',
+          content: '/resume',
+          id: 'msg1',
+          timestamp: '2024-01-01T10:00:00.000Z',
+        },
+        {
+          type: 'user',
+          content: '?help',
+          id: 'msg2',
+          timestamp: '2024-01-01T10:01:00.000Z',
+        },
+      ] as MessageRecord[];
+
+      expect(hasResumableConversationContent(messages)).toBe(false);
+    });
+
+    it('should return false for internal context-only messages', () => {
+      const messages = [
+        {
+          type: 'user',
+          content: '<session_context>previous state</session_context>',
+          id: 'msg1',
+          timestamp: '2024-01-01T10:00:00.000Z',
+        },
+        {
+          type: 'user',
+          content: '<hook_context>hook data</hook_context>',
+          id: 'msg2',
+          timestamp: '2024-01-01T10:01:00.000Z',
+        },
+      ] as MessageRecord[];
+
+      expect(hasResumableConversationContent(messages)).toBe(false);
+    });
+
+    it('should return true for real user or assistant content', () => {
+      const messages = [
+        {
+          type: 'user',
+          content: '/resume',
+          id: 'msg1',
+          timestamp: '2024-01-01T10:00:00.000Z',
+        },
+        {
+          type: 'gemini',
+          content: 'I can help with that.',
+          id: 'msg2',
+          timestamp: '2024-01-01T10:01:00.000Z',
+        },
+      ] as MessageRecord[];
+
+      expect(hasResumableConversationContent(messages)).toBe(true);
+    });
+
+    it('should return false when messages is undefined or empty', () => {
+      expect(hasResumableConversationContent(undefined)).toBe(false);
+      expect(hasResumableConversationContent([])).toBe(false);
+    });
+  });
+
+  describe('initialize', () => {
+    it('should create a new session if none is provided', async () => {
+      await chatRecordingService.initialize();
+      chatRecordingService.recordMessage({
+        type: 'user',
+        content: 'ping',
+        model: 'm',
+      });
+
+      const chatsDir = path.join(testTempDir, 'chats');
+      expect(fs.existsSync(chatsDir)).toBe(true);
+      const files = fs.readdirSync(chatsDir);
+      expect(files.length).toBeGreaterThan(0);
+      expect(files[0]).toMatch(/^session-.*-test-ses\.jsonl$/);
+    });
+
+    it('should not append to or poison an existing session file in the same UTC minute', async () => {
+      await chatRecordingService.initialize();
+      chatRecordingService.recordMessage({
+        type: 'user',
+        content: 'Reply with exactly: alpha',
+        model: 'gemini-pro',
+      });
+      chatRecordingService.recordMessage({
+        type: 'gemini',
+        content: 'alpha',
+        model: 'gemini-pro',
+      });
+
+      const originalFilePath = chatRecordingService.getConversationFilePath()!;
+      expect(fs.existsSync(originalFilePath)).toBe(true);
+
+      // A second fresh initialization in the same UTC minute for the same sessionId
+      // (e.g. during eager config initialization before resumeChat) must not append a
+      // context-only checkpoint onto the existing session file.
+      const secondRecordingService = new ChatRecordingService(mockConfig);
+      await secondRecordingService.initialize();
+      secondRecordingService.updateMessagesFromHistory([
+        {
+          id: 'ctx-1',
+          content: {
+            role: 'user',
+            parts: [{ text: '<session_context>env</session_context>' }],
+          },
+        } as HistoryTurn,
+      ]);
+
+      const secondFilePath = secondRecordingService.getConversationFilePath()!;
+      expect(secondFilePath).not.toBe(originalFilePath);
+      expect(path.basename(secondFilePath)).toMatch(
+        /^session-.*-1-test-ses\.jsonl$/,
+      );
+
+      const reloadedOriginal = await loadConversationRecord(originalFilePath);
+      expect(reloadedOriginal).not.toBeNull();
+      expect(reloadedOriginal?.hasResumableContent).toBe(true);
+      expect(reloadedOriginal?.messages).toHaveLength(2);
+    });
+
+    it('should include the conversation kind when specified', async () => {
+      await chatRecordingService.initialize(undefined, 'subagent');
+      chatRecordingService.recordMessage({
+        type: 'user',
+        content: 'ping',
+        model: 'm',
+      });
+
+      const sessionFile = chatRecordingService.getConversationFilePath()!;
+      const conversation = (await loadConversationRecord(
+        sessionFile,
+      )) as ConversationRecord;
+      expect(conversation.kind).toBe('subagent');
+    });
+
+    it('should create a subdirectory for subagents if parentSessionId is present', async () => {
+      const parentSessionId = 'test-parent-uuid';
+      Object.defineProperty(mockConfig, 'parentSessionId', {
+        value: parentSessionId,
+        writable: true,
+        configurable: true,
+      });
+
+      await chatRecordingService.initialize(undefined, 'subagent');
+      chatRecordingService.recordMessage({
+        type: 'user',
+        content: 'ping',
+        model: 'm',
+      });
+
+      const chatsDir = path.join(testTempDir, 'chats');
+      const subagentDir = path.join(chatsDir, parentSessionId);
+      expect(fs.existsSync(subagentDir)).toBe(true);
+
+      const files = fs.readdirSync(subagentDir);
+      expect(files.length).toBeGreaterThan(0);
+      expect(files[0]).toBe('test-session-id.jsonl');
+    });
+
+    it('should inherit workspace directories for subagents during initialization', async () => {
+      const mockDirectories = ['/project/dir1', '/project/dir2'];
+      vi.mocked(mockConfig.getWorkspaceContext).mockReturnValue({
+        getDirectories: vi.fn().mockReturnValue(mockDirectories),
+      } as unknown as WorkspaceContext);
+
+      // Initialize as a subagent
+      await chatRecordingService.initialize(undefined, 'subagent');
+
+      // Recording a message triggers the disk write
+      chatRecordingService.recordMessage({
+        type: 'user',
+        content: 'ping',
+        model: 'm',
+      });
+
+      const sessionFile = chatRecordingService.getConversationFilePath()!;
+      const conversation = (await loadConversationRecord(
+        sessionFile,
+      )) as ConversationRecord;
+
+      expect(conversation.kind).toBe('subagent');
+      expect(conversation.directories).toEqual(mockDirectories);
+    });
+
+    it('should resume from an existing session if provided', async () => {
+      const chatsDir = path.join(testTempDir, 'chats');
+      fs.mkdirSync(chatsDir, { recursive: true });
+      const sessionFile = path.join(chatsDir, 'session.jsonl');
+      const initialData = {
+        sessionId: 'old-session-id',
+        projectHash: 'test-project-hash',
+        messages: [],
+      };
+      fs.writeFileSync(
+        sessionFile,
+        JSON.stringify({ ...initialData, messages: undefined }) +
+          '\n' +
+          (initialData.messages || [])
+            .map((m: unknown) => JSON.stringify(m))
+            .join('\n') +
+          '\n',
+      );
+
+      await chatRecordingService.initialize({
+        filePath: sessionFile,
+        conversation: {
+          sessionId: 'old-session-id',
+        } as ConversationRecord,
+      });
+
+      const conversation = (await loadConversationRecord(
+        sessionFile,
+      )) as ConversationRecord;
+      expect(conversation.sessionId).toBe('old-session-id');
+    });
+
+    it('should safely handle resumed session files with undefined messages and initialize array', async () => {
+      const chatsDir = path.join(testTempDir, 'chats');
+      fs.mkdirSync(chatsDir, { recursive: true });
+      const sessionFile = path.join(chatsDir, 'session-undefined-msgs.jsonl');
+      fs.writeFileSync(
+        sessionFile,
+        JSON.stringify({
+          sessionId: 'undefined-msgs-id',
+          projectHash: 'test-project-hash',
+          startTime: new Date().toISOString(),
+          lastUpdated: new Date().toISOString(),
+        }) + '\n',
+      );
+
+      await expect(
+        chatRecordingService.initialize({
+          filePath: sessionFile,
+          conversation: {
+            sessionId: 'undefined-msgs-id',
+            projectHash: 'test-project-hash',
+          } as ConversationRecord,
+        }),
+      ).resolves.not.toThrow();
+
+      const conv = chatRecordingService.getConversation();
+      expect(conv).not.toBeNull();
+      expect(conv?.messages).toEqual([]);
+    });
+
+    it('should fall back to the in-memory conversation when the file cannot be reloaded', async () => {
+      // Regression test for the `/compress` "Failed to load resumed session
+      // data from file" bug: when resuming with a filePath that cannot be
+      // loaded from disk, initialize must NOT throw. It should adopt the
+      // in-memory conversation it was handed and rewrite a clean file.
+      const chatsDir = path.join(testTempDir, 'chats');
+      fs.mkdirSync(chatsDir, { recursive: true });
+      const missingFile = path.join(chatsDir, 'missing-session.jsonl');
+      expect(fs.existsSync(missingFile)).toBe(false);
+
+      const inMemoryConversation = {
+        sessionId: 'resumed-session-id',
+        projectHash: 'resumed-project-hash',
+        startTime: new Date().toISOString(),
+        lastUpdated: new Date().toISOString(),
+        messages: [
+          {
+            id: 'msg-1',
+            type: 'user',
+            timestamp: new Date().toISOString(),
+            content: 'hello from memory',
+          },
+        ],
+      } as unknown as ConversationRecord;
+
+      await expect(
+        chatRecordingService.initialize({
+          filePath: missingFile,
+          conversation: inMemoryConversation,
+        }),
+      ).resolves.not.toThrow();
+
+      // The in-memory conversation is adopted.
+      expect(chatRecordingService.getConversation()?.sessionId).toBe(
+        'resumed-session-id',
+      );
+
+      // A clean, loadable file is rewritten from the in-memory copy so future
+      // loads and appends succeed.
+      const reloaded = (await loadConversationRecord(
+        missingFile,
+      )) as ConversationRecord;
+      expect(reloaded).not.toBeNull();
+      expect(reloaded.sessionId).toBe('resumed-session-id');
+      expect(reloaded.projectHash).toBe('resumed-project-hash');
+      expect(reloaded.messages).toHaveLength(1);
+    });
+
+    it('should preserve an unreadable session file instead of destroying it', async () => {
+      // The reload may have failed only transiently, so the original bytes
+      // must survive the recovery rewrite.
+      const chatsDir = path.join(testTempDir, 'chats');
+      fs.mkdirSync(chatsDir, { recursive: true });
+      const sessionFile = path.join(chatsDir, 'unreadable.jsonl');
+
+      // No usable metadata line => loadConversationRecord() returns null.
+      const originalBytes = '{"not":"a valid metadata line"}\n';
+      fs.writeFileSync(sessionFile, originalBytes);
+
+      await chatRecordingService.initialize({
+        filePath: sessionFile,
+        conversation: {
+          sessionId: 'recovered-session-id',
+          projectHash: 'recovered-project-hash',
+          startTime: new Date().toISOString(),
+          lastUpdated: new Date().toISOString(),
+          messages: [],
+        } as unknown as ConversationRecord,
+      });
+
+      // The rewritten file is loadable again...
+      const reloaded = (await loadConversationRecord(
+        sessionFile,
+      )) as ConversationRecord;
+      expect(reloaded.sessionId).toBe('recovered-session-id');
+
+      // ...and the original bytes were kept alongside it.
+      const preserved = fs
+        .readdirSync(chatsDir)
+        .filter((f) => f.startsWith('unreadable.jsonl.unreadable-'));
+      expect(preserved).toHaveLength(1);
+      expect(fs.readFileSync(path.join(chatsDir, preserved[0]), 'utf-8')).toBe(
+        originalBytes,
+      );
+    });
+
+    it('should not leave a temp file behind when the rewrite fails', async () => {
+      const chatsDir = path.join(testTempDir, 'chats');
+      fs.mkdirSync(chatsDir, { recursive: true });
+      const sessionFile = path.join(chatsDir, 'rewrite-fails.jsonl');
+
+      // Fail the rename that publishes the temp file, leaving it orphaned.
+      const realRename = fs.renameSync;
+      vi.spyOn(fs, 'renameSync').mockImplementation((from, to) => {
+        if (String(from).includes('.tmp-')) {
+          throw new Error('simulated rename failure');
+        }
+        return realRename(from, to);
+      });
+
+      await expect(
+        chatRecordingService.initialize({
+          filePath: sessionFile,
+          conversation: {
+            sessionId: 'temp-cleanup-session',
+            projectHash: 'temp-cleanup-hash',
+            startTime: new Date().toISOString(),
+            lastUpdated: new Date().toISOString(),
+            messages: [],
+          } as unknown as ConversationRecord,
+        }),
+      ).rejects.toThrow('simulated rename failure');
+
+      const leftovers = fs
+        .readdirSync(chatsDir)
+        .filter((f) => f.includes('.tmp-'));
+      expect(leftovers).toEqual([]);
+    });
+  });
+
+  describe('recordMessage', () => {
+    beforeEach(async () => {
+      await chatRecordingService.initialize();
+    });
+
+    it('should record a new message', async () => {
+      chatRecordingService.recordMessage({
+        type: 'user',
+        content: 'Hello',
+        displayContent: 'User Hello',
+        model: 'gemini-pro',
+      });
+
+      const sessionFile = chatRecordingService.getConversationFilePath()!;
+      const conversation = (await loadConversationRecord(
+        sessionFile,
+      )) as ConversationRecord;
+
+      expect(conversation.messages).toHaveLength(1);
+      expect(conversation.messages[0].content).toBe('Hello');
+      expect(conversation.messages[0].displayContent).toBe('User Hello');
+      expect(conversation.messages[0].type).toBe('user');
+    });
+
+    it('should create separate messages when recording multiple messages', async () => {
+      chatRecordingService.recordMessage({
+        type: 'user',
+        content: 'World',
+        model: 'gemini-pro',
+      });
+
+      const sessionFile = chatRecordingService.getConversationFilePath()!;
+      const conversation = (await loadConversationRecord(
+        sessionFile,
+      )) as ConversationRecord;
+      expect(conversation.messages).toHaveLength(1);
+      expect(conversation.messages[0].content).toBe('World');
+    });
+  });
+
+  describe('recordThought', () => {
+    it('should queue a thought', async () => {
+      await chatRecordingService.initialize();
+      chatRecordingService.recordThought({
+        subject: 'Thinking',
+        description: 'Thinking...',
+      });
+      // @ts-expect-error private property
+      expect(chatRecordingService.queuedThoughts).toHaveLength(1);
+      // @ts-expect-error private property
+      expect(chatRecordingService.queuedThoughts[0].subject).toBe('Thinking');
+    });
+  });
+
+  describe('recordMessageTokens', () => {
+    beforeEach(async () => {
+      await chatRecordingService.initialize();
+    });
+
+    it('should update the last message with token info', async () => {
+      chatRecordingService.recordMessage({
+        type: 'gemini',
+        content: 'Response',
+        model: 'gemini-pro',
+      });
+
+      chatRecordingService.recordMessageTokens({
+        promptTokenCount: 1,
+        candidatesTokenCount: 2,
+        totalTokenCount: 3,
+        cachedContentTokenCount: 0,
+      });
+
+      const sessionFile = chatRecordingService.getConversationFilePath()!;
+      const conversation = (await loadConversationRecord(
+        sessionFile,
+      )) as ConversationRecord;
+      const geminiMsg = conversation.messages[0] as MessageRecord & {
+        type: 'gemini';
+      };
+      expect(geminiMsg.tokens).toEqual({
+        input: 1,
+        output: 2,
+        total: 3,
+        cached: 0,
+        thoughts: 0,
+        tool: 0,
+      });
+    });
+
+    it('should queue token info if the last message already has tokens', async () => {
+      chatRecordingService.recordMessage({
+        type: 'gemini',
+        content: 'Response',
+        model: 'gemini-pro',
+      });
+
+      chatRecordingService.recordMessageTokens({
+        promptTokenCount: 1,
+        candidatesTokenCount: 1,
+        totalTokenCount: 2,
+        cachedContentTokenCount: 0,
+      });
+
+      chatRecordingService.recordMessageTokens({
+        promptTokenCount: 2,
+        candidatesTokenCount: 2,
+        totalTokenCount: 4,
+        cachedContentTokenCount: 0,
+      });
+
+      // @ts-expect-error private property
+      expect(chatRecordingService.queuedTokens).toEqual({
+        input: 2,
+        output: 2,
+        total: 4,
+        cached: 0,
+        thoughts: 0,
+        tool: 0,
+      });
+    });
+
+    it('should not write to disk when queuing tokens (no last gemini message)', async () => {
+      const appendFileSyncSpy = vi.mocked(fs.appendFileSync);
+
+      // Clear spy call count after initialize writes the initial file
+      appendFileSyncSpy.mockClear();
+
+      // No gemini message recorded yet, so tokens should only be queued
+      chatRecordingService.recordMessageTokens({
+        promptTokenCount: 5,
+        candidatesTokenCount: 10,
+        totalTokenCount: 15,
+        cachedContentTokenCount: 0,
+      });
+
+      // writeFileSync should NOT have been called since we only queued
+      expect(appendFileSyncSpy).not.toHaveBeenCalled();
+
+      // @ts-expect-error private property
+      expect(chatRecordingService.queuedTokens).toEqual({
+        input: 5,
+        output: 10,
+        total: 15,
+        cached: 0,
+        thoughts: 0,
+        tool: 0,
+      });
+    });
+
+    it('should not write to disk when queuing tokens (last message already has tokens)', async () => {
+      chatRecordingService.recordMessage({
+        type: 'gemini',
+        content: 'Response',
+        model: 'gemini-pro',
+      });
+
+      // First recordMessageTokens updates the message and writes to disk
+      chatRecordingService.recordMessageTokens({
+        promptTokenCount: 1,
+        candidatesTokenCount: 1,
+        totalTokenCount: 2,
+        cachedContentTokenCount: 0,
+      });
+
+      const appendFileSyncSpy = vi.mocked(fs.appendFileSync);
+      appendFileSyncSpy.mockClear();
+
+      // Second call should only queue, NOT write to disk
+      chatRecordingService.recordMessageTokens({
+        promptTokenCount: 2,
+        candidatesTokenCount: 2,
+        totalTokenCount: 4,
+        cachedContentTokenCount: 0,
+      });
+
+      expect(appendFileSyncSpy).not.toHaveBeenCalled();
+    });
+
+    it('should use in-memory cache and not re-read from disk on subsequent operations', async () => {
+      chatRecordingService.recordMessage({
+        type: 'gemini',
+        content: 'Response',
+        model: 'gemini-pro',
+      });
+
+      const readFileSyncSpy = vi.mocked(fs.readFileSync);
+      readFileSyncSpy.mockClear();
+
+      // These operations should all use the in-memory cache
+      chatRecordingService.recordMessageTokens({
+        promptTokenCount: 1,
+        candidatesTokenCount: 1,
+        totalTokenCount: 2,
+        cachedContentTokenCount: 0,
+      });
+
+      chatRecordingService.recordMessage({
+        type: 'gemini',
+        content: 'Another response',
+        model: 'gemini-pro',
+      });
+
+      chatRecordingService.saveSummary('Test summary');
+
+      // readFileSync should NOT have been called since we use the in-memory cache
+      expect(readFileSyncSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('recordToolCalls', () => {
+    beforeEach(async () => {
+      await chatRecordingService.initialize();
+    });
+
+    it('should add new tool calls to the last message', async () => {
+      chatRecordingService.recordMessage({
+        type: 'gemini',
+        content: '',
+        model: 'gemini-pro',
+      });
+
+      const toolCall: ToolCallRecord = {
+        id: 'tool-1',
+        name: 'testTool',
+        args: {},
+        status: CoreToolCallStatus.AwaitingApproval,
+        timestamp: new Date().toISOString(),
+      };
+      chatRecordingService.recordToolCalls('gemini-pro', [toolCall]);
+
+      const sessionFile = chatRecordingService.getConversationFilePath()!;
+      const conversation = (await loadConversationRecord(
+        sessionFile,
+      )) as ConversationRecord;
+      const geminiMsg = conversation.messages[0] as MessageRecord & {
+        type: 'gemini';
+      };
+      expect(geminiMsg.toolCalls).toHaveLength(1);
+      expect(geminiMsg.toolCalls![0].name).toBe('testTool');
+    });
+
+    it('should preserve dynamic description and NOT overwrite with generic one', async () => {
+      chatRecordingService.recordMessage({
+        type: 'gemini',
+        content: '',
+        model: 'gemini-pro',
+      });
+
+      const dynamicDescription = 'DYNAMIC DESCRIPTION (e.g. Read file foo.txt)';
+      const toolCall: ToolCallRecord = {
+        id: 'tool-1',
+        name: 'testTool',
+        args: {},
+        status: CoreToolCallStatus.Success,
+        timestamp: new Date().toISOString(),
+        description: dynamicDescription,
+      };
+
+      chatRecordingService.recordToolCalls('gemini-pro', [toolCall]);
+
+      const sessionFile = chatRecordingService.getConversationFilePath()!;
+      const conversation = (await loadConversationRecord(
+        sessionFile,
+      )) as ConversationRecord;
+      const geminiMsg = conversation.messages[0] as MessageRecord & {
+        type: 'gemini';
+      };
+
+      expect(geminiMsg.toolCalls![0].description).toBe(dynamicDescription);
+    });
+
+    it('should create a new message if the last message is not from gemini', async () => {
+      chatRecordingService.recordMessage({
+        type: 'user',
+        content: 'call a tool',
+        model: 'gemini-pro',
+      });
+
+      const toolCall: ToolCallRecord = {
+        id: 'tool-1',
+        name: 'testTool',
+        args: {},
+        status: CoreToolCallStatus.AwaitingApproval,
+        timestamp: new Date().toISOString(),
+      };
+      chatRecordingService.recordToolCalls('gemini-pro', [toolCall]);
+
+      const sessionFile = chatRecordingService.getConversationFilePath()!;
+      const conversation = (await loadConversationRecord(
+        sessionFile,
+      )) as ConversationRecord;
+      expect(conversation.messages).toHaveLength(2);
+      expect(conversation.messages[1].type).toBe('gemini');
+      expect(
+        (conversation.messages[1] as MessageRecord & { type: 'gemini' })
+          .toolCalls,
+      ).toHaveLength(1);
+    });
+
+    it('should record agentId when provided', async () => {
+      chatRecordingService.recordMessage({
+        type: 'gemini',
+        content: '',
+        model: 'gemini-pro',
+      });
+
+      const toolCall: ToolCallRecord = {
+        id: 'tool-1',
+        name: 'testTool',
+        args: {},
+        status: CoreToolCallStatus.Success,
+        timestamp: new Date().toISOString(),
+        agentId: 'test-agent-id',
+      };
+      chatRecordingService.recordToolCalls('gemini-pro', [toolCall]);
+
+      const sessionFile = chatRecordingService.getConversationFilePath()!;
+      const conversation = (await loadConversationRecord(
+        sessionFile,
+      )) as ConversationRecord;
+      const geminiMsg = conversation.messages[0] as MessageRecord & {
+        type: 'gemini';
+      };
+      expect(geminiMsg.toolCalls).toHaveLength(1);
+      expect(geminiMsg.toolCalls![0].agentId).toBe('test-agent-id');
+    });
+  });
+
+  describe('deleteSession', () => {
+    it('should delete the session file, tool outputs, session directory, and logs if they exist', async () => {
+      const sessionId = 'test-session-id';
+      const shortId = '12345678';
+      const chatsDir = path.join(testTempDir, 'chats');
+      const logsDir = path.join(testTempDir, 'logs');
+      const toolOutputsDir = path.join(testTempDir, 'tool-outputs');
+      const sessionDir = path.join(testTempDir, sessionId);
+
+      fs.mkdirSync(chatsDir, { recursive: true });
+      fs.mkdirSync(logsDir, { recursive: true });
+      fs.mkdirSync(toolOutputsDir, { recursive: true });
+      fs.mkdirSync(sessionDir, { recursive: true });
+
+      // Create main session file with timestamp
+      const sessionFile = path.join(
+        chatsDir,
+        `session-2023-01-01T00-00-${shortId}.jsonl`,
+      );
+      fs.writeFileSync(sessionFile, JSON.stringify({ sessionId }) + '\n');
+
+      const logFile = path.join(logsDir, `session-${sessionId}.jsonl`);
+      fs.writeFileSync(logFile, '{}');
+
+      const toolOutputDir = path.join(toolOutputsDir, `session-${sessionId}`);
+      fs.mkdirSync(toolOutputDir, { recursive: true });
+
+      // Call with shortId
+      await chatRecordingService.deleteSession(shortId);
+
+      expect(fs.existsSync(sessionFile)).toBe(false);
+      expect(fs.existsSync(logFile)).toBe(false);
+      expect(fs.existsSync(toolOutputDir)).toBe(false);
+      expect(fs.existsSync(sessionDir)).toBe(false);
+    });
+
+    it('should delete legacy pretty-printed session files and their artifacts', async () => {
+      const sessionId = 'legacy-uuid';
+      const shortId = 'legacy12';
+      const chatsDir = path.join(testTempDir, 'chats');
+      const toolOutputsDir = path.join(testTempDir, 'tool-outputs');
+
+      fs.mkdirSync(chatsDir, { recursive: true });
+      fs.mkdirSync(toolOutputsDir, { recursive: true });
+
+      const sessionFile = path.join(
+        chatsDir,
+        `session-2023-01-01T00-00-${shortId}.json`,
+      );
+      // Pretty-printed JSON (not JSONL)
+      fs.writeFileSync(
+        sessionFile,
+        JSON.stringify({ sessionId, messages: [] }, null, 2),
+      );
+
+      const toolOutputDir = path.join(toolOutputsDir, `session-${sessionId}`);
+      fs.mkdirSync(toolOutputDir, { recursive: true });
+      fs.writeFileSync(path.join(toolOutputDir, 'output.txt'), 'data');
+
+      await chatRecordingService.deleteSession(shortId);
+
+      expect(fs.existsSync(sessionFile)).toBe(false);
+      expect(fs.existsSync(toolOutputDir)).toBe(false);
+    });
+
+    it('should delete the session file even if it is corrupted (invalid JSON)', async () => {
+      const shortId = 'corrupt1';
+      const chatsDir = path.join(testTempDir, 'chats');
+
+      fs.mkdirSync(chatsDir, { recursive: true });
+
+      const sessionFile = path.join(
+        chatsDir,
+        `session-2023-01-01T00-00-${shortId}.jsonl`,
+      );
+      fs.writeFileSync(sessionFile, 'not-json');
+
+      await chatRecordingService.deleteSession(shortId);
+
+      expect(fs.existsSync(sessionFile)).toBe(false);
+    });
+
+    it('should delete subagent files and their logs when parent is deleted', async () => {
+      const parentSessionId = '12345678-session-id';
+      const shortId = '12345678';
+      const subagentSessionId = 'subagent-session-id';
+      const chatsDir = path.join(testTempDir, 'chats');
+      const logsDir = path.join(testTempDir, 'logs');
+      const toolOutputsDir = path.join(testTempDir, 'tool-outputs');
+
+      fs.mkdirSync(chatsDir, { recursive: true });
+      fs.mkdirSync(logsDir, { recursive: true });
+      fs.mkdirSync(toolOutputsDir, { recursive: true });
+
+      // Create parent session file
+      const parentFile = path.join(
+        chatsDir,
+        `session-2023-01-01T00-00-${shortId}.jsonl`,
+      );
+      fs.writeFileSync(
+        parentFile,
+        JSON.stringify({ sessionId: parentSessionId }) + '\n',
+      );
+
+      // Create subagent session file in subdirectory
+      const subagentDir = path.join(chatsDir, parentSessionId);
+      fs.mkdirSync(subagentDir, { recursive: true });
+      const subagentFile = path.join(subagentDir, `${subagentSessionId}.jsonl`);
+      fs.writeFileSync(
+        subagentFile,
+        JSON.stringify({ sessionId: subagentSessionId, kind: 'subagent' }) +
+          '\n',
+      );
+
+      // Create logs for both
+      const parentLog = path.join(logsDir, `session-${parentSessionId}.jsonl`);
+      fs.writeFileSync(parentLog, '{}');
+      const subagentLog = path.join(
+        logsDir,
+        `session-${subagentSessionId}.jsonl`,
+      );
+      fs.writeFileSync(subagentLog, '{}');
+
+      // Create tool outputs for both
+      const parentToolOutputDir = path.join(
+        toolOutputsDir,
+        `session-${parentSessionId}`,
+      );
+      fs.mkdirSync(parentToolOutputDir, { recursive: true });
+      const subagentToolOutputDir = path.join(
+        toolOutputsDir,
+        `session-${subagentSessionId}`,
+      );
+      fs.mkdirSync(subagentToolOutputDir, { recursive: true });
+
+      // Call with parent sessionId
+      await chatRecordingService.deleteSession(parentSessionId);
+
+      expect(fs.existsSync(parentFile)).toBe(false);
+      expect(fs.existsSync(subagentFile)).toBe(false);
+      expect(fs.existsSync(subagentDir)).toBe(false); // Subagent directory should be deleted
+      expect(fs.existsSync(parentLog)).toBe(false);
+      expect(fs.existsSync(subagentLog)).toBe(false);
+      expect(fs.existsSync(parentToolOutputDir)).toBe(false);
+      expect(fs.existsSync(subagentToolOutputDir)).toBe(false);
+    });
+
+    it('should delete subagent files and their logs when parent is deleted (legacy flat structure)', async () => {
+      const parentSessionId = '12345678-session-id';
+      const shortId = '12345678';
+      const subagentSessionId = 'subagent-session-id';
+      const chatsDir = path.join(testTempDir, 'chats');
+      const logsDir = path.join(testTempDir, 'logs');
+
+      fs.mkdirSync(chatsDir, { recursive: true });
+      fs.mkdirSync(logsDir, { recursive: true });
+
+      // Create parent session file
+      const parentFile = path.join(
+        chatsDir,
+        `session-2023-01-01T00-00-${shortId}.jsonl`,
+      );
+      fs.writeFileSync(
+        parentFile,
+        JSON.stringify({ sessionId: parentSessionId }) + '\n',
+      );
+
+      // Create legacy subagent session file (flat in chatsDir)
+      const subagentFile = path.join(
+        chatsDir,
+        `session-2023-01-01T00-01-${shortId}.jsonl`,
+      );
+      fs.writeFileSync(
+        subagentFile,
+        JSON.stringify({ sessionId: subagentSessionId, kind: 'subagent' }) +
+          '\n',
+      );
+
+      // Call with parent sessionId
+      await chatRecordingService.deleteSession(parentSessionId);
+
+      expect(fs.existsSync(parentFile)).toBe(false);
+      expect(fs.existsSync(subagentFile)).toBe(false);
+    });
+
+    it('should delete by basename', async () => {
+      const sessionId = 'test-session-id';
+      const shortId = '12345678';
+      const chatsDir = path.join(testTempDir, 'chats');
+      const logsDir = path.join(testTempDir, 'logs');
+
+      fs.mkdirSync(chatsDir, { recursive: true });
+      fs.mkdirSync(logsDir, { recursive: true });
+
+      const basename = `session-2023-01-01T00-00-${shortId}`;
+      const sessionFile = path.join(chatsDir, `${basename}.jsonl`);
+      fs.writeFileSync(sessionFile, JSON.stringify({ sessionId }) + '\n');
+
+      const logFile = path.join(logsDir, `session-${sessionId}.jsonl`);
+      fs.writeFileSync(logFile, '{}');
+
+      // Call with basename
+      await chatRecordingService.deleteSession(basename);
+
+      expect(fs.existsSync(sessionFile)).toBe(false);
+      expect(fs.existsSync(logFile)).toBe(false);
+    });
+
+    it('should not throw if session file does not exist', async () => {
+      await expect(
+        chatRecordingService.deleteSession('non-existent'),
+      ).resolves.not.toThrow();
+    });
+  });
+
+  describe('deleteCurrentSessionAsync', () => {
+    it('should asynchronously delete the current session file and tool outputs', async () => {
+      await chatRecordingService.initialize();
+      // Record a message to trigger the file write (writeConversation skips
+      // writing when there are no messages).
+      chatRecordingService.recordMessage({
+        type: 'user',
+        content: 'test',
+        model: 'gemini-pro',
+      });
+      const conversationFile = chatRecordingService.getConversationFilePath();
+      expect(conversationFile).not.toBeNull();
+
+      // Create a tool output directory matching the session ID used by
+      // deleteSessionArtifactsAsync (this.sessionId = mockConfig.promptId).
+      const toolOutputDir = path.join(
+        testTempDir,
+        'tool-outputs',
+        'session-test-session-id',
+      );
+      fs.mkdirSync(toolOutputDir, { recursive: true });
+      fs.writeFileSync(path.join(toolOutputDir, 'output.txt'), 'data');
+
+      expect(fs.existsSync(conversationFile!)).toBe(true);
+      expect(fs.existsSync(toolOutputDir)).toBe(true);
+
+      await chatRecordingService.deleteCurrentSessionAsync();
+
+      expect(fs.existsSync(conversationFile!)).toBe(false);
+      expect(fs.existsSync(toolOutputDir)).toBe(false);
+    });
+
+    it('should not throw if the session was never initialized', async () => {
+      // conversationFile is null when not initialized
+      await expect(
+        chatRecordingService.deleteCurrentSessionAsync(),
+      ).resolves.not.toThrow();
+    });
+
+    it('should not throw if session file does not exist on disk', async () => {
+      // initialize() writes an initial metadata record synchronously, so
+      // delete the file manually to simulate the "missing on disk" scenario.
+      await chatRecordingService.initialize();
+      const conversationFile = chatRecordingService.getConversationFilePath();
+      expect(conversationFile).not.toBeNull();
+      if (conversationFile && fs.existsSync(conversationFile)) {
+        fs.unlinkSync(conversationFile);
+      }
+      expect(fs.existsSync(conversationFile!)).toBe(false);
+
+      await expect(
+        chatRecordingService.deleteCurrentSessionAsync(),
+      ).resolves.not.toThrow();
+    });
+  });
+
+  describe('deleteCurrentSessionIfNotResumableAsync', () => {
+    it('should delete a startup-only session', async () => {
+      await chatRecordingService.initialize();
+      const conversationFile = chatRecordingService.getConversationFilePath();
+      expect(conversationFile).not.toBeNull();
+      expect(fs.existsSync(conversationFile!)).toBe(true);
+
+      await chatRecordingService.deleteCurrentSessionIfNotResumableAsync();
+
+      expect(fs.existsSync(conversationFile!)).toBe(false);
+    });
+
+    it('should delete a command-only session', async () => {
+      await chatRecordingService.initialize();
+      chatRecordingService.recordMessage({
+        type: 'user',
+        content: '/resume',
+        model: 'gemini-pro',
+      });
+      const conversationFile = chatRecordingService.getConversationFilePath();
+      expect(conversationFile).not.toBeNull();
+
+      await chatRecordingService.deleteCurrentSessionIfNotResumableAsync();
+
+      expect(fs.existsSync(conversationFile!)).toBe(false);
+    });
+
+    it('should keep a session with a real user message', async () => {
+      await chatRecordingService.initialize();
+      chatRecordingService.recordMessage({
+        type: 'user',
+        content: 'Help me debug this test',
+        model: 'gemini-pro',
+      });
+      const conversationFile = chatRecordingService.getConversationFilePath();
+      expect(conversationFile).not.toBeNull();
+
+      await chatRecordingService.deleteCurrentSessionIfNotResumableAsync();
+
+      expect(fs.existsSync(conversationFile!)).toBe(true);
+    });
+
+    it('should not delete a resumed session even if messages are empty', async () => {
+      const chatsDir = path.join(testTempDir, 'chats');
+      fs.mkdirSync(chatsDir, { recursive: true });
+      const sessionFile = path.join(chatsDir, 'session-resume-test.jsonl');
+      const initialData = {
+        sessionId: 'resumed-empty-session',
+        projectHash: 'test-project-hash',
+        startTime: new Date().toISOString(),
+        lastUpdated: new Date().toISOString(),
+      };
+      fs.writeFileSync(sessionFile, JSON.stringify(initialData) + '\n');
+
+      await chatRecordingService.initialize({
+        filePath: sessionFile,
+        conversation: {
+          sessionId: 'resumed-empty-session',
+          projectHash: 'test-project-hash',
+          startTime: initialData.startTime,
+          lastUpdated: initialData.lastUpdated,
+          messages: [],
+        },
+      });
+
+      expect(chatRecordingService.getIsResumedSession()).toBe(true);
+
+      await chatRecordingService.deleteCurrentSessionIfNotResumableAsync();
+
+      expect(fs.existsSync(sessionFile)).toBe(true);
+    });
+
+    it('should wait for async initialization before deciding whether to delete (race condition)', async () => {
+      const chatsDir = path.join(testTempDir, 'chats');
+      fs.mkdirSync(chatsDir, { recursive: true });
+      const sessionFile = path.join(chatsDir, 'session-race-test.jsonl');
+      const initialData = {
+        sessionId: 'resumed-race-session',
+        projectHash: 'test-project-hash',
+        startTime: new Date().toISOString(),
+        lastUpdated: new Date().toISOString(),
+      };
+      const msg = {
+        id: 'msg-1',
+        type: 'user',
+        content: 'Hello prior conversation',
+        timestamp: new Date().toISOString(),
+      };
+      fs.writeFileSync(
+        sessionFile,
+        JSON.stringify(initialData) + '\n' + JSON.stringify(msg) + '\n',
+      );
+
+      // Start initialization without awaiting it immediately
+      const initPromise = chatRecordingService.initialize({
+        filePath: sessionFile,
+        conversation: {
+          sessionId: 'resumed-race-session',
+          projectHash: 'test-project-hash',
+          startTime: initialData.startTime,
+          lastUpdated: initialData.lastUpdated,
+          messages: [msg as MessageRecord],
+        },
+      });
+
+      // Fire cleanup concurrently (simulates fast exit before init settles)
+      await chatRecordingService.deleteCurrentSessionIfNotResumableAsync();
+      await initPromise;
+
+      expect(fs.existsSync(sessionFile)).toBe(true);
+    });
+
+    it('should not delete session file if the file on disk has resumable content even if in-memory cache is empty', async () => {
+      const chatsDir = path.join(testTempDir, 'chats');
+      fs.mkdirSync(chatsDir, { recursive: true });
+      const sessionFile = path.join(chatsDir, 'session-disk-check.jsonl');
+      const initialData = {
+        sessionId: 'session-disk-id',
+        projectHash: 'test-project-hash',
+        startTime: new Date().toISOString(),
+        lastUpdated: new Date().toISOString(),
+      };
+      const msg = {
+        id: 'msg-1',
+        type: 'user',
+        content: 'Preserved content from disk',
+        timestamp: new Date().toISOString(),
+      };
+      fs.writeFileSync(
+        sessionFile,
+        JSON.stringify(initialData) + '\n' + JSON.stringify(msg) + '\n',
+      );
+
+      // Directly configure chatRecordingService to point to this file but with empty cache
+      await chatRecordingService.initialize();
+      // Overwrite private properties to simulate empty in-memory state on an existing file
+      (
+        chatRecordingService as unknown as { conversationFile: string }
+      ).conversationFile = sessionFile;
+      (
+        chatRecordingService as unknown as {
+          cachedConversation: { messages: MessageRecord[] };
+        }
+      ).cachedConversation = {
+        messages: [],
+      };
+      (
+        chatRecordingService as unknown as { isResumedSession: boolean }
+      ).isResumedSession = false;
+
+      await chatRecordingService.deleteCurrentSessionIfNotResumableAsync();
+
+      expect(fs.existsSync(sessionFile)).toBe(true);
+    });
+
+    it('should detect and preserve existing session files during same-minute collision', async () => {
+      const chatsDir = path.join(testTempDir, 'chats');
+      fs.mkdirSync(chatsDir, { recursive: true });
+
+      const timestamp = new Date()
+        .toISOString()
+        .slice(0, 16)
+        .replace(/:/g, '-');
+      const collisionSessionId = 'collision-session-uuid';
+      const expectedFilename = `${SESSION_FILE_PREFIX}${timestamp}-${collisionSessionId.slice(
+        0,
+        8,
+      )}.jsonl`;
+      const collisionFile = path.join(chatsDir, expectedFilename);
+
+      const initialData = {
+        sessionId: collisionSessionId,
+        projectHash: 'test-project-hash',
+        startTime: new Date().toISOString(),
+        lastUpdated: new Date().toISOString(),
+      };
+      const msg = {
+        id: 'msg-existing',
+        type: 'user',
+        content: 'Message created earlier in the same minute',
+        timestamp: new Date().toISOString(),
+      };
+      fs.writeFileSync(
+        collisionFile,
+        JSON.stringify(initialData) + '\n' + JSON.stringify(msg) + '\n',
+      );
+
+      // Configure collisionConfig promptId to match the collision session ID
+      const collisionConfig = createTestMockConfig(collisionSessionId);
+      chatRecordingService = new ChatRecordingService(collisionConfig);
+
+      // Initialize as a new session (no resumedSessionData)
+      await chatRecordingService.initialize();
+
+      expect(chatRecordingService.getConversationFilePath()).not.toBe(
+        collisionFile,
+      );
+
+      // Calling deleteCurrentSessionIfNotResumableAsync must NOT delete the collided session file
+      await chatRecordingService.deleteCurrentSessionIfNotResumableAsync();
+
+      expect(fs.existsSync(collisionFile)).toBe(true);
+    });
+
+    it('should handle malformed records with undefined messages without throwing', async () => {
+      const chatsDir = path.join(testTempDir, 'chats');
+      fs.mkdirSync(chatsDir, { recursive: true });
+      const sessionFile = path.join(chatsDir, 'session-malformed.jsonl');
+      // Write metadata only without messages array
+      fs.writeFileSync(
+        sessionFile,
+        JSON.stringify({
+          sessionId: 'malformed-session',
+          projectHash: 'test-project-hash',
+          startTime: new Date().toISOString(),
+          lastUpdated: new Date().toISOString(),
+        }) + '\n',
+      );
+
+      (
+        chatRecordingService as unknown as {
+          conversationFile: string;
+          cachedConversation: { messages?: MessageRecord[] };
+          isResumedSession: boolean;
+        }
+      ).conversationFile = sessionFile;
+      (
+        chatRecordingService as unknown as {
+          cachedConversation: { messages?: MessageRecord[] };
+        }
+      ).cachedConversation = {};
+      (
+        chatRecordingService as unknown as { isResumedSession: boolean }
+      ).isResumedSession = false;
+
+      await expect(
+        chatRecordingService.deleteCurrentSessionIfNotResumableAsync(),
+      ).resolves.not.toThrow();
+    });
+  });
+
+  describe('recordDirectories', () => {
+    beforeEach(async () => {
+      await chatRecordingService.initialize();
+    });
+
+    it('should save directories to the conversation', async () => {
+      chatRecordingService.recordMessage({
+        type: 'user',
+        content: 'ping',
+        model: 'm',
+      });
+      chatRecordingService.recordDirectories([
+        '/path/to/dir1',
+        '/path/to/dir2',
+      ]);
+
+      const sessionFile = chatRecordingService.getConversationFilePath()!;
+      const conversation = (await loadConversationRecord(
+        sessionFile,
+      )) as ConversationRecord;
+      expect(conversation.directories).toEqual([
+        '/path/to/dir1',
+        '/path/to/dir2',
+      ]);
+    });
+
+    it('should overwrite existing directories', async () => {
+      chatRecordingService.recordMessage({
+        type: 'user',
+        content: 'ping',
+        model: 'm',
+      });
+      chatRecordingService.recordDirectories(['/old/dir']);
+      chatRecordingService.recordDirectories(['/new/dir1', '/new/dir2']);
+
+      const sessionFile = chatRecordingService.getConversationFilePath()!;
+      const conversation = (await loadConversationRecord(
+        sessionFile,
+      )) as ConversationRecord;
+      expect(conversation.directories).toEqual(['/new/dir1', '/new/dir2']);
+    });
+  });
+
+  describe('rewindTo', () => {
+    it('should rewind the conversation to a specific message ID', async () => {
+      await chatRecordingService.initialize();
+      // Record some messages
+      chatRecordingService.recordMessage({
+        type: 'user',
+        content: 'msg1',
+        model: 'm',
+      });
+      chatRecordingService.recordMessage({
+        type: 'gemini',
+        content: 'msg2',
+        model: 'm',
+      });
+      chatRecordingService.recordMessage({
+        type: 'user',
+        content: 'msg3',
+        model: 'm',
+      });
+
+      const sessionFile = chatRecordingService.getConversationFilePath()!;
+      let conversation = (await loadConversationRecord(
+        sessionFile,
+      )) as ConversationRecord;
+      const secondMsgId = conversation.messages[1].id;
+
+      const result = chatRecordingService.rewindTo(secondMsgId);
+
+      expect(result).not.toBeNull();
+      expect(result!.messages).toHaveLength(1);
+      expect(result!.messages[0].content).toBe('msg1');
+
+      conversation = (await loadConversationRecord(
+        sessionFile,
+      )) as ConversationRecord;
+      expect(conversation.messages).toHaveLength(1);
+    });
+
+    it('should return the original conversation if the message ID is not found', async () => {
+      await chatRecordingService.initialize();
+      chatRecordingService.recordMessage({
+        type: 'user',
+        content: 'msg1',
+        model: 'm',
+      });
+
+      const result = chatRecordingService.rewindTo('non-existent');
+
+      expect(result).not.toBeNull();
+      expect(result!.messages).toHaveLength(1);
+    });
+  });
+
+  describe('ENOSPC (disk full) graceful degradation - issue #16266', () => {
+    it('should disable recording and not throw when ENOSPC occurs during initialize', async () => {
+      const enospcError = new Error('ENOSPC: no space left on device');
+      (enospcError as NodeJS.ErrnoException).code = 'ENOSPC';
+
+      const mkdirSyncSpy = vi.mocked(fs.mkdirSync).mockImplementation(() => {
+        throw enospcError;
+      });
+
+      // Should not throw
+      await expect(chatRecordingService.initialize()).resolves.not.toThrow();
+
+      // Recording should be disabled (conversationFile set to null)
+      expect(chatRecordingService.getConversationFilePath()).toBeNull();
+      mkdirSyncSpy.mockRestore();
+    });
+
+    it('should disable recording and not throw when ENOSPC occurs during writeConversation', async () => {
+      await chatRecordingService.initialize();
+
+      const enospcError = new Error('ENOSPC: no space left on device');
+      (enospcError as NodeJS.ErrnoException).code = 'ENOSPC';
+
+      vi.mocked(fs.appendFileSync).mockImplementation(() => {
+        throw enospcError;
+      });
+
+      // Should not throw when recording a message
+      expect(() =>
+        chatRecordingService.recordMessage({
+          type: 'user',
+          content: 'Hello',
+          model: 'gemini-pro',
+        }),
+      ).not.toThrow();
+
+      // Recording should be disabled (conversationFile set to null)
+      expect(chatRecordingService.getConversationFilePath()).toBeNull();
+    });
+
+    it('should skip recording operations when recording is disabled', async () => {
+      await chatRecordingService.initialize();
+
+      const enospcError = new Error('ENOSPC: no space left on device');
+      (enospcError as NodeJS.ErrnoException).code = 'ENOSPC';
+
+      const appendFileSyncSpy = vi
+        .mocked(fs.appendFileSync)
+        .mockImplementationOnce(() => {
+          throw enospcError;
+        });
+
+      chatRecordingService.recordMessage({
+        type: 'user',
+        content: 'First message',
+        model: 'gemini-pro',
+      });
+
+      // Reset mock to track subsequent calls
+      appendFileSyncSpy.mockClear();
+
+      // Subsequent calls should be no-ops (not call writeFileSync)
+      chatRecordingService.recordMessage({
+        type: 'user',
+        content: 'Second message',
+        model: 'gemini-pro',
+      });
+
+      chatRecordingService.recordThought({
+        subject: 'Test',
+        description: 'Test thought',
+      });
+
+      chatRecordingService.saveSummary('Test summary');
+
+      // writeFileSync should not have been called for any of these
+      expect(appendFileSyncSpy).not.toHaveBeenCalled();
+    });
+
+    it('should return null from getConversation when recording is disabled', async () => {
+      await chatRecordingService.initialize();
+
+      const enospcError = new Error('ENOSPC: no space left on device');
+      (enospcError as NodeJS.ErrnoException).code = 'ENOSPC';
+
+      vi.mocked(fs.appendFileSync).mockImplementation(() => {
+        throw enospcError;
+      });
+
+      // Trigger ENOSPC
+      chatRecordingService.recordMessage({
+        type: 'user',
+        content: 'Hello',
+        model: 'gemini-pro',
+      });
+
+      // getConversation should return null when disabled
+      expect(chatRecordingService.getConversation()).toBeNull();
+      expect(chatRecordingService.getConversationFilePath()).toBeNull();
+    });
+
+    it('should still throw for non-ENOSPC errors', async () => {
+      await chatRecordingService.initialize();
+
+      const otherError = new Error('Permission denied');
+      (otherError as NodeJS.ErrnoException).code = 'EACCES';
+
+      vi.mocked(fs.appendFileSync).mockImplementation(() => {
+        throw otherError;
+      });
+
+      // Should throw for non-ENOSPC errors
+      expect(() =>
+        chatRecordingService.recordMessage({
+          type: 'user',
+          content: 'Hello',
+          model: 'gemini-pro',
+        }),
+      ).toThrow('Permission denied');
+
+      // Recording should NOT be disabled for non-ENOSPC errors (file path still exists)
+      expect(chatRecordingService.getConversationFilePath()).not.toBeNull();
+    });
+  });
+
+  describe('updateMessagesFromHistory', () => {
+    beforeEach(async () => {
+      await chatRecordingService.initialize();
+    });
+
+    it('should update tool results from API history (masking sync)', async () => {
+      // 1. Record an initial message and tool call
+      const modelMsgId = chatRecordingService.recordMessage({
+        type: 'gemini',
+        content: 'I will list the files.',
+        model: 'gemini-pro',
+      });
+
+      const callId = 'tool-call-123';
+      const originalResult = [{ text: 'a'.repeat(1000) }];
+      chatRecordingService.recordToolCalls('gemini-pro', [
+        {
+          id: callId,
+          name: 'list_files',
+          args: { path: '.' },
+          result: originalResult,
+          status: CoreToolCallStatus.Success,
+          timestamp: new Date().toISOString(),
+        },
+      ]);
+
+      // 2. Prepare mock history with masked content
+      const maskedSnippet =
+        '<tool_output_masked>short preview</tool_output_masked>';
+      const history: HistoryTurn[] = [
+        {
+          id: modelMsgId,
+          content: {
+            role: 'model',
+            parts: [
+              { functionCall: { name: 'list_files', args: { path: '.' } } },
+            ],
+          },
+        },
+        {
+          id: 'user-id',
+          content: {
+            role: 'user',
+            parts: [
+              {
+                functionResponse: {
+                  name: 'list_files',
+                  id: callId,
+                  response: { output: maskedSnippet },
+                },
+              },
+            ],
+          },
+        },
+      ];
+
+      // 3. Trigger sync
+      chatRecordingService.updateMessagesFromHistory(history);
+
+      // 4. Verify disk content
+      const sessionFile = chatRecordingService.getConversationFilePath()!;
+      const conversation = (await loadConversationRecord(
+        sessionFile,
+      )) as ConversationRecord;
+
+      const geminiMsg = conversation.messages[0];
+      if (geminiMsg.type !== 'gemini')
+        throw new Error('Expected gemini message');
+      expect(geminiMsg.toolCalls).toBeDefined();
+      expect(geminiMsg.toolCalls![0].id).toBe(callId);
+      // The implementation stringifies the response object
+      const result = geminiMsg.toolCalls![0].result;
+      if (!Array.isArray(result)) throw new Error('Expected array result');
+      const firstPart = result[0] as Part;
+      expect(firstPart.functionResponse).toBeDefined();
+      expect(firstPart.functionResponse!.id).toBe(callId);
+      expect(firstPart.functionResponse!.response).toEqual({
+        output: maskedSnippet,
+      });
+    });
+
+    it('should preserve multi-modal sibling parts during sync', async () => {
+      await chatRecordingService.initialize();
+      const modelMsgId = chatRecordingService.recordMessage({
+        type: 'gemini',
+        content: '',
+        model: 'gemini-pro',
+      });
+
+      const callId = 'multi-modal-call';
+      const originalResult: Part[] = [
+        {
+          functionResponse: {
+            id: callId,
+            name: 'read_file',
+            response: { content: '...' },
+          },
+        },
+        { inlineData: { mimeType: 'image/png', data: 'base64...' } },
+      ];
+
+      chatRecordingService.recordToolCalls('gemini-pro', [
+        {
+          id: callId,
+          name: 'read_file',
+          args: { path: 'image.png' },
+          result: originalResult,
+          status: CoreToolCallStatus.Success,
+          timestamp: new Date().toISOString(),
+        },
+      ]);
+
+      const maskedSnippet = '<masked>';
+      const history: HistoryTurn[] = [
+        {
+          id: modelMsgId,
+          content: { role: 'model', parts: [] },
+        },
+        {
+          id: 'user-id',
+          content: {
+            role: 'user',
+            parts: [
+              {
+                functionResponse: {
+                  name: 'read_file',
+                  id: callId,
+                  response: { output: maskedSnippet },
+                },
+              },
+              { inlineData: { mimeType: 'image/png', data: 'base64...' } },
+            ],
+          },
+        },
+      ];
+
+      chatRecordingService.updateMessagesFromHistory(history);
+
+      const sessionFile = chatRecordingService.getConversationFilePath()!;
+      const conversation = (await loadConversationRecord(
+        sessionFile,
+      )) as ConversationRecord;
+
+      const lastMsg = conversation.messages[0] as MessageRecord & {
+        type: 'gemini';
+      };
+      const result = lastMsg.toolCalls![0].result as Part[];
+      expect(result).toHaveLength(2);
+      expect(result[0].functionResponse!.response).toEqual({
+        output: maskedSnippet,
+      });
+      expect(result[1].inlineData).toBeDefined();
+      expect(result[1].inlineData!.mimeType).toBe('image/png');
+    });
+
+    it('should handle parts appearing BEFORE the functionResponse in a content block', async () => {
+      await chatRecordingService.initialize();
+      const modelMsgId = chatRecordingService.recordMessage({
+        type: 'gemini',
+        content: '',
+        model: 'gemini-pro',
+      });
+
+      const callId = 'prefix-part-call';
+
+      chatRecordingService.recordToolCalls('gemini-pro', [
+        {
+          id: callId,
+          name: 'read_file',
+          args: { path: 'test.txt' },
+          result: [],
+          status: CoreToolCallStatus.Success,
+          timestamp: new Date().toISOString(),
+        },
+      ]);
+
+      const history: HistoryTurn[] = [
+        {
+          id: modelMsgId,
+          content: { role: 'model', parts: [] },
+        },
+        {
+          id: 'user-id',
+          content: {
+            role: 'user',
+            parts: [
+              { text: 'Prefix metadata or text' },
+              {
+                functionResponse: {
+                  name: 'read_file',
+                  id: callId,
+                  response: { output: 'file content' },
+                },
+              },
+            ],
+          },
+        },
+      ];
+
+      chatRecordingService.updateMessagesFromHistory(history);
+
+      const sessionFile = chatRecordingService.getConversationFilePath()!;
+      const conversation = (await loadConversationRecord(
+        sessionFile,
+      )) as ConversationRecord;
+
+      const lastMsg = conversation.messages[0] as MessageRecord & {
+        type: 'gemini';
+      };
+      const result = lastMsg.toolCalls![0].result as Part[];
+      expect(result).toHaveLength(2);
+      expect(result[0].text).toBe('Prefix metadata or text');
+      expect(result[1].functionResponse!.id).toBe(callId);
+    });
+
+    it('should not write to disk when no tool calls match', async () => {
+      chatRecordingService.recordMessage({
+        type: 'gemini',
+        content: 'Response with no tool calls',
+        model: 'gemini-pro',
+      });
+
+      const appendFileSyncSpy = vi.mocked(fs.appendFileSync);
+      appendFileSyncSpy.mockClear();
+
+      // History with a tool call ID that doesn't exist in the conversation
+      const history: HistoryTurn[] = [
+        {
+          id: 'user-id',
+          content: {
+            role: 'user',
+            parts: [
+              {
+                functionResponse: {
+                  name: 'read_file',
+                  id: 'nonexistent-call-id',
+                  response: { output: 'some content' },
+                },
+              },
+            ],
+          },
+        },
+      ];
+
+      chatRecordingService.updateMessagesFromHistory(history);
+
+      // In the new 'Strong Owner' architecture, updateMessagesFromHistory ensures that
+      // all turns in history (including new/synthetic ones) are recorded.
+      // Since 'user-id' was not in the original conversation, it is added.
+      expect(appendFileSyncSpy).toHaveBeenCalled();
+    });
+  });
+
+  describe('ENOENT (missing directory) handling', () => {
+    it('should ensure directory exists before writing conversation file', async () => {
+      await chatRecordingService.initialize();
+
+      const mkdirSyncSpy = vi.mocked(fs.mkdirSync);
+      const appendFileSyncSpy = vi.mocked(fs.appendFileSync);
+
+      chatRecordingService.recordMessage({
+        type: 'user',
+        content: 'Hello after dir cleanup',
+        model: 'gemini-pro',
+      });
+
+      // mkdirSync should be called with the parent directory and recursive option
+      const conversationFile = chatRecordingService.getConversationFilePath()!;
+      expect(mkdirSyncSpy).toHaveBeenCalledWith(
+        path.dirname(conversationFile),
+        { recursive: true },
+      );
+
+      // mkdirSync should be called before writeFileSync
+      const mkdirCallOrder = mkdirSyncSpy.mock.invocationCallOrder;
+      const writeCallOrder = appendFileSyncSpy.mock.invocationCallOrder;
+      const lastMkdir = mkdirCallOrder[mkdirCallOrder.length - 1];
+      const lastWrite = writeCallOrder[writeCallOrder.length - 1];
+      expect(lastMkdir).toBeLessThan(lastWrite);
+
+      mkdirSyncSpy.mockRestore();
+    });
+  });
+
+  describe('recordSyntheticMessage and history sync', () => {
+    it('should correctly record synthetic messages with durable IDs', async () => {
+      await chatRecordingService.initialize(undefined, 'main');
+      const parts = [{ text: 'Synthetic Turn' }];
+
+      // Implicit ID generation
+      const id1 = chatRecordingService.recordSyntheticMessage('user', parts);
+      expect(id1).toBeDefined();
+      expect(id1).toMatch(/test-uuid-/);
+
+      // Explicit ID registration (e.g. from context processor)
+      const customId = 'stable-hash-123';
+      const id2 = chatRecordingService.recordSyntheticMessage(
+        'gemini',
+        parts,
+        customId,
+      );
+      expect(id2).toBe(customId);
+
+      const record = await loadConversationRecord(
+        chatRecordingService.getConversationFilePath()!,
+      );
+      expect(record!.messages).toHaveLength(2);
+      expect(record!.messages[0].id).toBe(id1);
+      expect(record!.messages[0].type).toBe('user');
+      expect(record!.messages[1].id).toBe(customId);
+      expect(record!.messages[1].type).toBe('gemini');
+    });
+
+    it('should synchronize history turns and maintain their durable identity', async () => {
+      await chatRecordingService.initialize(undefined, 'main');
+      const history: HistoryTurn[] = [
+        { id: 'h1', content: { role: 'user', parts: [{ text: 'msg1' }] } },
+        { id: 'h2', content: { role: 'model', parts: [{ text: 'msg2' }] } },
+      ];
+
+      chatRecordingService.updateMessagesFromHistory(history);
+
+      const record = await loadConversationRecord(
+        chatRecordingService.getConversationFilePath()!,
+      );
+      expect(record!.messages).toHaveLength(2);
+      expect(record!.messages[0].id).toBe('h1');
+      expect(record!.messages[1].id).toBe('h2');
+
+      // Update with a summary
+      const summaryId = 'summary-123';
+      const updatedHistory: HistoryTurn[] = [
+        {
+          id: summaryId,
+          content: { role: 'user', parts: [{ text: 'summary' }] },
+        },
+        ...history.slice(1),
+      ];
+
+      chatRecordingService.updateMessagesFromHistory(updatedHistory);
+      const record2 = await loadConversationRecord(
+        chatRecordingService.getConversationFilePath()!,
+      );
+      expect(record2!.messages).toHaveLength(2);
+      expect(record2!.messages[0].id).toBe(summaryId);
+      expect(record2!.messages[1].id).toBe('h2');
+    });
+  });
+
+  describe('append-only delta patching and memory bounding', () => {
+    it('should append atomic delta patches instead of $set: { messages } when updating tool results or turns', async () => {
+      await chatRecordingService.initialize();
+
+      const userMsgId = chatRecordingService.recordMessage({
+        type: 'user',
+        content: 'Run tool',
+        model: 'gemini-pro',
+      });
+      const modelMsgId = chatRecordingService.recordMessage({
+        type: 'gemini',
+        content: 'Running tool...',
+        model: 'gemini-pro',
+      });
+
+      const callId = 'tool-call-delta-1';
+      chatRecordingService.recordToolCalls('gemini-pro', [
+        {
+          id: callId,
+          name: 'read_file',
+          args: { path: 'large.txt' },
+          result: [{ text: 'x'.repeat(10000) }],
+          status: CoreToolCallStatus.Success,
+          timestamp: new Date().toISOString(),
+        },
+      ]);
+
+      const maskedOutput = '<tool_output_masked>masked</tool_output_masked>';
+      const history: HistoryTurn[] = [
+        {
+          id: userMsgId,
+          content: { role: 'user', parts: [{ text: 'Run tool' }] },
+        },
+        {
+          id: modelMsgId,
+          content: {
+            role: 'model',
+            parts: [
+              {
+                functionCall: {
+                  id: callId,
+                  name: 'read_file',
+                  args: { path: 'large.txt' },
+                },
+              },
+            ],
+          },
+        },
+        {
+          id: 'tool-resp-turn-1',
+          content: {
+            role: 'user',
+            parts: [
+              {
+                functionResponse: {
+                  id: callId,
+                  name: 'read_file',
+                  response: { output: maskedOutput },
+                },
+              },
+            ],
+          },
+        },
+      ];
+
+      chatRecordingService.updateMessagesFromHistory(history);
+
+      const sessionFile = chatRecordingService.getConversationFilePath()!;
+      const rawLines = fs
+        .readFileSync(sessionFile, 'utf8')
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line));
+
+      // Verify NO line contains { $set: { messages: [...] } }
+      for (const record of rawLines) {
+        if (record && typeof record === 'object' && '$set' in record) {
+          expect(record.$set).not.toHaveProperty('messages');
+        }
+      }
+
+      const loaded = await loadConversationRecord(sessionFile);
+      expect(loaded).not.toBeNull();
+      const loadedGemini = loaded!.messages.find((m) => m.id === modelMsgId);
+      expect(loadedGemini?.type).toBe('gemini');
+      if (loadedGemini?.type === 'gemini') {
+        expect(loadedGemini.toolCalls?.[0].result).toEqual([
+          {
+            functionResponse: {
+              id: callId,
+              name: 'read_file',
+              response: { output: maskedOutput },
+            },
+          },
+        ]);
+      }
+    });
+
+    it('should scale file size linearly O(n) and bound in-memory cached messages over 100+ turns with large tool outputs', async () => {
+      await chatRecordingService.initialize();
+
+      const totalTurns = 100;
+      const payloadSize = 50 * 1024; // 50 KB per turn
+      const largePayload = 'A'.repeat(payloadSize);
+      const history: HistoryTurn[] = [];
+      let firstTurnUserMsgId = '';
+
+      for (let i = 0; i < totalTurns; i++) {
+        const userId = chatRecordingService.recordMessage({
+          type: 'user',
+          content: `User prompt ${i}`,
+          model: 'gemini-pro',
+        });
+        if (i === 0) {
+          firstTurnUserMsgId = userId;
+        }
+        const modelId = chatRecordingService.recordMessage({
+          type: 'gemini',
+          content: `Model response ${i}`,
+          model: 'gemini-pro',
+        });
+        const callId = `call-${i}`;
+        const toolResultParts: Part[] = [
+          {
+            functionResponse: {
+              id: callId,
+              name: 'read_file',
+              response: { output: largePayload },
+            },
+          },
+        ];
+        chatRecordingService.recordToolCalls('gemini-pro', [
+          {
+            id: callId,
+            name: 'read_file',
+            args: { index: i },
+            result: toolResultParts,
+            status: CoreToolCallStatus.Success,
+            timestamp: new Date().toISOString(),
+          },
+        ]);
+
+        history.push(
+          {
+            id: userId,
+            content: { role: 'user', parts: [{ text: `User prompt ${i}` }] },
+          },
+          {
+            id: modelId,
+            content: {
+              role: 'model',
+              parts: [{ text: `Model response ${i}` }],
+            },
+          },
+        );
+
+        // Sync every turn as M31aChat does
+        chatRecordingService.updateMessagesFromHistory(history);
+      }
+
+      // 1. In-memory cache must be bounded to MAX_HISTORY_MESSAGES
+      // @ts-expect-error accessing private cachedConversation for memory bound verification
+      const inMemoryMessages = chatRecordingService.cachedConversation.messages;
+      expect(inMemoryMessages.length).toBeLessThanOrEqual(MAX_HISTORY_MESSAGES);
+
+      // 2. Disk file size must scale linearly O(n), not quadratically O(n^2).
+      // 100 turns * ~50KB = ~5MB linear vs ~250MB+ quadratic.
+      const sessionFile = chatRecordingService.getConversationFilePath()!;
+      const stats = fs.statSync(sessionFile);
+      const maxLinearBytes = totalTurns * payloadSize * 3; // generous 3x linear bound (~15MB)
+      expect(stats.size).toBeLessThan(maxLinearBytes);
+
+      // 3. Full conversation reconstruction via loadConversationRecord and getConversation()
+      const loaded = await loadConversationRecord(sessionFile);
+      expect(loaded!.messages).toHaveLength(totalTurns * 2);
+
+      const fullConv = chatRecordingService.getConversation();
+      expect(fullConv!.messages).toHaveLength(totalTurns * 2);
+
+      // 4. Rewind to the very first message (which was evicted from the in-memory window)
+      const rewound = chatRecordingService.rewindTo(firstTurnUserMsgId);
+      expect(rewound!.messages).toHaveLength(0);
+    });
+
+    it('should patch tool results for messages evicted from the in-memory window and reconstruct accurately on resume', async () => {
+      await chatRecordingService.initialize();
+
+      const totalTurns = 35; // 70 messages (> MAX_HISTORY_MESSAGES = 50)
+      const history: HistoryTurn[] = [];
+      let firstModelMsgId = '';
+      const firstCallId = 'evicted-call-0';
+
+      for (let i = 0; i < totalTurns; i++) {
+        const userParts: Part[] = [{ text: `User turn ${i}` }];
+        const userId = chatRecordingService.recordMessage({
+          type: 'user',
+          content: userParts,
+          model: 'gemini-pro',
+        });
+
+        const modelParts: Part[] = [{ text: `Model turn ${i}` }];
+        const modelId = chatRecordingService.recordMessage({
+          type: 'gemini',
+          content: modelParts,
+          model: 'gemini-pro',
+        });
+
+        if (i === 0) {
+          firstModelMsgId = modelId;
+          chatRecordingService.recordToolCalls('gemini-pro', [
+            {
+              id: firstCallId,
+              name: 'run_shell_command',
+              args: { command: 'ls' },
+              result: [{ text: 'unmasked-initial-output' }],
+              status: CoreToolCallStatus.Success,
+              timestamp: new Date().toISOString(),
+            },
+          ]);
+        }
+
+        history.push(
+          { id: userId, content: { role: 'user', parts: userParts } },
+          { id: modelId, content: { role: 'model', parts: modelParts } },
+        );
+      }
+
+      chatRecordingService.updateMessagesFromHistory(history);
+
+      // Verify firstModelMsgId was evicted from the in-memory window
+      // @ts-expect-error accessing private cachedConversation
+      const cachedIds = chatRecordingService.cachedConversation.messages.map(
+        (m: MessageRecord) => m.id,
+      );
+      expect(cachedIds).not.toContain(firstModelMsgId);
+
+      // Now mask the tool result of the evicted first turn
+      const maskedParts: Part[] = [
+        {
+          functionResponse: {
+            id: firstCallId,
+            name: 'run_shell_command',
+            response: {
+              output: '<tool_output_masked>evicted</tool_output_masked>',
+            },
+          },
+        },
+      ];
+      history.push({
+        id: 'tool-mask-turn',
+        content: { role: 'user', parts: maskedParts },
+      });
+
+      chatRecordingService.updateMessagesFromHistory(history);
+
+      const sessionFile = chatRecordingService.getConversationFilePath()!;
+      const loaded = await loadConversationRecord(sessionFile);
+      expect(loaded).not.toBeNull();
+      const firstModelMsg = loaded!.messages.find(
+        (m) => m.id === firstModelMsgId,
+      );
+      expect(firstModelMsg?.type).toBe('gemini');
+      if (firstModelMsg?.type === 'gemini') {
+        expect(firstModelMsg.toolCalls?.[0].result).toEqual(maskedParts);
+      }
+
+      // Resume a new ChatRecordingService instance from this session file
+      const resumedService = new ChatRecordingService(mockConfig);
+      await resumedService.initialize({
+        filePath: sessionFile,
+        conversation: loaded!,
+      });
+
+      // Resumed service should also bound its in-memory messages to MAX_HISTORY_MESSAGES
+      // @ts-expect-error accessing private cachedConversation
+      const resumedInMemory = resumedService.cachedConversation.messages;
+      expect(resumedInMemory.length).toBeLessThanOrEqual(MAX_HISTORY_MESSAGES);
+      expect(resumedService.getConversation()?.messages.length).toBe(
+        totalTurns * 2 + 1,
+      );
+
+      // Rewind to a mid-history message that was evicted from memory
+      const targetMsgId = history[10].id;
+      const rewound = resumedService.rewindTo(targetMsgId);
+      expect(rewound?.messages).toHaveLength(10);
+      expect(rewound?.messages[9].id).toBe(history[9].id);
+    });
+
+    it('should support legacy $set: { messages } checkpoints alongside new $patch and $rewindTo records in loadConversationRecord', async () => {
+      const chatsDir = path.join(testTempDir, 'chats');
+      fs.mkdirSync(chatsDir, { recursive: true });
+      const sessionFile = path.join(chatsDir, 'mixed-format.jsonl');
+
+      const lines = [
+        JSON.stringify({
+          sessionId: 'mixed-session',
+          projectHash: 'test-project-hash',
+          startTime: '2026-01-01T00:00:00.000Z',
+          lastUpdated: '2026-01-01T00:00:00.000Z',
+        }),
+        // Legacy $set: { messages } checkpoint
+        JSON.stringify({
+          $set: {
+            messages: [
+              {
+                id: 'm1',
+                type: 'user',
+                timestamp: '2026-01-01T00:01:00.000Z',
+                content: 'First user prompt',
+              },
+              {
+                id: 'm2',
+                type: 'gemini',
+                timestamp: '2026-01-01T00:02:00.000Z',
+                content: 'Initial model response',
+                toolCalls: [
+                  {
+                    id: 'tc-1',
+                    name: 'read_file',
+                    args: {},
+                    result: 'raw-output',
+                    status: CoreToolCallStatus.Success,
+                    timestamp: '2026-01-01T00:02:00.000Z',
+                  },
+                ],
+              },
+            ],
+          },
+        }),
+        // Incremental message append
+        JSON.stringify({
+          id: 'm3',
+          type: 'user',
+          timestamp: '2026-01-01T00:03:00.000Z',
+          content: 'Second user prompt',
+        }),
+        // Delta $patch updating m2's content and toolCall result
+        JSON.stringify({
+          $patch: {
+            updates: [
+              {
+                id: 'm2',
+                content: [{ text: 'Updated model response' }],
+                toolCalls: [
+                  { id: 'tc-1', result: [{ text: 'masked-output' }] },
+                ],
+              },
+            ],
+          },
+        }),
+      ];
+
+      fs.writeFileSync(sessionFile, lines.join('\n') + '\n');
+
+      const fullLoaded = await loadConversationRecord(sessionFile);
+      expect(fullLoaded).not.toBeNull();
+      expect(fullLoaded!.messages).toHaveLength(3);
+      expect(fullLoaded!.messages[1].content).toEqual([
+        { text: 'Updated model response' },
+      ]);
+      if (fullLoaded!.messages[1].type === 'gemini') {
+        expect(fullLoaded!.messages[1].toolCalls?.[0].result).toEqual([
+          { text: 'masked-output' },
+        ]);
+      }
+
+      const metaLoaded = await loadConversationRecord(sessionFile, {
+        metadataOnly: true,
+      });
+      expect(metaLoaded).not.toBeNull();
+      expect(metaLoaded!.messageCount).toBe(3);
+      expect(metaLoaded!.userMessageCount).toBe(2);
+      expect(metaLoaded!.firstUserMessage).toBe('First user prompt');
+      expect(metaLoaded!.hasResumableContent).toBe(true);
+    });
+
+    it('should reload previously evicted messages into the active trailing window when turns are removed in updateMessagesFromHistory', async () => {
+      await chatRecordingService.initialize();
+
+      const totalMessages = MAX_HISTORY_MESSAGES + 20; // 70 messages (first 20 evicted)
+      const history: HistoryTurn[] = [];
+
+      for (let i = 0; i < totalMessages; i++) {
+        const isUser = i % 2 === 0;
+        const text = `Message ${i}`;
+        const id = chatRecordingService.recordMessage({
+          type: isUser ? 'user' : 'gemini',
+          content: text,
+          model: 'gemini-pro',
+        });
+        history.push({
+          id,
+          content: { role: isUser ? 'user' : 'model', parts: [{ text }] },
+        });
+      }
+
+      chatRecordingService.updateMessagesFromHistory(history);
+
+      // First 20 messages (indices 0..19) are evicted from the in-memory window
+      // @ts-expect-error accessing private cachedConversation
+      const beforeRollback = chatRecordingService.cachedConversation.messages;
+      expect(beforeRollback).toHaveLength(MAX_HISTORY_MESSAGES);
+      expect(beforeRollback[0].id).toBe(history[20].id);
+
+      // Roll back the last 30 messages, leaving 40 messages (indices 0..39)
+      const truncatedHistory = history.slice(0, 40);
+      chatRecordingService.updateMessagesFromHistory(truncatedHistory);
+
+      // Previously evicted messages 0..19 must now be reloaded into cachedConversation.messages
+      // @ts-expect-error accessing private cachedConversation
+      const afterRollback = chatRecordingService.cachedConversation.messages;
+      expect(afterRollback).toHaveLength(40);
+      expect(afterRollback[0].id).toBe(history[0].id);
+      expect(afterRollback[39].id).toBe(history[39].id);
+    });
+
+    it('should detect in-place mutations to Part objects and modifications at index >= 1 in updateMessagesFromHistory', async () => {
+      await chatRecordingService.initialize();
+
+      const parts: Part[] = [
+        { text: 'Initial first part' },
+        { text: 'Part 2' },
+      ];
+      const msgId = chatRecordingService.recordMessage({
+        type: 'user',
+        content: parts,
+        model: 'gemini-pro',
+      });
+
+      const history: HistoryTurn[] = [
+        {
+          id: msgId,
+          content: { role: 'user', parts },
+        },
+      ];
+
+      // Mutate parts[0].text in place (same array reference, same parts[0] reference)
+      parts[0].text = 'Mutated first part in place';
+      chatRecordingService.updateMessagesFromHistory(history);
+
+      const sessionFile = chatRecordingService.getConversationFilePath()!;
+      const afterFirstMutation = await loadConversationRecord(sessionFile);
+      expect(afterFirstMutation!.messages[0].content).toEqual([
+        { text: 'Mutated first part in place' },
+        { text: 'Part 2' },
+      ]);
+
+      // Modify parts[1] (index >= 1) in place while keeping array and parts[0] unchanged
+      const longPrefix = 'A'.repeat(500);
+      const longSuffix = 'Z'.repeat(500);
+      parts[1] = { text: `${longPrefix}0${longSuffix}` };
+      chatRecordingService.updateMessagesFromHistory(history);
+
+      const afterSecondMutation = await loadConversationRecord(sessionFile);
+      expect(afterSecondMutation!.messages[0].content).toEqual([
+        { text: 'Mutated first part in place' },
+        { text: `${longPrefix}0${longSuffix}` },
+      ]);
+
+      // Modify a single character in the middle of the >1000-char string (same length, prefix, and suffix)
+      parts[1].text = `${longPrefix}1${longSuffix}`;
+      chatRecordingService.updateMessagesFromHistory(history);
+
+      const afterMiddleCharMutation = await loadConversationRecord(sessionFile);
+      expect(afterMiddleCharMutation!.messages[0].content).toEqual([
+        { text: 'Mutated first part in place' },
+        { text: `${longPrefix}1${longSuffix}` },
+      ]);
+    });
+
+    it('should detect single-byte mutations inside >= 4096-char strings using word-chunked digest', async () => {
+      await chatRecordingService.initialize();
+
+      const prefix = 'X'.repeat(3000);
+      const suffix = 'Y'.repeat(3000);
+      const parts: Part[] = [{ text: `${prefix}A${suffix}` }];
+      const msgId = chatRecordingService.recordMessage({
+        type: 'user',
+        content: parts,
+        model: 'gemini-pro',
+      });
+
+      const history: HistoryTurn[] = [
+        { id: msgId, content: { role: 'user', parts } },
+      ];
+
+      parts[0].text = `${prefix}B${suffix}`;
+      chatRecordingService.updateMessagesFromHistory(history);
+
+      const sessionFile = chatRecordingService.getConversationFilePath()!;
+      const loaded = await loadConversationRecord(sessionFile);
+      expect(loaded!.messages[0].content).toEqual([
+        { text: `${prefix}B${suffix}` },
+      ]);
+    });
+
+    it('should avoid synchronous readFileSync on compression/pruning when evicted messages exist and target window is cached, and support async getConversationAsync/rewindToAsync', async () => {
+      await chatRecordingService.initialize();
+
+      const totalMessages = MAX_HISTORY_MESSAGES + 20;
+      const history: HistoryTurn[] = [];
+
+      for (let i = 0; i < totalMessages; i++) {
+        const isUser = i % 2 === 0;
+        const text = `Turn ${i}`;
+        const id = chatRecordingService.recordMessage({
+          type: isUser ? 'user' : 'gemini',
+          content: text,
+          model: 'gemini-pro',
+        });
+        history.push({
+          id,
+          content: { role: isUser ? 'user' : 'model', parts: [{ text }] },
+        });
+      }
+
+      chatRecordingService.updateMessagesFromHistory(history);
+
+      vi.mocked(fs.readFileSync).mockClear();
+
+      // Simulate context compression keeping a new summary turn + the most recent 10 turns
+      // (all 10 recent turns are already inside cachedConversation.messages).
+      const compressedHistory: HistoryTurn[] = [
+        {
+          id: 'summary-turn',
+          content: { role: 'user', parts: [{ text: 'Summary of old turns' }] },
+        },
+        {
+          id: 'summary-ack',
+          content: { role: 'model', parts: [{ text: 'Understood.' }] },
+        },
+        ...history.slice(-10),
+      ];
+
+      chatRecordingService.updateMessagesFromHistory(compressedHistory);
+      expect(fs.readFileSync).not.toHaveBeenCalled();
+
+      // Rebuild > MAX_HISTORY_MESSAGES to verify getConversationAsync and rewindToAsync avoid readFileSync
+      const expandedHistory = [...compressedHistory];
+      for (let i = 0; i < MAX_HISTORY_MESSAGES + 10; i++) {
+        const isUser = i % 2 === 0;
+        const text = `Post-compression ${i}`;
+        const id = chatRecordingService.recordMessage({
+          type: isUser ? 'user' : 'gemini',
+          content: text,
+          model: 'gemini-pro',
+        });
+        expandedHistory.push({
+          id,
+          content: { role: isUser ? 'user' : 'model', parts: [{ text }] },
+        });
+      }
+      chatRecordingService.updateMessagesFromHistory(expandedHistory);
+
+      vi.mocked(fs.readFileSync).mockClear();
+
+      const asyncFull = await chatRecordingService.getConversationAsync();
+      expect(asyncFull?.messages.length).toBe(expandedHistory.length);
+      expect(fs.readFileSync).not.toHaveBeenCalled();
+
+      const rewoundAsync = await chatRecordingService.rewindToAsync(
+        expandedHistory[5].id,
+      );
+      expect(rewoundAsync?.messages).toHaveLength(5);
+      expect(fs.readFileSync).not.toHaveBeenCalled();
+    });
+
+    it('should update pre-persisted scheduled tool calls in place even when an info message is recorded in between', async () => {
+      await chatRecordingService.initialize();
+
+      chatRecordingService.recordMessage({
+        type: 'user',
+        content: 'Run work.sh',
+        model: 'gemini-pro',
+      });
+
+      chatRecordingService.recordMessage({
+        type: 'gemini',
+        content: 'Running bash work.sh',
+        model: 'gemini-pro',
+      });
+
+      chatRecordingService.recordToolCalls('gemini-pro', [
+        {
+          id: 'call-1',
+          name: 'run_shell_command',
+          args: { command: 'bash work.sh' },
+          status: CoreToolCallStatus.Scheduled,
+          timestamp: '2026-11-09T03:57:28.250Z',
+          result: null,
+        },
+      ]);
+
+      // Record an intermediate info message while the tool is running
+      chatRecordingService.recordMessage({
+        type: 'info',
+        content: 'Cancelling...',
+        model: 'gemini-pro',
+      });
+
+      // Now update the tool call to Cancelled
+      chatRecordingService.recordToolCalls('gemini-pro', [
+        {
+          id: 'call-1',
+          name: 'run_shell_command',
+          args: { command: 'bash work.sh' },
+          status: CoreToolCallStatus.Cancelled,
+          timestamp: '2026-11-09T03:57:29.383Z',
+          result: [
+            {
+              functionResponse: {
+                id: 'call-1',
+                name: 'run_shell_command',
+                response: { error: '[Operation Cancelled]' },
+              },
+            },
+          ],
+        },
+      ]);
+
+      const sessionFile = chatRecordingService.getConversationFilePath()!;
+      const loaded = await loadConversationRecord(sessionFile);
+      const geminiMessages = loaded!.messages.filter(
+        (m) => m.type === 'gemini',
+      );
+      expect(geminiMessages).toHaveLength(1);
+      expect(
+        geminiMessages[0].type === 'gemini' && geminiMessages[0].toolCalls,
+      ).toEqual([
+        expect.objectContaining({
+          id: 'call-1',
+          name: 'run_shell_command',
+          status: CoreToolCallStatus.Cancelled,
+        }),
+      ]);
+    });
+  });
+});

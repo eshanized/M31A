@@ -1,0 +1,251 @@
+/**
+ * @license
+ * Copyright 2025 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import {
+  type ExtensionUpdateAction,
+  ExtensionUpdateState,
+  type ExtensionUpdateStatus,
+} from '../../ui/state/extensions.js';
+import { loadInstallMetadata } from '../extension.js';
+import { checkForExtensionUpdate } from './github.js';
+import {
+  debugLogger,
+  getErrorMessage,
+  type M31AExtension,
+  IntegrityDataStatus,
+} from '@m31a/core';
+import { copyExtension, type ExtensionManager } from '../extension-manager.js';
+import { ExtensionStorage } from './storage.js';
+import { removeDirectoryWithRetry } from '../../utils/retry.js';
+import { ExtensionConsentDeclinedError } from './extensionConsentErrors.js';
+
+export interface ExtensionUpdateInfo {
+  name: string;
+  originalVersion: string;
+  updatedVersion: string;
+}
+
+export async function updateExtension(
+  extension: M31AExtension,
+  extensionManager: ExtensionManager,
+  currentState: ExtensionUpdateState,
+  dispatchExtensionStateUpdate: (action: ExtensionUpdateAction) => void,
+  enableExtensionReloading?: boolean,
+): Promise<ExtensionUpdateInfo | undefined> {
+  if (currentState === ExtensionUpdateState.UPDATING) {
+    return undefined;
+  }
+  dispatchExtensionStateUpdate({
+    type: 'SET_STATE',
+    payload: { name: extension.name, state: ExtensionUpdateState.UPDATING },
+  });
+  const installMetadata = loadInstallMetadata(extension.path);
+
+  if (!installMetadata?.type) {
+    dispatchExtensionStateUpdate({
+      type: 'SET_STATE',
+      payload: { name: extension.name, state: ExtensionUpdateState.ERROR },
+    });
+    throw new Error(
+      `Extension ${extension.name} cannot be updated, type is unknown.`,
+    );
+  }
+
+  try {
+    const status = await extensionManager.verifyExtensionIntegrity(
+      extension.name,
+      installMetadata,
+    );
+
+    if (status === IntegrityDataStatus.INVALID) {
+      throw new Error('Extension integrity cannot be verified');
+    }
+  } catch (e) {
+    dispatchExtensionStateUpdate({
+      type: 'SET_STATE',
+      payload: { name: extension.name, state: ExtensionUpdateState.ERROR },
+    });
+    throw new Error(
+      `Extension ${extension.name} cannot be updated. ${getErrorMessage(e)}. To fix this, reinstall the extension.`,
+    );
+  }
+
+  if (installMetadata?.type === 'link') {
+    dispatchExtensionStateUpdate({
+      type: 'SET_STATE',
+      payload: { name: extension.name, state: ExtensionUpdateState.UP_TO_DATE },
+    });
+    throw new Error(`Extension is linked so does not need to be updated`);
+  }
+
+  if (extension.migratedTo) {
+    const migratedState = await checkForExtensionUpdate(
+      {
+        ...extension,
+        installMetadata: { ...installMetadata, source: extension.migratedTo },
+        migratedTo: undefined,
+      },
+      extensionManager,
+    );
+    if (
+      migratedState === ExtensionUpdateState.UPDATE_AVAILABLE ||
+      migratedState === ExtensionUpdateState.UP_TO_DATE
+    ) {
+      installMetadata.source = extension.migratedTo;
+    }
+  }
+
+  const originalVersion = extension.version;
+
+  const tempDir = await ExtensionStorage.createTmpDir();
+  try {
+    const previousExtensionConfig = await extensionManager.loadExtensionConfig(
+      extension.path,
+    );
+    let updatedExtension: M31AExtension;
+    try {
+      updatedExtension = await extensionManager.installOrUpdateExtension(
+        installMetadata,
+        previousExtensionConfig,
+      );
+    } catch (e) {
+      dispatchExtensionStateUpdate({
+        type: 'SET_STATE',
+        payload: { name: extension.name, state: ExtensionUpdateState.ERROR },
+      });
+      if (e instanceof ExtensionConsentDeclinedError) {
+        throw e;
+      }
+      throw new Error(
+        `Updated extension not found after installation, got error:\n${e}`,
+      );
+    }
+    const updatedVersion = updatedExtension.version;
+    dispatchExtensionStateUpdate({
+      type: 'SET_STATE',
+      payload: {
+        name: extension.name,
+        state: enableExtensionReloading
+          ? ExtensionUpdateState.UPDATED
+          : ExtensionUpdateState.UPDATED_NEEDS_RESTART,
+      },
+    });
+    return {
+      name: extension.name,
+      originalVersion,
+      updatedVersion,
+    };
+  } catch (e) {
+    // A declined update stops before any file changes, so there's nothing to
+    // restore. Its ERROR state keeps auto-update from asking again.
+    if (e instanceof ExtensionConsentDeclinedError) {
+      throw e;
+    }
+    debugLogger.error(
+      `Error updating extension, rolling back. ${getErrorMessage(e)}`,
+    );
+    dispatchExtensionStateUpdate({
+      type: 'SET_STATE',
+      payload: { name: extension.name, state: ExtensionUpdateState.ERROR },
+    });
+    await copyExtension(tempDir, extension.path);
+    throw e;
+  } finally {
+    try {
+      await removeDirectoryWithRetry(tempDir);
+    } catch (cleanupError) {
+      debugLogger.warn(
+        `Failed to clean up temp directory ${tempDir}: ${getErrorMessage(cleanupError)}`,
+      );
+    }
+  }
+}
+
+export async function updateAllUpdatableExtensions(
+  extensions: M31AExtension[],
+  extensionsState: Map<string, ExtensionUpdateStatus>,
+  extensionManager: ExtensionManager,
+  dispatch: (action: ExtensionUpdateAction) => void,
+  enableExtensionReloading?: boolean,
+): Promise<ExtensionUpdateInfo[]> {
+  const updatableExtensions = extensions.filter(
+    (extension) =>
+      extensionsState.get(extension.name)?.status ===
+      ExtensionUpdateState.UPDATE_AVAILABLE,
+  );
+  // Every update runs to the end, even when another one fails or is declined.
+  // The filter above leaves only extensions whose state is UPDATE_AVAILABLE.
+  const results = await Promise.allSettled(
+    updatableExtensions.map((extension) =>
+      updateExtension(
+        extension,
+        extensionManager,
+        ExtensionUpdateState.UPDATE_AVAILABLE,
+        dispatch,
+        enableExtensionReloading,
+      ),
+    ),
+  );
+  const updated: ExtensionUpdateInfo[] = [];
+  results.forEach((result, index) => {
+    if (result.status === 'fulfilled') {
+      if (result.value) {
+        updated.push(result.value);
+      }
+    } else {
+      debugLogger.error(
+        `Failed to update extension "${updatableExtensions[index].name}": ${getErrorMessage(result.reason)}`,
+      );
+    }
+  });
+  return updated;
+}
+
+export interface ExtensionUpdateCheckResult {
+  state: ExtensionUpdateState;
+  error?: string;
+}
+
+export async function checkForAllExtensionUpdates(
+  extensions: M31AExtension[],
+  extensionManager: ExtensionManager,
+  dispatch: (action: ExtensionUpdateAction) => void,
+): Promise<void> {
+  dispatch({ type: 'BATCH_CHECK_START' });
+  try {
+    const promises: Array<Promise<void>> = [];
+    for (const extension of extensions) {
+      if (!extension.installMetadata) {
+        dispatch({
+          type: 'SET_STATE',
+          payload: {
+            name: extension.name,
+            state: ExtensionUpdateState.NOT_UPDATABLE,
+          },
+        });
+        continue;
+      }
+      dispatch({
+        type: 'SET_STATE',
+        payload: {
+          name: extension.name,
+          state: ExtensionUpdateState.CHECKING_FOR_UPDATES,
+        },
+      });
+      promises.push(
+        checkForExtensionUpdate(extension, extensionManager).then((state) =>
+          dispatch({
+            type: 'SET_STATE',
+            payload: { name: extension.name, state },
+          }),
+        ),
+      );
+    }
+    await Promise.all(promises);
+  } finally {
+    dispatch({ type: 'BATCH_CHECK_END' });
+  }
+}

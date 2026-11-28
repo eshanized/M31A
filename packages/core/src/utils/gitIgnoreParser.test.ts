@@ -1,0 +1,225 @@
+/**
+ * @license
+ * Copyright 2025 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { GitIgnoreParser } from './gitIgnoreParser.js';
+import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
+import * as os from 'node:os';
+
+describe('GitIgnoreParser', () => {
+  let parser: GitIgnoreParser;
+  let projectRoot: string;
+
+  async function createTestFile(filePath: string, content = '') {
+    const fullPath = path.join(projectRoot, filePath);
+    await fs.mkdir(path.dirname(fullPath), { recursive: true });
+    await fs.writeFile(fullPath, content);
+  }
+
+  async function setupGitRepo() {
+    await fs.mkdir(path.join(projectRoot, '.git'), { recursive: true });
+  }
+
+  beforeEach(async () => {
+    projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'gitignore-test-'));
+    parser = new GitIgnoreParser(projectRoot);
+  });
+
+  afterEach(async () => {
+    await fs.rm(projectRoot, { recursive: true, force: true });
+  });
+
+  describe('Core Git Logic', () => {
+    beforeEach(async () => {
+      await setupGitRepo();
+    });
+
+    it('should identify paths ignored by the root .gitignore', async () => {
+      await createTestFile('.gitignore', 'node_modules/\n*.log\n/dist\n.env');
+
+      expect(parser.isIgnored('node_modules/package/index.js', false)).toBe(
+        true,
+      );
+      expect(parser.isIgnored('src/app.log', false)).toBe(true);
+      expect(parser.isIgnored('dist/bundle.js', false)).toBe(true);
+      expect(parser.isIgnored('.env', false)).toBe(true);
+      expect(parser.isIgnored('src/index.js', false)).toBe(false);
+    });
+
+    it('should identify paths ignored by .git/info/exclude', async () => {
+      await createTestFile(
+        path.join('.git', 'info', 'exclude'),
+        'temp/\n*.tmp',
+      );
+      expect(parser.isIgnored('temp/file.txt', false)).toBe(true);
+      expect(parser.isIgnored('src/file.tmp', false)).toBe(true);
+    });
+
+    it('should identify the .git directory as ignored regardless of patterns', () => {
+      expect(parser.isIgnored('.git', true)).toBe(true);
+      expect(parser.isIgnored('.git/config', false)).toBe(true);
+    });
+
+    it('should identify ignored directories when explicitly flagged', async () => {
+      await createTestFile('.gitignore', 'dist/');
+      expect(parser.isIgnored('dist', true)).toBe(true);
+      expect(parser.isIgnored('dist', false)).toBe(false);
+    });
+  });
+
+  describe('Nested .gitignore precedence', () => {
+    beforeEach(async () => {
+      await setupGitRepo();
+      await createTestFile('.gitignore', '*.log\n/ignored-at-root/');
+      await createTestFile(
+        'subdir/.gitignore',
+        '!special.log\nfile-in-subdir.txt',
+      );
+    });
+
+    it('should prioritize nested rules over root rules', () => {
+      expect(parser.isIgnored('any.log', false)).toBe(true);
+      expect(parser.isIgnored('subdir/any.log', false)).toBe(true);
+      expect(parser.isIgnored('subdir/special.log', false)).toBe(false);
+    });
+
+    it('should correctly anchor nested patterns', () => {
+      expect(parser.isIgnored('subdir/file-in-subdir.txt', false)).toBe(true);
+      expect(parser.isIgnored('file-in-subdir.txt', false)).toBe(false);
+    });
+
+    it('should stop processing if an ancestor directory is ignored', async () => {
+      await createTestFile(
+        'ignored-at-root/.gitignore',
+        '!should-not-work.txt',
+      );
+      await createTestFile('ignored-at-root/should-not-work.txt', 'content');
+
+      expect(
+        parser.isIgnored('ignored-at-root/should-not-work.txt', false),
+      ).toBe(true);
+    });
+
+    it('should not ignore files re-included by nested .gitignore under dir/** pattern (#29826)', async () => {
+      await createTestFile('.gitignore', 'logs/**');
+      await createTestFile('logs/.gitignore', '!keep.txt');
+      await createTestFile('logs/keep.txt', 'content');
+      await createTestFile('logs/a.txt', 'content');
+      await createTestFile('logs/sub/keep.txt', 'content');
+      parser.clearCache();
+
+      expect(parser.isIgnored('logs', true)).toBe(false);
+      expect(parser.isIgnored('logs/keep.txt', false)).toBe(false);
+      expect(parser.isIgnored('logs/a.txt', false)).toBe(true);
+      // Subdirectories without negations remain ignored
+      expect(parser.isIgnored('logs/sub', true)).toBe(true);
+      expect(parser.isIgnored('logs/sub/keep.txt', false)).toBe(true);
+    });
+
+    it('should continue pruning wildcard directory when nested .gitignore has no negations (#29826)', async () => {
+      await createTestFile('.gitignore', 'build/**');
+      await createTestFile('build/.gitignore', '# only comments\n*.tmp\n');
+      await createTestFile('build/out.js', 'content');
+      parser.clearCache();
+
+      expect(parser.isIgnored('build', true)).toBe(true);
+      expect(parser.isIgnored('build/out.js', false)).toBe(true);
+    });
+
+    it('should handle nested directory wildcard patterns with nested negations (#29826)', async () => {
+      await createTestFile('packages/.gitignore', 'dist/**');
+      await createTestFile('packages/dist/.gitignore', '!bundle.js');
+      await createTestFile('packages/dist/bundle.js', 'content');
+      await createTestFile('packages/dist/other.js', 'content');
+      parser.clearCache();
+
+      expect(parser.isIgnored('packages/dist', true)).toBe(false);
+      expect(parser.isIgnored('packages/dist/bundle.js', false)).toBe(false);
+      expect(parser.isIgnored('packages/dist/other.js', false)).toBe(true);
+    });
+  });
+
+  describe('Advanced Pattern Matching', () => {
+    beforeEach(async () => {
+      await setupGitRepo();
+    });
+
+    it('should handle complex negation and directory rules', async () => {
+      await createTestFile('.gitignore', 'docs/*\n!docs/README.md');
+
+      expect(parser.isIgnored('docs/other.txt', false)).toBe(true);
+      expect(parser.isIgnored('docs/README.md', false)).toBe(false);
+      expect(parser.isIgnored('docs/', true)).toBe(false);
+    });
+
+    it('should handle escaped characters like # and !', async () => {
+      await createTestFile('.gitignore', '\\#hashfile\n\\!exclaim');
+      expect(parser.isIgnored('#hashfile', false)).toBe(true);
+      expect(parser.isIgnored('!exclaim', false)).toBe(true);
+    });
+
+    it('should correctly handle significant trailing spaces', async () => {
+      await createTestFile('.gitignore', 'foo\\ \nbar ');
+
+      expect(parser.isIgnored('foo ', false)).toBe(true);
+      expect(parser.isIgnored('bar', false)).toBe(true);
+      expect(parser.isIgnored('bar ', false)).toBe(false);
+    });
+  });
+
+  describe('Extra Patterns (Constructor-passed)', () => {
+    it('should apply extraPatterns with highest precedence', async () => {
+      await createTestFile('.gitignore', '*.txt');
+      parser = new GitIgnoreParser(projectRoot, ['!important.txt', 'temp/']);
+
+      expect(parser.isIgnored('file.txt', false)).toBe(true);
+      expect(parser.isIgnored('important.txt', false)).toBe(false);
+      expect(parser.isIgnored('temp/anything.js', false)).toBe(true);
+    });
+  });
+
+  describe('Caching and clearCache', () => {
+    beforeEach(async () => {
+      await setupGitRepo();
+    });
+
+    it('should clear internal caches and reload updated ignore rules', async () => {
+      await createTestFile('.gitignore', '*.log');
+      expect(parser.isIgnored('app.log', false)).toBe(true);
+      expect(parser.isIgnored('app.txt', false)).toBe(false);
+
+      // Update .gitignore on disk
+      await createTestFile('.gitignore', '*.txt');
+
+      // Before clearCache, cached state is used
+      expect(parser.isIgnored('new.log', false)).toBe(true);
+      expect(parser.isIgnored('new.txt', false)).toBe(false);
+
+      // After clearCache, new rules on disk are loaded
+      parser.clearCache();
+      expect(parser.isIgnored('new.log', false)).toBe(false);
+      expect(parser.isIgnored('new.txt', false)).toBe(true);
+    });
+
+    it('should invalidate global exclude file cache when clearCache is called', async () => {
+      const excludePath = path.join('.git', 'info', 'exclude');
+      await createTestFile(excludePath, '*.bak');
+      expect(parser.isIgnored('test.bak', false)).toBe(true);
+      expect(parser.isIgnored('test.tmp', false)).toBe(false);
+
+      await createTestFile(excludePath, '*.tmp');
+
+      // Before clearCache, cached globals are retained
+      expect(parser.isIgnored('file.bak', false)).toBe(true);
+      expect(parser.isIgnored('file.tmp', false)).toBe(false);
+
+      parser.clearCache();
+      expect(parser.isIgnored('file.bak', false)).toBe(false);
+      expect(parser.isIgnored('file.tmp', false)).toBe(true);
+    });
+  });
+});

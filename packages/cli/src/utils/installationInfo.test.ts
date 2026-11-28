@@ -1,0 +1,690 @@
+/**
+ * @license
+ * Copyright 2025 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { getInstallationInfo, PackageManager } from './installationInfo.js';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import * as childProcess from 'node:child_process';
+import { isGitRepository, debugLogger } from '@m31a/core';
+
+vi.mock('@m31a/core', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@m31a/core')>();
+  return {
+    ...actual,
+    isGitRepository: vi.fn(),
+  };
+});
+
+vi.mock('fs', async (importOriginal) => {
+  const actualFs = await importOriginal<typeof fs>();
+  return {
+    ...actualFs,
+    realpathSync: vi.fn(),
+    existsSync: vi.fn(),
+  };
+});
+
+vi.mock('child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('child_process')>();
+  return {
+    ...actual,
+    execSync: vi.fn(),
+  };
+});
+
+const mockedIsGitRepository = vi.mocked(isGitRepository);
+const mockedRealPathSync = vi.mocked(fs.realpathSync);
+const mockedExistsSync = vi.mocked(fs.existsSync);
+const mockedExecSync = vi.mocked(childProcess.execSync);
+
+describe('getInstallationInfo', () => {
+  const projectRoot = '/path/to/project';
+  let originalArgv: string[];
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    originalArgv = [...process.argv];
+    // Mock process.cwd() for isGitRepository
+    vi.spyOn(process, 'cwd').mockReturnValue(projectRoot);
+    vi.spyOn(debugLogger, 'log').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    process.argv = originalArgv;
+  });
+
+  it('should detect running as a standalone binary', () => {
+    vi.stubEnv('IS_BINARY', 'true');
+    process.argv[1] = '/path/to/binary';
+    const info = getInstallationInfo(projectRoot, true);
+    expect(info.packageManager).toBe(PackageManager.BINARY);
+    expect(info.isGlobal).toBe(true);
+    expect(info.updateMessage).toBe(
+      'Running as a standalone binary. Please update by downloading the latest version from GitHub.',
+    );
+    expect(info.updateCommand).toBeUndefined();
+    vi.unstubAllEnvs();
+  });
+
+  it('should return UNKNOWN when cliPath is not available', () => {
+    process.argv[1] = '';
+    const info = getInstallationInfo(projectRoot, true);
+    expect(info.packageManager).toBe(PackageManager.UNKNOWN);
+  });
+
+  it('should return UNKNOWN and log error if realpathSync fails', () => {
+    process.argv[1] = '/path/to/cli';
+    const error = new Error('realpath failed');
+    mockedRealPathSync.mockImplementation(() => {
+      throw error;
+    });
+
+    const info = getInstallationInfo(projectRoot, true);
+
+    expect(info.packageManager).toBe(PackageManager.UNKNOWN);
+    expect(debugLogger.log).toHaveBeenCalledWith(error);
+  });
+
+  it('should detect running from a local git clone', () => {
+    process.argv[1] = `${projectRoot}/packages/cli/dist/index.js`;
+    mockedRealPathSync.mockReturnValue(
+      `${projectRoot}/packages/cli/dist/index.js`,
+    );
+    mockedIsGitRepository.mockReturnValue(true);
+
+    const info = getInstallationInfo(projectRoot, true);
+
+    expect(mockedIsGitRepository).toHaveBeenCalledWith(
+      `${projectRoot}/packages/cli/dist`,
+    );
+    expect(info.packageManager).toBe(PackageManager.UNKNOWN);
+    expect(info.isGlobal).toBe(false);
+    expect(info.updateCommand).toBeUndefined();
+    expect(info.updateMessage).toBe(
+      'Running from a local git clone. Please update with "git pull".',
+    );
+  });
+
+  it('should detect running from a local git clone when invoked from a non-git directory outside the clone', () => {
+    const cloneRoot = '/path/to/m31a';
+    const outsideDir = '/tmp/plain-folder';
+    vi.spyOn(process, 'cwd').mockReturnValue(outsideDir);
+    process.argv[1] = `${cloneRoot}/bundle/m31a.js`;
+    mockedRealPathSync.mockReturnValue(`${cloneRoot}/bundle/m31a.js`);
+    mockedIsGitRepository.mockImplementation((dir) =>
+      dir.replace(/\\/g, '/').startsWith(cloneRoot),
+    );
+    mockedExecSync.mockImplementation(() => {
+      throw new Error('Command failed');
+    });
+
+    const info = getInstallationInfo(outsideDir, true);
+
+    expect(mockedIsGitRepository).toHaveBeenCalledWith(`${cloneRoot}/bundle`);
+    expect(info.packageManager).toBe(PackageManager.UNKNOWN);
+    expect(info.isGlobal).toBe(false);
+    expect(info.updateCommand).toBeUndefined();
+    expect(info.updateMessage).toBe(
+      'Running from a local git clone. Please update with "git pull".',
+    );
+  });
+
+  it('should detect running from a local git clone when invoked from a different git repository', () => {
+    const cloneRoot = '/path/to/m31a';
+    const otherGitRepo = '/path/to/other-repo';
+    vi.spyOn(process, 'cwd').mockReturnValue(otherGitRepo);
+    process.argv[1] = `${cloneRoot}/bundle/m31a.js`;
+    mockedRealPathSync.mockReturnValue(`${cloneRoot}/bundle/m31a.js`);
+    mockedIsGitRepository.mockReturnValue(true);
+    mockedExecSync.mockImplementation(() => {
+      throw new Error('Command failed');
+    });
+
+    const info = getInstallationInfo(otherGitRepo, true);
+
+    expect(mockedIsGitRepository).toHaveBeenCalledWith(`${cloneRoot}/bundle`);
+    expect(info.packageManager).toBe(PackageManager.UNKNOWN);
+    expect(info.isGlobal).toBe(false);
+    expect(info.updateCommand).toBeUndefined();
+    expect(info.updateMessage).toBe(
+      'Running from a local git clone. Please update with "git pull".',
+    );
+  });
+
+  it('should detect running from a local git clone when invoked via npm link from outside the clone', () => {
+    const cloneRoot = '/path/to/m31a';
+    const outsideDir = '/tmp/plain-folder';
+    vi.spyOn(process, 'cwd').mockReturnValue(outsideDir);
+    process.argv[1] = '/usr/local/bin/gemini';
+    mockedRealPathSync.mockReturnValue(
+      `${cloneRoot}/packages/cli/dist/index.js`,
+    );
+    mockedIsGitRepository.mockImplementation((dir) =>
+      dir.replace(/\\/g, '/').startsWith(cloneRoot),
+    );
+    mockedExecSync.mockImplementation(() => {
+      throw new Error('Command failed');
+    });
+
+    const info = getInstallationInfo(outsideDir, true);
+
+    expect(mockedIsGitRepository).toHaveBeenCalledWith(
+      `${cloneRoot}/packages/cli/dist`,
+    );
+    expect(info.packageManager).toBe(PackageManager.UNKNOWN);
+    expect(info.isGlobal).toBe(false);
+    expect(info.updateCommand).toBeUndefined();
+    expect(info.updateMessage).toBe(
+      'Running from a local git clone. Please update with "git pull".',
+    );
+  });
+
+  it('should detect running from a local git clone when invoked via packages/cli directory entrypoint from outside the clone', () => {
+    const cloneRoot = '/path/to/m31a';
+    const outsideDir = '/tmp/plain-folder';
+    vi.spyOn(process, 'cwd').mockReturnValue(outsideDir);
+    process.argv[1] = `${cloneRoot}/packages/cli`;
+    mockedRealPathSync.mockReturnValue(`${cloneRoot}/packages/cli`);
+    mockedIsGitRepository.mockImplementation((dir) =>
+      dir.replace(/\\/g, '/').startsWith(cloneRoot),
+    );
+    mockedExecSync.mockImplementation(() => {
+      throw new Error('Command failed');
+    });
+
+    const info = getInstallationInfo(outsideDir, true);
+
+    expect(mockedIsGitRepository).toHaveBeenCalledWith(`${cloneRoot}/packages`);
+    expect(info.packageManager).toBe(PackageManager.UNKNOWN);
+    expect(info.isGlobal).toBe(false);
+    expect(info.updateCommand).toBeUndefined();
+    expect(info.updateMessage).toBe(
+      'Running from a local git clone. Please update with "git pull".',
+    );
+  });
+
+  it('should detect running from a local git clone when invoked from a subdirectory inside the clone', () => {
+    const cloneRoot = '/path/to/m31a';
+    const subDir = `${cloneRoot}/packages/core`;
+    vi.spyOn(process, 'cwd').mockReturnValue(subDir);
+    process.argv[1] = `${cloneRoot}/bundle/m31a.js`;
+    mockedRealPathSync.mockReturnValue(`${cloneRoot}/bundle/m31a.js`);
+    mockedIsGitRepository.mockImplementation((dir) =>
+      dir.replace(/\\/g, '/').startsWith(cloneRoot),
+    );
+    mockedExecSync.mockImplementation(() => {
+      throw new Error('Command failed');
+    });
+
+    const info = getInstallationInfo(subDir, true);
+
+    expect(mockedIsGitRepository).toHaveBeenCalledWith(`${cloneRoot}/bundle`);
+    expect(info.packageManager).toBe(PackageManager.UNKNOWN);
+    expect(info.isGlobal).toBe(false);
+    expect(info.updateCommand).toBeUndefined();
+    expect(info.updateMessage).toBe(
+      'Running from a local git clone. Please update with "git pull".',
+    );
+  });
+
+  it('should detect running from a Windows-style local git clone when invoked from another directory', () => {
+    const outsideDir = 'C:\\Users\\dev\\other-project';
+    vi.spyOn(process, 'cwd').mockReturnValue(outsideDir);
+    process.argv[1] = 'C:\\Users\\dev\\m31a\\bundle\\m31a.js';
+    mockedRealPathSync.mockReturnValue(
+      'C:\\Users\\dev\\m31a\\bundle\\m31a.js',
+    );
+    mockedIsGitRepository.mockImplementation((dir) =>
+      dir.replace(/\\/g, '/').startsWith('C:/Users/dev/m31a'),
+    );
+    mockedExecSync.mockImplementation(() => {
+      throw new Error('Command failed');
+    });
+
+    const info = getInstallationInfo(outsideDir, true);
+
+    expect(mockedIsGitRepository).toHaveBeenCalledWith(
+      'C:/Users/dev/m31a/bundle',
+    );
+    expect(info.packageManager).toBe(PackageManager.UNKNOWN);
+    expect(info.isGlobal).toBe(false);
+    expect(info.updateCommand).toBeUndefined();
+    expect(info.updateMessage).toBe(
+      'Running from a local git clone. Please update with "git pull".',
+    );
+  });
+
+  it('should NOT classify a global npm node_modules install as a local git clone even inside an ancestor git repo', () => {
+    const globalBundlePath =
+      '/Users/test/.nvm/versions/node/v20.19.0/lib/node_modules/@m31a/cli/bundle/m31a.js';
+    process.argv[1] = globalBundlePath;
+    mockedRealPathSync.mockReturnValue(globalBundlePath);
+    mockedIsGitRepository.mockReturnValue(true);
+    mockedExecSync.mockImplementation(() => {
+      throw new Error('Command failed');
+    });
+
+    const info = getInstallationInfo(projectRoot, true);
+
+    expect(mockedIsGitRepository).not.toHaveBeenCalled();
+    expect(info.packageManager).toBe(PackageManager.NPM);
+    expect(info.isGlobal).toBe(true);
+    expect(info.updateCommand).toBe('npm install -g @m31a/cli@latest');
+  });
+
+  it('should NOT classify a local node_modules install inside a git repo as a local git clone', () => {
+    const localBundlePath = `${projectRoot}/node_modules/@m31a/cli/bundle/m31a.js`;
+    process.argv[1] = localBundlePath;
+    mockedRealPathSync.mockReturnValue(localBundlePath);
+    mockedIsGitRepository.mockReturnValue(true);
+    mockedExecSync.mockImplementation(() => {
+      throw new Error('Command failed');
+    });
+    mockedExistsSync.mockReturnValue(false);
+
+    const info = getInstallationInfo(projectRoot, true);
+
+    expect(mockedIsGitRepository).not.toHaveBeenCalled();
+    expect(info.packageManager).toBe(PackageManager.NPM);
+    expect(info.isGlobal).toBe(false);
+    expect(info.updateMessage).toContain('Locally installed');
+  });
+
+  it('should NOT classify a Homebrew install as a local git clone even when Homebrew prefix is a git repo', () => {
+    const originalPlatform = process.platform;
+    Object.defineProperty(process, 'platform', {
+      value: 'darwin',
+      configurable: true,
+    });
+    try {
+      const cliPath = '/opt/homebrew/Cellar/m31a/1.0.0/bin/gemini';
+      process.argv[1] = cliPath;
+      mockedIsGitRepository.mockReturnValue(true);
+      mockedExecSync.mockImplementation((cmd) => {
+        if (
+          typeof cmd === 'string' &&
+          cmd.includes('brew --prefix m31a')
+        ) {
+          return '/opt/homebrew/opt/m31a';
+        }
+        throw new Error(`Command failed: ${cmd}`);
+      });
+      mockedRealPathSync.mockImplementation((p) => {
+        if (p === cliPath) return cliPath;
+        if (p === '/opt/homebrew/opt/m31a') {
+          return '/opt/homebrew/Cellar/m31a/1.0.0';
+        }
+        return String(p);
+      });
+
+      const info = getInstallationInfo(projectRoot, true);
+
+      expect(info.packageManager).toBe(PackageManager.HOMEBREW);
+      expect(info.isGlobal).toBe(true);
+    } finally {
+      Object.defineProperty(process, 'platform', {
+        value: originalPlatform,
+        configurable: true,
+      });
+    }
+  });
+
+  it('should NOT classify a non-git bundle directory as a local git clone', () => {
+    const nonGitBundle = '/opt/tools/m31a/bundle/m31a.js';
+    process.argv[1] = nonGitBundle;
+    mockedRealPathSync.mockReturnValue(nonGitBundle);
+    mockedIsGitRepository.mockReturnValue(false);
+    mockedExecSync.mockImplementation(() => {
+      throw new Error('Command failed');
+    });
+
+    const info = getInstallationInfo(projectRoot, true);
+
+    expect(mockedIsGitRepository).toHaveBeenCalledWith(
+      '/opt/tools/m31a/bundle',
+    );
+    expect(info.packageManager).toBe(PackageManager.NPM);
+    expect(info.isGlobal).toBe(true);
+  });
+
+  it('should NOT classify bunx cache bundle as a local git clone even inside an ancestor git repo', () => {
+    const bunxBundlePath =
+      '/Users/test/.bun/install/cache/@m31a/cli@0.70.0@@@1/bundle/m31a.js';
+    process.argv[1] = bunxBundlePath;
+    mockedRealPathSync.mockReturnValue(bunxBundlePath);
+    mockedIsGitRepository.mockReturnValue(true);
+
+    const info = getInstallationInfo(projectRoot, true);
+
+    expect(mockedIsGitRepository).not.toHaveBeenCalled();
+    expect(info.packageManager).toBe(PackageManager.BUNX);
+    expect(info.isGlobal).toBe(false);
+    expect(info.updateMessage).toBe('Running via bunx, update not applicable.');
+  });
+
+  it('should NOT classify a path with an ancestor directory named bundle as a local git clone', () => {
+    const unrelatedPath = '/home/user/bundle/projects/my-app/index.js';
+    process.argv[1] = unrelatedPath;
+    mockedRealPathSync.mockReturnValue(unrelatedPath);
+    mockedIsGitRepository.mockReturnValue(true);
+    mockedExecSync.mockImplementation(() => {
+      throw new Error('Command failed');
+    });
+
+    const info = getInstallationInfo(projectRoot, true);
+
+    expect(mockedIsGitRepository).not.toHaveBeenCalled();
+    expect(info.packageManager).toBe(PackageManager.NPM);
+    expect(info.isGlobal).toBe(true);
+  });
+
+  it('should detect running via npx', () => {
+    const npxPath = `/Users/test/.npm/_npx/12345/bin/gemini`;
+    process.argv[1] = npxPath;
+    mockedRealPathSync.mockReturnValue(npxPath);
+
+    const info = getInstallationInfo(projectRoot, true);
+
+    expect(info.packageManager).toBe(PackageManager.NPX);
+    expect(info.isGlobal).toBe(false);
+    expect(info.updateMessage).toBe('Running via npx, update not applicable.');
+  });
+
+  it('should detect running via pnpx', () => {
+    const pnpxPath = `/Users/test/.pnpm/_pnpx/12345/bin/gemini`;
+    process.argv[1] = pnpxPath;
+    mockedRealPathSync.mockReturnValue(pnpxPath);
+
+    const info = getInstallationInfo(projectRoot, true);
+
+    expect(info.packageManager).toBe(PackageManager.PNPX);
+    expect(info.isGlobal).toBe(false);
+    expect(info.updateMessage).toBe('Running via pnpx, update not applicable.');
+  });
+
+  it('should detect running via bunx', () => {
+    const bunxPath = `/Users/test/.bun/install/cache/12345/bin/gemini`;
+    process.argv[1] = bunxPath;
+    mockedRealPathSync.mockReturnValue(bunxPath);
+    mockedExecSync.mockImplementation(() => {
+      throw new Error('Command failed');
+    });
+
+    const info = getInstallationInfo(projectRoot, true);
+
+    expect(info.packageManager).toBe(PackageManager.BUNX);
+    expect(info.isGlobal).toBe(false);
+    expect(info.updateMessage).toBe('Running via bunx, update not applicable.');
+  });
+
+  it('should detect Homebrew installation via execSync', () => {
+    Object.defineProperty(process, 'platform', {
+      value: 'darwin',
+    });
+    // Use a path that matches what brew would resolve to
+    const cliPath = '/opt/homebrew/Cellar/m31a/1.0.0/bin/gemini';
+    process.argv[1] = cliPath;
+
+    mockedExecSync.mockImplementation((cmd) => {
+      if (typeof cmd === 'string' && cmd.includes('brew --prefix m31a')) {
+        return '/opt/homebrew/opt/m31a';
+      }
+      throw new Error(`Command failed: ${cmd}`);
+    });
+
+    mockedRealPathSync.mockImplementation((p) => {
+      if (p === cliPath) return cliPath;
+      if (p === '/opt/homebrew/opt/m31a') {
+        return '/opt/homebrew/Cellar/m31a/1.0.0';
+      }
+      return String(p);
+    });
+
+    const info = getInstallationInfo(projectRoot, true);
+
+    expect(mockedExecSync).toHaveBeenCalledWith(
+      expect.stringContaining('brew --prefix m31a'),
+      expect.anything(),
+    );
+    expect(info.packageManager).toBe(PackageManager.HOMEBREW);
+    expect(info.isGlobal).toBe(true);
+    expect(info.updateMessage).toBe(
+      'Installed via Homebrew. Please update with "brew upgrade m31a".',
+    );
+  });
+
+  it('should fall through if brew command fails', () => {
+    Object.defineProperty(process, 'platform', {
+      value: 'darwin',
+    });
+    const cliPath = '/usr/local/bin/gemini';
+    process.argv[1] = cliPath;
+    mockedRealPathSync.mockReturnValue(cliPath);
+    mockedExecSync.mockImplementation(() => {
+      throw new Error('Command failed');
+    });
+
+    const info = getInstallationInfo(projectRoot, true);
+
+    expect(mockedExecSync).toHaveBeenCalledWith(
+      expect.stringContaining('brew --prefix m31a'),
+      expect.anything(),
+    );
+    // Should fall back to default global npm
+    expect(info.packageManager).toBe(PackageManager.NPM);
+    expect(info.isGlobal).toBe(true);
+  });
+
+  it('should detect global pnpm installation', () => {
+    const pnpmPath = `/Users/test/.pnpm/global/5/node_modules/.pnpm/some-hash/node_modules/@m31a/cli/dist/index.js`;
+    process.argv[1] = pnpmPath;
+    mockedRealPathSync.mockReturnValue(pnpmPath);
+    mockedExecSync.mockImplementation(() => {
+      throw new Error('Command failed');
+    });
+
+    // isAutoUpdateEnabled = true -> "Attempting to automatically update"
+    const info = getInstallationInfo(projectRoot, true);
+    expect(info.packageManager).toBe(PackageManager.PNPM);
+    expect(info.isGlobal).toBe(true);
+    expect(info.updateCommand).toBe('pnpm add -g @m31a/cli@latest');
+    expect(info.updateMessage).toContain('Attempting to automatically update');
+
+    // isAutoUpdateEnabled = false -> "Please run..."
+    const infoDisabled = getInstallationInfo(projectRoot, false);
+    expect(infoDisabled.updateMessage).toContain('Please run pnpm add');
+  });
+
+  it('should detect global yarn installation', () => {
+    const yarnPath = `/Users/test/.yarn/global/node_modules/@m31a/cli/dist/index.js`;
+    process.argv[1] = yarnPath;
+    mockedRealPathSync.mockReturnValue(yarnPath);
+    mockedExecSync.mockImplementation(() => {
+      throw new Error('Command failed');
+    });
+
+    // isAutoUpdateEnabled = true -> "Attempting to automatically update"
+    const info = getInstallationInfo(projectRoot, true);
+    expect(info.packageManager).toBe(PackageManager.YARN);
+    expect(info.isGlobal).toBe(true);
+    expect(info.updateCommand).toBe(
+      'yarn global add @m31a/cli@latest',
+    );
+    expect(info.updateMessage).toContain('Attempting to automatically update');
+
+    // isAutoUpdateEnabled = false -> "Please run..."
+    const infoDisabled = getInstallationInfo(projectRoot, false);
+    expect(infoDisabled.updateMessage).toContain('Please run yarn global add');
+  });
+
+  it('should detect global bun installation', () => {
+    const bunPath = `/Users/test/.bun/install/global/node_modules/@m31a/cli/dist/index.js`;
+    process.argv[1] = bunPath;
+    mockedRealPathSync.mockReturnValue(bunPath);
+    mockedExecSync.mockImplementation(() => {
+      throw new Error('Command failed');
+    });
+
+    // isAutoUpdateEnabled = true -> "Attempting to automatically update"
+    const info = getInstallationInfo(projectRoot, true);
+    expect(info.packageManager).toBe(PackageManager.BUN);
+    expect(info.isGlobal).toBe(true);
+    expect(info.updateCommand).toBe('bun add -g @m31a/cli@latest');
+    expect(info.updateMessage).toContain('Attempting to automatically update');
+
+    // isAutoUpdateEnabled = false -> "Please run..."
+    const infoDisabled = getInstallationInfo(projectRoot, false);
+    expect(infoDisabled.updateMessage).toContain('Please run bun add');
+  });
+
+  it('should detect local installation and identify yarn from lockfile', () => {
+    const localPath = `${projectRoot}/node_modules/.bin/gemini`;
+    process.argv[1] = localPath;
+    mockedRealPathSync.mockReturnValue(localPath);
+    mockedExecSync.mockImplementation(() => {
+      throw new Error('Command failed');
+    });
+    mockedExistsSync.mockImplementation(
+      (p) => p === path.join(projectRoot, 'yarn.lock'),
+    );
+
+    const info = getInstallationInfo(projectRoot, true);
+
+    expect(info.packageManager).toBe(PackageManager.YARN);
+    expect(info.isGlobal).toBe(false);
+    expect(info.updateMessage).toContain('Locally installed');
+  });
+
+  it('should detect local installation and identify pnpm from lockfile', () => {
+    const localPath = `${projectRoot}/node_modules/.bin/gemini`;
+    process.argv[1] = localPath;
+    mockedRealPathSync.mockReturnValue(localPath);
+    mockedExecSync.mockImplementation(() => {
+      throw new Error('Command failed');
+    });
+    mockedExistsSync.mockImplementation(
+      (p) => p === path.join(projectRoot, 'pnpm-lock.yaml'),
+    );
+
+    const info = getInstallationInfo(projectRoot, true);
+
+    expect(info.packageManager).toBe(PackageManager.PNPM);
+    expect(info.isGlobal).toBe(false);
+  });
+
+  it('should detect local installation and identify bun from lockfile', () => {
+    const localPath = `${projectRoot}/node_modules/.bin/gemini`;
+    process.argv[1] = localPath;
+    mockedRealPathSync.mockReturnValue(localPath);
+    mockedExecSync.mockImplementation(() => {
+      throw new Error('Command failed');
+    });
+    mockedExistsSync.mockImplementation(
+      (p) => p === path.join(projectRoot, 'bun.lockb'),
+    );
+
+    const info = getInstallationInfo(projectRoot, true);
+
+    expect(info.packageManager).toBe(PackageManager.BUN);
+    expect(info.isGlobal).toBe(false);
+  });
+
+  it('should default to local npm installation if no lockfile is found', () => {
+    const localPath = `${projectRoot}/node_modules/.bin/gemini`;
+    process.argv[1] = localPath;
+    mockedRealPathSync.mockReturnValue(localPath);
+    mockedExecSync.mockImplementation(() => {
+      throw new Error('Command failed');
+    });
+    mockedExistsSync.mockReturnValue(false); // No lockfiles
+
+    const info = getInstallationInfo(projectRoot, true);
+
+    expect(info.packageManager).toBe(PackageManager.NPM);
+    expect(info.isGlobal).toBe(false);
+  });
+
+  it('should default to global npm installation for unrecognized paths', () => {
+    const globalPath = `/usr/local/bin/gemini`;
+    process.argv[1] = globalPath;
+    mockedRealPathSync.mockReturnValue(globalPath);
+    mockedExecSync.mockImplementation(() => {
+      throw new Error('Command failed');
+    });
+
+    // isAutoUpdateEnabled = true -> "Attempting to automatically update"
+    const info = getInstallationInfo(projectRoot, true);
+    expect(info.packageManager).toBe(PackageManager.NPM);
+    expect(info.isGlobal).toBe(true);
+    expect(info.updateCommand).toBe('npm install -g @m31a/cli@latest');
+    expect(info.updateMessage).toContain('Attempting to automatically update');
+
+    // isAutoUpdateEnabled = false -> "Please run..."
+    const infoDisabled = getInstallationInfo(projectRoot, false);
+    expect(infoDisabled.updateMessage).toContain('Please run npm install');
+  });
+
+  it('should detect Volta installation (Unix-style)', () => {
+    const voltaPath =
+      '/Users/test/.volta/tools/image/node/20.0.0/lib/node_modules/@m31a/cli/dist/index.js';
+    process.argv[1] = voltaPath;
+    mockedRealPathSync.mockReturnValue(voltaPath);
+
+    const info = getInstallationInfo(projectRoot, true);
+
+    expect(info.packageManager).toBe(PackageManager.VOLTA);
+    expect(info.updateCommand).toBe('volta install @m31a/cli@latest');
+  });
+
+  it('should detect Volta installation (Windows-style)', () => {
+    const voltaPath =
+      'C:\\Users\\test\\AppData\\Local\\Volta\\tools\\image\\node\\20.0.0\\node_modules\\@m31a/cli\\dist\\index.js';
+    process.argv[1] = voltaPath;
+    mockedRealPathSync.mockReturnValue(voltaPath);
+
+    const info = getInstallationInfo(projectRoot, true);
+
+    expect(info.packageManager).toBe(PackageManager.VOLTA);
+    expect(info.updateCommand).toBe('volta install @m31a/cli@latest');
+  });
+
+  it('should NOT detect Homebrew if m31a is installed in brew but running from npm location', () => {
+    Object.defineProperty(process, 'platform', {
+      value: 'darwin',
+    });
+    // Path looks like standard global NPM
+    const cliPath =
+      '/usr/local/lib/node_modules/@m31a/cli/dist/index.js';
+    process.argv[1] = cliPath;
+
+    // Setup mocks
+    mockedExecSync.mockImplementation((cmd) => {
+      if (typeof cmd === 'string' && cmd.includes('brew list')) {
+        return Buffer.from('m31a\n');
+      }
+      // Future proofing for the fix:
+      if (typeof cmd === 'string' && cmd.includes('brew --prefix m31a')) {
+        return '/opt/homebrew/opt/m31a';
+      }
+      throw new Error(`Command failed: ${cmd}`);
+    });
+
+    mockedRealPathSync.mockImplementation((p) => {
+      if (p === cliPath) return cliPath;
+      // Future proofing for the fix:
+      if (p === '/opt/homebrew/opt/m31a')
+        return '/opt/homebrew/Cellar/m31a/1.0.0';
+      return String(p);
+    });
+
+    const info = getInstallationInfo(projectRoot, false);
+
+    expect(info.packageManager).not.toBe(PackageManager.HOMEBREW);
+    expect(info.packageManager).toBe(PackageManager.NPM);
+  });
+});

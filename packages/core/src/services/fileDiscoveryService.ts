@@ -1,0 +1,383 @@
+/**
+ * @license
+ * Copyright 2025 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import {
+  GitIgnoreParser,
+  type GitIgnoreFilter,
+} from '../utils/gitIgnoreParser.js';
+import {
+  IgnoreFileParser,
+  type IgnoreFileFilter,
+} from '../utils/ignoreFileParser.js';
+import { isGitRepository } from '../utils/gitUtils.js';
+import { M31A_IGNORE_FILE_NAME } from '../config/constants.js';
+import { isNodeError } from '../utils/errors.js';
+import { debugLogger } from '../utils/debugLogger.js';
+import { isSubpath, resolveToRealPath } from '../utils/paths.js';
+import fs from 'node:fs';
+import * as path from 'node:path';
+import { LRUCache } from 'mnemonist';
+
+const MAX_SYMLINK_CACHE_SIZE = 20_000;
+const MAX_REALPATH_CACHE_SIZE = 20_000;
+
+export interface FilterFilesOptions {
+  respectGitIgnore?: boolean;
+  respectM31aIgnore?: boolean;
+  customIgnoreFilePaths?: string[];
+  isSymbolicLink?: boolean;
+}
+
+export interface FilterReport {
+  filteredPaths: string[];
+  ignoredCount: number;
+}
+
+export class FileDiscoveryService {
+  private gitIgnoreFilter: GitIgnoreFilter | null = null;
+  private geminiIgnoreFilter: IgnoreFileFilter | null = null;
+  private customIgnoreFilter: IgnoreFileFilter | null = null;
+  private combinedIgnoreFilter: GitIgnoreFilter | IgnoreFileFilter | null =
+    null;
+  private defaultFilterFileOptions: FilterFilesOptions = {
+    respectGitIgnore: true,
+    respectM31aIgnore: true,
+    customIgnoreFilePaths: [],
+  };
+  private projectRoot: string;
+  private _realProjectRoot?: string;
+  private symlinkCache: LRUCache<string, boolean> = new LRUCache(
+    MAX_SYMLINK_CACHE_SIZE,
+  );
+  private realPathCache: LRUCache<string, string> = new LRUCache(
+    MAX_REALPATH_CACHE_SIZE,
+  );
+
+  clearCache(): void {
+    this.symlinkCache.clear();
+    this.realPathCache.clear();
+    this.initFilters();
+  }
+
+  private get realProjectRoot(): string {
+    if (!this._realProjectRoot) {
+      try {
+        this._realProjectRoot = resolveToRealPath(this.projectRoot);
+      } catch {
+        this._realProjectRoot = this.projectRoot;
+      }
+    }
+    return this._realProjectRoot;
+  }
+
+  constructor(projectRoot: string, options?: FilterFilesOptions) {
+    this.projectRoot = path.resolve(projectRoot);
+    this.applyFilterFilesOptions(options);
+    this.initFilters();
+  }
+
+  private initFilters(): void {
+    if (isGitRepository(this.projectRoot)) {
+      this.gitIgnoreFilter = new GitIgnoreParser(this.projectRoot);
+    } else {
+      this.gitIgnoreFilter = null;
+    }
+    this.geminiIgnoreFilter = new IgnoreFileParser(
+      this.projectRoot,
+      M31A_IGNORE_FILE_NAME,
+    );
+    if (this.defaultFilterFileOptions.customIgnoreFilePaths?.length) {
+      this.customIgnoreFilter = new IgnoreFileParser(
+        this.projectRoot,
+        this.defaultFilterFileOptions.customIgnoreFilePaths,
+      );
+    } else {
+      this.customIgnoreFilter = null;
+    }
+
+    const geminiPatterns = this.geminiIgnoreFilter.getPatterns();
+    const customPatterns = this.customIgnoreFilter
+      ? this.customIgnoreFilter.getPatterns()
+      : [];
+    const extraPatterns = [...geminiPatterns, ...customPatterns];
+
+    if (this.gitIgnoreFilter) {
+      // Create combined parser: .gitignore + .m31aignore + custom ignore
+      this.combinedIgnoreFilter = new GitIgnoreParser(
+        this.projectRoot,
+        // customPatterns should go the last to ensure overwriting of geminiPatterns
+        extraPatterns,
+      );
+    } else {
+      // Create combined parser when not git repo
+      this.combinedIgnoreFilter = new IgnoreFileParser(
+        this.projectRoot,
+        extraPatterns,
+        true,
+      );
+    }
+  }
+
+  /**
+   * Returns all absolute paths (files and directories) within the project root that should be ignored.
+   */
+  async getIgnoredPaths(options: FilterFilesOptions = {}): Promise<string[]> {
+    const ignoredPaths: string[] = [];
+
+    /**
+     * Recursively walks the directory tree to find ignored paths.
+     */
+    const walk = async (currentDir: string) => {
+      let dirEntries: fs.Dirent[];
+      try {
+        dirEntries = await fs.promises.readdir(currentDir, {
+          withFileTypes: true,
+        });
+      } catch (error: unknown) {
+        if (
+          isNodeError(error) &&
+          (error.code === 'EACCES' || error.code === 'ENOENT')
+        ) {
+          // Stop if the directory is inaccessible or doesn't exist
+          debugLogger.debug(
+            `Skipping directory ${currentDir} due to ${error.code}`,
+          );
+          return;
+        }
+        throw error;
+      }
+
+      // Traverse sibling directories concurrently to improve performance.
+      await Promise.all(
+        dirEntries.map(async (entry) => {
+          const fullPath = path.join(currentDir, entry.name);
+          const entryOptions: FilterFilesOptions = {
+            ...options,
+            isSymbolicLink: entry.isSymbolicLink(),
+          };
+
+          if (entry.isDirectory()) {
+            // Optimization: If a directory is ignored, its contents are not traversed.
+            if (this.shouldIgnoreDirectory(fullPath, entryOptions)) {
+              ignoredPaths.push(fullPath);
+            } else {
+              await walk(fullPath);
+            }
+          } else {
+            if (this.shouldIgnoreFile(fullPath, entryOptions)) {
+              ignoredPaths.push(fullPath);
+            }
+          }
+        }),
+      );
+    };
+
+    await walk(this.projectRoot);
+    return ignoredPaths;
+  }
+
+  private applyFilterFilesOptions(options?: FilterFilesOptions): void {
+    if (!options) return;
+
+    if (options.respectGitIgnore !== undefined) {
+      this.defaultFilterFileOptions.respectGitIgnore = options.respectGitIgnore;
+    }
+    if (options.respectM31aIgnore !== undefined) {
+      this.defaultFilterFileOptions.respectM31aIgnore =
+        options.respectM31aIgnore;
+    }
+    if (options.customIgnoreFilePaths) {
+      this.defaultFilterFileOptions.customIgnoreFilePaths =
+        options.customIgnoreFilePaths;
+    }
+  }
+
+  /**
+   * Filters a list of file paths based on ignore rules.
+   *
+   * NOTE: Directory paths must include a trailing slash to be correctly identified and
+   * matched against directory-specific ignore patterns (e.g., 'dist/').
+   */
+  filterFiles(filePaths: string[], options: FilterFilesOptions = {}): string[] {
+    return filePaths.filter((filePath) => {
+      // Infer directory status from the string format
+      const isDir = filePath.endsWith('/') || filePath.endsWith('\\');
+      return !this._shouldIgnore(filePath, isDir, options);
+    });
+  }
+
+  /**
+   * Filters a list of file paths based on git ignore rules and returns a report
+   * with counts of ignored files.
+   */
+  filterFilesWithReport(
+    filePaths: string[],
+    opts: FilterFilesOptions = {
+      respectGitIgnore: true,
+      respectM31aIgnore: true,
+    },
+  ): FilterReport {
+    const filteredPaths = this.filterFiles(filePaths, opts);
+    const ignoredCount = filePaths.length - filteredPaths.length;
+
+    return {
+      filteredPaths,
+      ignoredCount,
+    };
+  }
+
+  /**
+   * Checks if a specific file should be ignored based on project ignore rules.
+   */
+  shouldIgnoreFile(
+    filePath: string,
+    options: FilterFilesOptions = {},
+  ): boolean {
+    return this._shouldIgnore(filePath, false, options);
+  }
+
+  /**
+   * Checks if a specific directory should be ignored based on project ignore rules.
+   */
+  shouldIgnoreDirectory(
+    dirPath: string,
+    options: FilterFilesOptions = {},
+  ): boolean {
+    return this._shouldIgnore(dirPath, true, options);
+  }
+
+  private _checkIgnoreFilters(
+    filePath: string,
+    isDirectory: boolean,
+    options: FilterFilesOptions = {},
+  ): boolean {
+    const {
+      respectGitIgnore = this.defaultFilterFileOptions.respectGitIgnore,
+      respectM31aIgnore = this.defaultFilterFileOptions.respectM31aIgnore,
+    } = options;
+
+    if (respectGitIgnore && respectM31aIgnore && this.combinedIgnoreFilter) {
+      return this.combinedIgnoreFilter.isIgnored(filePath, isDirectory);
+    }
+
+    if (this.customIgnoreFilter?.isIgnored(filePath, isDirectory)) {
+      return true;
+    }
+
+    if (
+      respectGitIgnore &&
+      this.gitIgnoreFilter?.isIgnored(filePath, isDirectory)
+    ) {
+      return true;
+    }
+
+    if (
+      respectM31aIgnore &&
+      this.geminiIgnoreFilter?.isIgnored(filePath, isDirectory)
+    ) {
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Internal unified check for paths.
+   */
+  private _shouldIgnore(
+    filePath: string,
+    isDirectory: boolean,
+    options: FilterFilesOptions = {},
+  ): boolean {
+    if (this._checkIgnoreFilters(filePath, isDirectory, options)) {
+      return true;
+    }
+
+    try {
+      const absolutePath = path.isAbsolute(filePath)
+        ? filePath
+        : path.resolve(this.projectRoot, filePath);
+
+      let isSymlink: boolean;
+      if (options.isSymbolicLink !== undefined) {
+        isSymlink = options.isSymbolicLink;
+        this.symlinkCache.set(absolutePath, isSymlink);
+      } else {
+        const cached = this.symlinkCache.get(absolutePath);
+        if (cached !== undefined) {
+          isSymlink = cached;
+        } else {
+          const stat = fs.lstatSync(absolutePath, { throwIfNoEntry: false });
+          if (stat !== undefined) {
+            isSymlink = stat.isSymbolicLink();
+            this.symlinkCache.set(absolutePath, isSymlink);
+          } else {
+            isSymlink = false;
+          }
+        }
+      }
+
+      if (isSymlink) {
+        let realPath = this.realPathCache.get(absolutePath);
+        if (!realPath) {
+          realPath = resolveToRealPath(absolutePath);
+          this.realPathCache.set(absolutePath, realPath);
+        }
+        if (!isSubpath(this.realProjectRoot, realPath)) {
+          return true;
+        }
+        let targetIsDir = isDirectory;
+        try {
+          targetIsDir = fs.statSync(realPath).isDirectory();
+        } catch {
+          // Fallback to original isDirectory status if target is inaccessible
+        }
+        if (this._checkIgnoreFilters(realPath, targetIsDir, options)) {
+          return true;
+        }
+      }
+    } catch {
+      // Gracefully handle resolution errors or inaccessible paths
+    }
+
+    return false;
+  }
+
+  /**
+   * Returns the list of ignore files being used (e.g. .m31aignore) excluding .gitignore.
+   */
+  getIgnoreFilePaths(): string[] {
+    const paths: string[] = [];
+    if (
+      this.geminiIgnoreFilter &&
+      this.defaultFilterFileOptions.respectM31aIgnore
+    ) {
+      paths.push(...this.geminiIgnoreFilter.getIgnoreFilePaths());
+    }
+    if (this.customIgnoreFilter) {
+      paths.push(...this.customIgnoreFilter.getIgnoreFilePaths());
+    }
+    return paths;
+  }
+
+  /**
+   * Returns all ignore files including .gitignore if applicable.
+   */
+  getAllIgnoreFilePaths(): string[] {
+    const paths: string[] = [];
+    if (
+      this.gitIgnoreFilter &&
+      this.defaultFilterFileOptions.respectGitIgnore
+    ) {
+      const gitIgnorePath = path.join(this.projectRoot, '.gitignore');
+      const stat = fs.statSync(gitIgnorePath, { throwIfNoEntry: false });
+      if (stat?.isFile()) {
+        paths.push(gitIgnorePath);
+      }
+    }
+    return paths.concat(this.getIgnoreFilePaths());
+  }
+}

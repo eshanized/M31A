@@ -1,0 +1,933 @@
+/**
+ * @license
+ * Copyright 2025 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import {
+  describe,
+  it,
+  expect,
+  vi,
+  beforeEach,
+  afterEach,
+  type Mock,
+} from 'vitest';
+import { getInstallationInfo, PackageManager } from './installationInfo.js';
+import type { UpdateObject } from '../ui/utils/updateCheck.js';
+import type { LoadedSettings } from '../config/settings.js';
+import EventEmitter from 'node:events';
+import type { ChildProcess } from 'node:child_process';
+import {
+  handleAutoUpdate,
+  setUpdateHandler,
+  isUpdateInProgress,
+  waitForUpdateCompletion,
+  _setUpdateStateForTesting,
+  updateEventEmitter,
+} from './handleAutoUpdate.js';
+import { MessageType } from '../ui/types.js';
+
+vi.mock('./installationInfo.js', async () => {
+  const actual = await vi.importActual('./installationInfo.js');
+  return {
+    ...actual,
+    getInstallationInfo: vi.fn(),
+  };
+});
+
+const mockGetPackageJson = vi.hoisted(() => vi.fn());
+
+vi.mock('@m31a/core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@m31a/core')>();
+  return {
+    ...actual,
+    getPackageJson: mockGetPackageJson,
+  };
+});
+
+const mockGetInstallationInfo = vi.mocked(getInstallationInfo);
+
+describe('handleAutoUpdate', () => {
+  let mockSpawn: Mock;
+  let mockUpdateInfo: UpdateObject;
+  let mockSettings: LoadedSettings;
+  let mockChildProcess: ChildProcess;
+
+  beforeEach(() => {
+    vi.stubEnv('M31A_SANDBOX', '');
+    vi.stubEnv('SANDBOX', '');
+    mockSpawn = vi.fn();
+    vi.clearAllMocks();
+    mockGetPackageJson.mockResolvedValue({
+      name: '@m31a/cli',
+      version: '2.0.0',
+    });
+    vi.spyOn(updateEventEmitter, 'emit');
+    mockUpdateInfo = {
+      update: {
+        latest: '2.0.0',
+        current: '1.0.0',
+        type: 'major',
+        name: '@m31a/cli',
+      },
+      message: 'An update is available!',
+    };
+
+    mockSettings = {
+      merged: {
+        general: {
+          enableAutoUpdate: true,
+          enableAutoUpdateNotification: true,
+        },
+        tools: {
+          sandbox: false,
+        },
+      },
+    } as LoadedSettings;
+
+    mockChildProcess = Object.assign(new EventEmitter(), {
+      stdin: Object.assign(new EventEmitter(), {
+        write: vi.fn(),
+        end: vi.fn(),
+      }),
+      unref: vi.fn(),
+    }) as unknown as ChildProcess;
+
+    mockSpawn.mockReturnValue(
+      mockChildProcess as unknown as ReturnType<typeof mockSpawn>,
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.clearAllMocks();
+    _setUpdateStateForTesting(false);
+  });
+
+  it('should do nothing if update info is null', () => {
+    handleAutoUpdate(null, mockSettings, '/root', false, mockSpawn);
+    expect(mockGetInstallationInfo).not.toHaveBeenCalled();
+    expect(updateEventEmitter.emit).not.toHaveBeenCalled();
+    expect(mockSpawn).not.toHaveBeenCalled();
+  });
+
+  it('should track update progress state', async () => {
+    mockGetInstallationInfo.mockReturnValue({
+      updateCommand: 'npm i -g @m31a/cli@latest',
+      updateMessage: 'This is an additional message.',
+      isGlobal: false,
+      packageManager: PackageManager.NPM,
+    });
+
+    expect(isUpdateInProgress()).toBe(false);
+
+    handleAutoUpdate(mockUpdateInfo, mockSettings, '/root', false, mockSpawn);
+
+    expect(isUpdateInProgress()).toBe(true);
+
+    mockChildProcess.emit('close', 0);
+
+    expect(isUpdateInProgress()).toBe(false);
+  });
+
+  it('should track update progress state on error', async () => {
+    mockGetInstallationInfo.mockReturnValue({
+      updateCommand: 'npm i -g @m31a/cli@latest',
+      updateMessage: 'This is an additional message.',
+      isGlobal: false,
+      packageManager: PackageManager.NPM,
+    });
+
+    handleAutoUpdate(mockUpdateInfo, mockSettings, '/root', false, mockSpawn);
+
+    expect(isUpdateInProgress()).toBe(true);
+
+    mockChildProcess.emit('error', new Error('fail'));
+
+    expect(isUpdateInProgress()).toBe(false);
+  });
+
+  it('should resolve waitForUpdateCompletion when update succeeds', async () => {
+    _setUpdateStateForTesting(true);
+
+    const waitPromise = waitForUpdateCompletion();
+    updateEventEmitter.emit('update-success', {});
+
+    await expect(waitPromise).resolves.toBeUndefined();
+  });
+
+  it('should resolve waitForUpdateCompletion when update fails', async () => {
+    _setUpdateStateForTesting(true);
+
+    const waitPromise = waitForUpdateCompletion();
+    updateEventEmitter.emit('update-failed', {});
+
+    await expect(waitPromise).resolves.toBeUndefined();
+  });
+
+  it('should resolve waitForUpdateCompletion immediately if not in progress', async () => {
+    _setUpdateStateForTesting(false);
+
+    const waitPromise = waitForUpdateCompletion();
+
+    await expect(waitPromise).resolves.toBeUndefined();
+  });
+
+  it('should timeout waitForUpdateCompletion', async () => {
+    vi.useFakeTimers();
+    _setUpdateStateForTesting(true);
+
+    const waitPromise = waitForUpdateCompletion(1000);
+
+    vi.advanceTimersByTime(1001);
+
+    await expect(waitPromise).resolves.toBeUndefined();
+    vi.useRealTimers();
+  });
+
+  it('should do nothing if update prompts are disabled', () => {
+    mockSettings.merged.general.enableAutoUpdateNotification = false;
+    handleAutoUpdate(mockUpdateInfo, mockSettings, '/root', false, mockSpawn);
+    expect(mockGetInstallationInfo).not.toHaveBeenCalled();
+    expect(updateEventEmitter.emit).not.toHaveBeenCalled();
+    expect(mockSpawn).not.toHaveBeenCalled();
+  });
+
+  it('should emit "update-received" but not update if auto-updates are disabled', () => {
+    mockSettings.merged.general.enableAutoUpdate = false;
+    mockGetInstallationInfo.mockReturnValue({
+      updateCommand: 'npm i -g @m31a/cli@latest',
+      updateMessage: 'Please update manually.',
+      isGlobal: true,
+      packageManager: PackageManager.NPM,
+    });
+
+    handleAutoUpdate(mockUpdateInfo, mockSettings, '/root', false, mockSpawn);
+
+    expect(updateEventEmitter.emit).toHaveBeenCalledTimes(1);
+    expect(updateEventEmitter.emit).toHaveBeenCalledWith('update-received', {
+      ...mockUpdateInfo,
+      message: 'An update is available!\nPlease update manually.',
+      isUpdating: false,
+    });
+    expect(mockSpawn).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    PackageManager.NPX,
+    PackageManager.PNPX,
+    PackageManager.BUNX,
+    PackageManager.BINARY,
+  ])(
+    'should suppress update notifications when running via %s',
+    (packageManager) => {
+      mockGetInstallationInfo.mockReturnValue({
+        updateCommand: undefined,
+        updateMessage: `Running via ${packageManager}, update not applicable.`,
+        isGlobal: false,
+        packageManager,
+      });
+
+      handleAutoUpdate(mockUpdateInfo, mockSettings, '/root', false, mockSpawn);
+
+      expect(updateEventEmitter.emit).not.toHaveBeenCalled();
+      expect(mockSpawn).not.toHaveBeenCalled();
+    },
+  );
+
+  it('should emit "update-received" but not update if no update command is found', () => {
+    mockGetInstallationInfo.mockReturnValue({
+      updateCommand: undefined,
+      updateMessage: 'Cannot determine update command.',
+      isGlobal: false,
+      packageManager: PackageManager.NPM,
+    });
+
+    handleAutoUpdate(mockUpdateInfo, mockSettings, '/root', false, mockSpawn);
+
+    expect(updateEventEmitter.emit).toHaveBeenCalledTimes(1);
+    expect(updateEventEmitter.emit).toHaveBeenCalledWith('update-received', {
+      ...mockUpdateInfo,
+      message: 'An update is available!\nCannot determine update command.',
+      isUpdating: false,
+    });
+    expect(mockSpawn).not.toHaveBeenCalled();
+  });
+
+  it('should combine update messages correctly', () => {
+    mockGetInstallationInfo.mockReturnValue({
+      updateCommand: undefined, // No command to prevent spawn
+      updateMessage: 'This is an additional message.',
+      isGlobal: false,
+      packageManager: PackageManager.NPM,
+    });
+
+    handleAutoUpdate(mockUpdateInfo, mockSettings, '/root', false, mockSpawn);
+
+    expect(updateEventEmitter.emit).toHaveBeenCalledTimes(1);
+    expect(updateEventEmitter.emit).toHaveBeenCalledWith('update-received', {
+      ...mockUpdateInfo,
+      message: 'An update is available!\nThis is an additional message.',
+      isUpdating: false,
+    });
+  });
+
+  it('should attempt to perform an update when conditions are met', async () => {
+    mockGetInstallationInfo.mockReturnValue({
+      updateCommand: 'npm i -g @m31a/cli@latest',
+      updateMessage: 'This is an additional message.',
+      isGlobal: false,
+      packageManager: PackageManager.NPM,
+    });
+
+    // Simulate successful execution
+    setTimeout(() => {
+      mockChildProcess.emit('close', 0);
+    }, 0);
+
+    handleAutoUpdate(mockUpdateInfo, mockSettings, '/root', false, mockSpawn);
+
+    expect(mockSpawn).toHaveBeenCalledOnce();
+  });
+
+  it('should emit "update-failed" when the update process fails', async () => {
+    await new Promise<void>((resolve) => {
+      mockGetInstallationInfo.mockReturnValue({
+        updateCommand: 'npm i -g @m31a/cli@latest',
+        updateMessage: 'This is an additional message.',
+        isGlobal: false,
+        packageManager: PackageManager.NPM,
+      });
+
+      // Simulate failed execution
+      setTimeout(() => {
+        mockChildProcess.emit('close', 1);
+        resolve();
+      }, 0);
+
+      handleAutoUpdate(mockUpdateInfo, mockSettings, '/root', false, mockSpawn);
+    });
+
+    expect(updateEventEmitter.emit).toHaveBeenCalledWith('update-failed', {
+      message:
+        'Automatic update failed. Please try updating manually:\n\nnpm i -g @m31a/cli@2.0.0',
+    });
+  });
+
+  it('should emit "update-failed" when the spawn function throws an error', async () => {
+    await new Promise<void>((resolve) => {
+      mockGetInstallationInfo.mockReturnValue({
+        updateCommand: 'npm i -g @m31a/cli@latest',
+        updateMessage: 'This is an additional message.',
+        isGlobal: false,
+        packageManager: PackageManager.NPM,
+      });
+
+      // Simulate an error event
+      setTimeout(() => {
+        mockChildProcess.emit('error', new Error('Spawn error'));
+        resolve();
+      }, 0);
+
+      handleAutoUpdate(mockUpdateInfo, mockSettings, '/root', false, mockSpawn);
+    });
+
+    expect(updateEventEmitter.emit).toHaveBeenCalledWith('update-failed', {
+      message:
+        'Automatic update failed. Please try updating manually. (error: Spawn error)\n\nnpm i -g @m31a/cli@2.0.0',
+    });
+  });
+
+  it('should use the "@nightly" tag for nightly updates', async () => {
+    mockUpdateInfo = {
+      ...mockUpdateInfo,
+      update: {
+        ...mockUpdateInfo.update,
+        current: '1.0.0-nightly.0',
+        latest: '2.0.0-nightly.1',
+      },
+    };
+    mockGetInstallationInfo.mockReturnValue({
+      updateCommand: 'npm i -g @m31a/cli@latest',
+      updateMessage: 'This is an additional message.',
+      isGlobal: false,
+      packageManager: PackageManager.NPM,
+    });
+
+    handleAutoUpdate(mockUpdateInfo, mockSettings, '/root', false, mockSpawn);
+
+    expect(mockSpawn).toHaveBeenCalledWith('npm i -g @m31a/cli@nightly', {
+      shell: true,
+      stdio: 'ignore',
+      detached: true,
+    });
+  });
+
+  it('should NOT update if target is less stable than current (defense-in-depth)', async () => {
+    mockUpdateInfo = {
+      ...mockUpdateInfo,
+      update: {
+        ...mockUpdateInfo.update,
+        current: '1.0.0',
+        latest: '1.1.0-nightly.1',
+      },
+    };
+    mockGetInstallationInfo.mockReturnValue({
+      updateCommand: 'npm i -g @m31a/cli@latest',
+      isGlobal: false,
+      packageManager: PackageManager.NPM,
+    });
+
+    handleAutoUpdate(mockUpdateInfo, mockSettings, '/root', false, mockSpawn);
+
+    expect(mockSpawn).not.toHaveBeenCalled();
+  });
+
+  it('should emit "update-success" when the update process succeeds', async () => {
+    await new Promise<void>((resolve) => {
+      mockGetInstallationInfo.mockReturnValue({
+        updateCommand: 'npm i -g @m31a/cli@latest',
+        updateMessage: 'This is an additional message.',
+        isGlobal: false,
+        packageManager: PackageManager.NPM,
+      });
+
+      updateEventEmitter.once('update-success', () => {
+        resolve();
+      });
+
+      // Simulate successful execution
+      setTimeout(() => {
+        mockChildProcess.emit('close', 0);
+      }, 0);
+
+      handleAutoUpdate(mockUpdateInfo, mockSettings, '/root', false, mockSpawn);
+    });
+
+    expect(updateEventEmitter.emit).toHaveBeenCalledWith('update-success', {
+      message:
+        'Update successful! The new version will be used on your next run.',
+    });
+  });
+
+  it('should not emit "update-success" when the active binary is not updated due to PATH shadowing', async () => {
+    mockGetPackageJson.mockResolvedValue({
+      name: '@m31a/cli',
+      version: '1.0.0',
+    });
+
+    await new Promise<void>((resolve) => {
+      mockGetInstallationInfo.mockReturnValue({
+        updateCommand: 'npm i -g @m31a/cli@latest',
+        updateMessage: 'This is an additional message.',
+        isGlobal: true,
+        packageManager: PackageManager.NPM,
+      });
+
+      updateEventEmitter.once('update-failed', () => {
+        resolve();
+      });
+
+      // Simulate child process completing successfully (code 0)
+      setTimeout(() => {
+        mockChildProcess.emit('close', 0);
+      }, 0);
+
+      handleAutoUpdate(mockUpdateInfo, mockSettings, '/root', false, mockSpawn);
+    });
+
+    // Due to PATH shadowing / prefix mismatch, process exit code 0 does not mean
+    // the active binary was updated. handleAutoUpdate should emit update-failed with warning.
+    expect(updateEventEmitter.emit).not.toHaveBeenCalledWith(
+      'update-success',
+      expect.anything(),
+    );
+    expect(updateEventEmitter.emit).toHaveBeenCalledWith(
+      'update-failed',
+      expect.objectContaining({
+        message: expect.stringContaining(
+          'shadowed by another installation in your PATH',
+        ),
+      }),
+    );
+  });
+
+  it('should emit "update-success" when package version cannot be determined (graceful fallback)', async () => {
+    mockGetPackageJson.mockResolvedValue(undefined);
+
+    await new Promise<void>((resolve) => {
+      mockGetInstallationInfo.mockReturnValue({
+        updateCommand: 'npm i -g @m31a/cli@latest',
+        updateMessage: 'This is an additional message.',
+        isGlobal: true,
+        packageManager: PackageManager.NPM,
+      });
+
+      updateEventEmitter.once('update-success', () => {
+        resolve();
+      });
+
+      setTimeout(() => {
+        mockChildProcess.emit('close', 0);
+      }, 0);
+
+      handleAutoUpdate(mockUpdateInfo, mockSettings, '/root', false, mockSpawn);
+    });
+
+    expect(updateEventEmitter.emit).toHaveBeenCalledWith('update-success', {
+      message:
+        'Update successful! The new version will be used on your next run.',
+    });
+  });
+
+  it('should emit "update-success" when getPackageJson throws (graceful fallback)', async () => {
+    mockGetPackageJson.mockRejectedValue(new Error('File read error'));
+
+    await new Promise<void>((resolve) => {
+      mockGetInstallationInfo.mockReturnValue({
+        updateCommand: 'npm i -g @m31a/cli@latest',
+        updateMessage: 'This is an additional message.',
+        isGlobal: true,
+        packageManager: PackageManager.NPM,
+      });
+
+      updateEventEmitter.once('update-success', () => {
+        resolve();
+      });
+
+      setTimeout(() => {
+        mockChildProcess.emit('close', 0);
+      }, 0);
+
+      handleAutoUpdate(mockUpdateInfo, mockSettings, '/root', false, mockSpawn);
+    });
+
+    expect(updateEventEmitter.emit).toHaveBeenCalledWith('update-success', {
+      message:
+        'Update successful! The new version will be used on your next run.',
+    });
+  });
+
+  it('should use pre-resolved CLI path and verify even if path resolution was relative or custom', async () => {
+    mockGetPackageJson.mockImplementation(async (cwd: string) => {
+      if (cwd.includes('custom-bin')) {
+        return { name: '@m31a/cli', version: '1.0.0' };
+      }
+      return { name: '@m31a/cli', version: '2.0.0' };
+    });
+
+    const originalArgv1 = process.argv[1];
+    process.argv[1] = '/tmp/custom-bin/gemini';
+
+    try {
+      await new Promise<void>((resolve) => {
+        mockGetInstallationInfo.mockReturnValue({
+          updateCommand: 'npm i -g @m31a/cli@latest',
+          updateMessage: 'This is an additional message.',
+          isGlobal: true,
+          packageManager: PackageManager.NPM,
+        });
+
+        updateEventEmitter.once('update-failed', () => {
+          resolve();
+        });
+
+        setTimeout(() => {
+          mockChildProcess.emit('close', 0);
+        }, 0);
+
+        handleAutoUpdate(
+          mockUpdateInfo,
+          mockSettings,
+          '/root',
+          false,
+          mockSpawn,
+        );
+      });
+
+      expect(updateEventEmitter.emit).toHaveBeenCalledWith(
+        'update-failed',
+        expect.objectContaining({
+          message: expect.stringContaining(
+            'shadowed by another installation in your PATH',
+          ),
+        }),
+      );
+    } finally {
+      process.argv[1] = originalArgv1;
+    }
+  });
+
+  it('should not fail verification if package name differs from expected CLI package (parent monorepo fallback)', async () => {
+    // Parent package has an older version (1.0.0), but belongs to a different package name
+    mockGetPackageJson.mockResolvedValue({
+      name: 'root-monorepo',
+      version: '1.0.0',
+    });
+
+    await new Promise<void>((resolve) => {
+      mockGetInstallationInfo.mockReturnValue({
+        updateCommand: 'npm i -g @m31a/cli@latest',
+        updateMessage: 'This is an additional message.',
+        isGlobal: true,
+        packageManager: PackageManager.NPM,
+      });
+
+      updateEventEmitter.once('update-success', () => {
+        resolve();
+      });
+
+      setTimeout(() => {
+        mockChildProcess.emit('close', 0);
+      }, 0);
+
+      handleAutoUpdate(mockUpdateInfo, mockSettings, '/root', false, mockSpawn);
+    });
+
+    // Since package name does not match @m31a/cli, it should not falsely treat it as an outdated CLI package
+    expect(updateEventEmitter.emit).toHaveBeenCalledWith('update-success', {
+      message:
+        'Update successful! The new version will be used on your next run.',
+    });
+  });
+
+  it('should fail verification when package name matches but version is outdated', async () => {
+    mockGetPackageJson.mockResolvedValue({
+      name: '@m31a/cli',
+      version: '1.0.0',
+    });
+
+    await new Promise<void>((resolve) => {
+      mockGetInstallationInfo.mockReturnValue({
+        updateCommand: 'npm i -g @m31a/cli@latest',
+        updateMessage: 'This is an additional message.',
+        isGlobal: true,
+        packageManager: PackageManager.NPM,
+      });
+
+      updateEventEmitter.once('update-failed', () => {
+        resolve();
+      });
+
+      setTimeout(() => {
+        mockChildProcess.emit('close', 0);
+      }, 0);
+
+      handleAutoUpdate(mockUpdateInfo, mockSettings, '/root', false, mockSpawn);
+    });
+
+    expect(updateEventEmitter.emit).toHaveBeenCalledWith(
+      'update-failed',
+      expect.objectContaining({
+        message: expect.stringContaining(
+          'shadowed by another installation in your PATH',
+        ),
+      }),
+    );
+  });
+
+  it('should not fail verification if parent package.json is nameless', async () => {
+    // Nameless package.json in parent directory should not trigger false failure
+    mockGetPackageJson.mockResolvedValue({
+      version: '1.0.0',
+    });
+
+    await new Promise<void>((resolve) => {
+      mockGetInstallationInfo.mockReturnValue({
+        updateCommand: 'npm i -g @m31a/cli@latest',
+        updateMessage: 'This is an additional message.',
+        isGlobal: true,
+        packageManager: PackageManager.NPM,
+      });
+
+      updateEventEmitter.once('update-success', () => {
+        resolve();
+      });
+
+      setTimeout(() => {
+        mockChildProcess.emit('close', 0);
+      }, 0);
+
+      handleAutoUpdate(mockUpdateInfo, mockSettings, '/root', false, mockSpawn);
+    });
+
+    expect(updateEventEmitter.emit).toHaveBeenCalledWith('update-success', {
+      message:
+        'Update successful! The new version will be used on your next run.',
+    });
+  });
+
+  it('should not fail verification if info.update.name is missing', async () => {
+    mockGetPackageJson.mockResolvedValue({
+      name: '@m31a/cli',
+      version: '1.0.0',
+    });
+
+    const infoWithoutName: UpdateObject = {
+      ...mockUpdateInfo,
+      update: {
+        ...mockUpdateInfo.update,
+        // @ts-expect-error intentionally undefined name for test
+        name: undefined,
+      },
+    };
+
+    await new Promise<void>((resolve) => {
+      mockGetInstallationInfo.mockReturnValue({
+        updateCommand: 'npm i -g @m31a/cli@latest',
+        updateMessage: 'This is an additional message.',
+        isGlobal: true,
+        packageManager: PackageManager.NPM,
+      });
+
+      updateEventEmitter.once('update-success', () => {
+        resolve();
+      });
+
+      setTimeout(() => {
+        mockChildProcess.emit('close', 0);
+      }, 0);
+
+      handleAutoUpdate(
+        infoWithoutName,
+        mockSettings,
+        '/root',
+        false,
+        mockSpawn,
+      );
+    });
+
+    expect(updateEventEmitter.emit).toHaveBeenCalledWith('update-success', {
+      message:
+        'Update successful! The new version will be used on your next run.',
+    });
+  });
+
+  it('should skip update and not spawn process if latest version is invalid semver', () => {
+    const maliciousUpdateInfo: UpdateObject = {
+      ...mockUpdateInfo,
+      update: {
+        ...mockUpdateInfo.update,
+        latest: '2.0.0; touch /tmp/pwned',
+      },
+    };
+
+    handleAutoUpdate(
+      maliciousUpdateInfo,
+      mockSettings,
+      '/root',
+      false,
+      mockSpawn,
+    );
+
+    expect(mockSpawn).not.toHaveBeenCalled();
+    expect(updateEventEmitter.emit).not.toHaveBeenCalledWith(
+      'update-success',
+      expect.anything(),
+    );
+  });
+
+  it('should skip update and not spawn process if latest version is missing or empty', () => {
+    const emptyLatestUpdateInfo: UpdateObject = {
+      ...mockUpdateInfo,
+      update: {
+        ...mockUpdateInfo.update,
+        latest: '',
+      },
+    };
+
+    handleAutoUpdate(
+      emptyLatestUpdateInfo,
+      mockSettings,
+      '/root',
+      false,
+      mockSpawn,
+    );
+
+    expect(mockSpawn).not.toHaveBeenCalled();
+    expect(updateEventEmitter.emit).not.toHaveBeenCalledWith(
+      'update-success',
+      expect.anything(),
+    );
+  });
+
+  it('should include resolved binary path in update-failed message when verification fails', async () => {
+    mockGetPackageJson.mockResolvedValue({
+      name: '@m31a/cli',
+      version: '1.0.0',
+    });
+
+    const originalArgv1 = process.argv[1];
+    process.argv[1] = '/custom/bin/m31a';
+
+    try {
+      await new Promise<void>((resolve) => {
+        mockGetInstallationInfo.mockReturnValue({
+          updateCommand: 'npm i -g @m31a/cli@latest',
+          updateMessage: 'This is an additional message.',
+          isGlobal: true,
+          packageManager: PackageManager.NPM,
+        });
+
+        updateEventEmitter.once('update-failed', () => {
+          resolve();
+        });
+
+        setTimeout(() => {
+          mockChildProcess.emit('close', 0);
+        }, 0);
+
+        handleAutoUpdate(
+          mockUpdateInfo,
+          mockSettings,
+          '/root',
+          false,
+          mockSpawn,
+        );
+      });
+
+      expect(updateEventEmitter.emit).toHaveBeenCalledWith(
+        'update-failed',
+        expect.objectContaining({
+          message: expect.stringMatching(
+            /active binary \(.*custom.bin.m31a\) was not updated/,
+          ),
+        }),
+      );
+    } finally {
+      process.argv[1] = originalArgv1;
+    }
+  });
+
+  it('should suppress update if isSandboxEnabled is true', () => {
+    handleAutoUpdate(mockUpdateInfo, mockSettings, '/root', true, mockSpawn);
+
+    expect(updateEventEmitter.emit).toHaveBeenCalledWith('update-info', {
+      message: `${mockUpdateInfo.message}\nAutomatic update is not available in sandbox mode.`,
+    });
+    expect(mockSpawn).not.toHaveBeenCalled();
+  });
+});
+
+describe('setUpdateHandler', () => {
+  let addItem: ReturnType<typeof vi.fn>;
+  let setUpdateInfo: ReturnType<typeof vi.fn>;
+  let unregister: () => void;
+
+  beforeEach(() => {
+    addItem = vi.fn();
+    setUpdateInfo = vi.fn();
+    vi.useFakeTimers();
+    unregister = setUpdateHandler(addItem, setUpdateInfo);
+  });
+
+  afterEach(() => {
+    unregister();
+    vi.useRealTimers();
+    vi.clearAllMocks();
+  });
+
+  it('should register event listeners', () => {
+    // We can't easily check if listeners are registered on the real EventEmitter
+    // without mocking it more deeply, but we can check if they respond to events.
+    expect(unregister).toBeInstanceOf(Function);
+  });
+
+  it('should handle update-received event', () => {
+    const updateInfo: UpdateObject = {
+      update: {
+        latest: '2.0.0',
+        current: '1.0.0',
+        type: 'major',
+        name: '@m31a/cli',
+      },
+      message: 'Update available',
+    };
+
+    // Access the actual emitter to emit events
+    updateEventEmitter.emit('update-received', updateInfo);
+
+    expect(setUpdateInfo).toHaveBeenCalledWith(updateInfo);
+
+    // Advance timers to trigger timeout
+    vi.advanceTimersByTime(60000);
+
+    expect(addItem).toHaveBeenCalledWith(
+      {
+        type: MessageType.INFO,
+        text: 'Update available',
+      },
+      expect.any(Number),
+    );
+    expect(setUpdateInfo).toHaveBeenCalledWith(null);
+  });
+
+  it('should handle update-failed event', () => {
+    updateEventEmitter.emit('update-failed', {
+      message: 'Failed message with command',
+    });
+
+    expect(setUpdateInfo).toHaveBeenCalledWith(null);
+    expect(addItem).toHaveBeenCalledWith(
+      {
+        type: MessageType.ERROR,
+        text: 'Failed message with command',
+      },
+      expect.any(Number),
+    );
+  });
+
+  it('should handle update-success event', () => {
+    updateEventEmitter.emit('update-success', { message: 'Success' });
+
+    expect(setUpdateInfo).toHaveBeenCalledWith(null);
+    expect(addItem).toHaveBeenCalledWith(
+      {
+        type: MessageType.INFO,
+        text: 'Update successful! The new version will be used on your next run.',
+      },
+      expect.any(Number),
+    );
+  });
+
+  it('should not show update-received message if update-success was called', () => {
+    const updateInfo: UpdateObject = {
+      update: {
+        latest: '2.0.0',
+        current: '1.0.0',
+        type: 'major',
+        name: '@m31a/cli',
+      },
+      message: 'Update available',
+    };
+
+    updateEventEmitter.emit('update-received', updateInfo);
+    updateEventEmitter.emit('update-success', { message: 'Success' });
+
+    // Advance timers
+    vi.advanceTimersByTime(60000);
+
+    // Should only have called addItem for success, not for received (after timeout)
+    expect(addItem).toHaveBeenCalledTimes(1);
+    expect(addItem).toHaveBeenCalledWith(
+      {
+        type: MessageType.INFO,
+        text: 'Update successful! The new version will be used on your next run.',
+      },
+      expect.any(Number),
+    );
+  });
+
+  it('should handle update-info event', () => {
+    updateEventEmitter.emit('update-info', { message: 'Info message' });
+
+    expect(addItem).toHaveBeenCalledWith(
+      {
+        type: MessageType.INFO,
+        text: 'Info message',
+      },
+      expect.any(Number),
+    );
+  });
+});

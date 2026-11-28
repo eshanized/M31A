@@ -1,0 +1,193 @@
+/**
+ * @license
+ * Copyright 2025 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import type { CommandModule } from 'yargs';
+import { debugLogger, getErrorMessage } from '@m31a/core';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import semver from 'semver';
+import type { ExtensionConfig } from '../../config/extension.js';
+import {
+  ExtensionManager,
+  validateContextFilePath,
+} from '../../config/extension-manager.js';
+import { requestConsentNonInteractive } from '../../config/extensions/consent.js';
+import { promptForSetting } from '../../config/extensions/extensionSettings.js';
+import { loadSettings } from '../../config/settings.js';
+import { exitCli } from '../utils.js';
+
+interface ValidateArgs {
+  path: string;
+}
+
+export async function handleValidate(args: ValidateArgs) {
+  try {
+    await validateExtension(args);
+    debugLogger.log(`Extension ${args.path} has been successfully validated.`);
+  } catch (error) {
+    debugLogger.error(getErrorMessage(error));
+    process.exit(1);
+  }
+}
+
+async function validateExtension(args: ValidateArgs) {
+  const workspaceDir = process.cwd();
+  const extensionManager = new ExtensionManager({
+    workspaceDir,
+    requestConsent: requestConsentNonInteractive,
+    requestSetting: promptForSetting,
+    settings: loadSettings(workspaceDir).merged,
+  });
+  const absoluteInputPath = path.resolve(args.path);
+  const extensionConfig: ExtensionConfig =
+    await extensionManager.loadExtensionConfig(absoluteInputPath);
+  const warnings: string[] = [];
+  const errors: string[] = [];
+
+  if (extensionConfig.contextFileName) {
+    const contextFileNames = Array.isArray(extensionConfig.contextFileName)
+      ? extensionConfig.contextFileName
+      : [extensionConfig.contextFileName];
+
+    const missingContextFiles: string[] = [];
+
+    for (const contextFilePath of contextFileNames) {
+      const validation = validateContextFilePath(
+        contextFilePath,
+        absoluteInputPath,
+      );
+
+      if (!validation.isValid) {
+        errors.push(
+          `Invalid context file path: "${contextFilePath}". ${validation.errorMessage}`,
+        );
+        continue;
+      }
+
+      if (!fs.existsSync(validation.resolvedPath!)) {
+        missingContextFiles.push(contextFilePath);
+      }
+    }
+    if (missingContextFiles.length > 0) {
+      errors.push(
+        `The following context files referenced in m31a-extension.json are missing: ${missingContextFiles}`,
+      );
+    }
+  }
+
+  if (!semver.valid(extensionConfig.version)) {
+    warnings.push(
+      `Warning: Version '${extensionConfig.version}' does not appear to be standard semver (e.g., 1.0.0).`,
+    );
+  }
+
+  if (extensionConfig.mcpServers) {
+    if (
+      typeof extensionConfig.mcpServers !== 'object' ||
+      extensionConfig.mcpServers === null ||
+      Array.isArray(extensionConfig.mcpServers)
+    ) {
+      errors.push('The "mcpServers" field must be an object.');
+    } else {
+      for (const [serverName, serverConfig] of Object.entries(
+        extensionConfig.mcpServers,
+      )) {
+        if (
+          typeof serverConfig !== 'object' ||
+          serverConfig === null ||
+          Array.isArray(serverConfig)
+        ) {
+          errors.push(
+            `MCP server configuration for "${serverName}" must be an object.`,
+          );
+          continue;
+        }
+
+        const hasCommand =
+          typeof serverConfig.command === 'string' &&
+          serverConfig.command.trim().length > 0;
+        const hasUrl =
+          typeof serverConfig.url === 'string' &&
+          serverConfig.url.trim().length > 0;
+        const hasHttpUrl =
+          typeof serverConfig.httpUrl === 'string' &&
+          serverConfig.httpUrl.trim().length > 0;
+        const hasTcp =
+          (typeof serverConfig.tcp === 'string' &&
+            serverConfig.tcp.trim().length > 0) ||
+          typeof serverConfig.tcp === 'number';
+
+        if (!hasCommand && !hasUrl && !hasHttpUrl && !hasTcp) {
+          errors.push(
+            `MCP server "${serverName}" must specify a transport (e.g., "command", "url", or "httpUrl").`,
+          );
+        }
+
+        if (hasHttpUrl) {
+          warnings.push(
+            `MCP server "${serverName}" uses deprecated "httpUrl". Consider using "url" with "type": "http" instead.`,
+          );
+        }
+
+        const errorPrefix = `MCP server "${serverName}" specifies an invalid `;
+        if (hasUrl && serverConfig.url) {
+          const hasPlaceholder = serverConfig.url.includes('$');
+          if (!hasPlaceholder) {
+            try {
+              new URL(serverConfig.url);
+            } catch {
+              errors.push(`${errorPrefix}URL: "${serverConfig.url}".`);
+            }
+          }
+        }
+
+        if (hasHttpUrl && serverConfig.httpUrl) {
+          const hasPlaceholder = serverConfig.httpUrl.includes('$');
+          if (!hasPlaceholder) {
+            try {
+              new URL(serverConfig.httpUrl);
+            } catch {
+              errors.push(`${errorPrefix}httpUrl: "${serverConfig.httpUrl}".`);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  if (warnings.length > 0) {
+    debugLogger.warn('Validation warnings:');
+    for (const warning of warnings) {
+      debugLogger.warn(`  - ${warning}`);
+    }
+  }
+
+  if (errors.length > 0) {
+    debugLogger.error('Validation failed with the following errors:');
+    for (const error of errors) {
+      debugLogger.error(`  - ${error}`);
+    }
+    throw new Error('Extension validation failed.');
+  }
+}
+
+export const validateCommand: CommandModule = {
+  command: 'validate <path>',
+  describe: 'Validates an extension from a local path.',
+  builder: (yargs) =>
+    yargs.positional('path', {
+      describe: 'The path of the extension to validate.',
+      type: 'string',
+      demandOption: true,
+    }),
+  handler: async (args) => {
+    await handleValidate({
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+      path: args['path'] as string,
+    });
+    await exitCli();
+  },
+};

@@ -1,0 +1,123 @@
+/**
+ * @license
+ * Copyright 2025 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { coreEvents, convertSessionToClientHistory } from '@m31a/core';
+import type { HistoryTurn, Config, ResumedSessionData } from '@m31a/core';
+import type { HistoryItemWithoutId } from '../types.js';
+import type { UseHistoryManagerReturn } from './useHistoryManager.js';
+import { convertSessionToHistoryFormats } from './useSessionBrowser.js';
+import type { Part } from '@m31a/genai';
+
+interface UseSessionResumeParams {
+  config: Config;
+  historyManager: UseHistoryManagerReturn;
+  refreshStatic: () => void;
+  isM31aClientInitialized: boolean;
+  setQuittingMessages: (messages: null) => void;
+  resumedSessionData?: ResumedSessionData;
+}
+
+/**
+ * Hook to handle session resumption logic.
+ * Provides a callback to load history for resume and automatically
+ * handles command-line resume on mount.
+ */
+export function useSessionResume({
+  config,
+  historyManager,
+  refreshStatic,
+  isM31aClientInitialized,
+  setQuittingMessages,
+  resumedSessionData,
+}: UseSessionResumeParams) {
+  const [isResuming, setIsResuming] = useState(false);
+
+  // Use refs to avoid dependency chain that causes infinite loop
+  const historyManagerRef = useRef(historyManager);
+  const refreshStaticRef = useRef(refreshStatic);
+
+  useEffect(() => {
+    historyManagerRef.current = historyManager;
+    refreshStaticRef.current = refreshStatic;
+  });
+
+  const loadHistoryForResume = useCallback(
+    async (
+      uiHistory: HistoryItemWithoutId[],
+      clientHistory: Array<
+        { role: 'user' | 'model'; parts: Part[] } | HistoryTurn
+      >,
+      resumedData: ResumedSessionData,
+    ) => {
+      // Wait for the client.
+      if (!isM31aClientInitialized) {
+        return;
+      }
+
+      setIsResuming(true);
+      try {
+        // Give the history to the Gemini client first.
+        const client = config.getM31aClient();
+        if (!client) {
+          throw new Error('Gemini client is not initialized');
+        }
+        await client.resumeChat(clientHistory, resumedData);
+
+        // Now that we have successfully resumed, load the history into the UI.
+        setQuittingMessages(null);
+        historyManagerRef.current.clearItems();
+        uiHistory.forEach((item, index) => {
+          historyManagerRef.current.addItem(item, index, true);
+        });
+        refreshStaticRef.current(); // Force Static component to re-render with the updated history.
+
+        // Restore directories from the resumed session
+        if (
+          resumedData.conversation.directories &&
+          resumedData.conversation.directories.length > 0
+        ) {
+          const workspaceContext = config.getWorkspaceContext();
+          // Add back any directories that were saved in the session
+          // but filter out ones that no longer exist
+          workspaceContext.addDirectories(resumedData.conversation.directories);
+        }
+      } catch (error) {
+        coreEvents.emitFeedback(
+          'error',
+          'Failed to resume session. Please try again.',
+          error,
+        );
+      } finally {
+        setIsResuming(false);
+      }
+    },
+    [config, isM31aClientInitialized, setQuittingMessages],
+  );
+
+  // Handle interactive resume from the command line (-r/--resume without -p/--prompt-interactive).
+  // Only if the client is initialized.
+  const hasLoadedResumedSession = useRef(false);
+  useEffect(() => {
+    if (
+      resumedSessionData &&
+      isM31aClientInitialized &&
+      !hasLoadedResumedSession.current
+    ) {
+      hasLoadedResumedSession.current = true;
+      const historyData = convertSessionToHistoryFormats(
+        resumedSessionData.conversation.messages,
+      );
+      void loadHistoryForResume(
+        historyData.uiHistory,
+        convertSessionToClientHistory(resumedSessionData.conversation.messages),
+        resumedSessionData,
+      );
+    }
+  }, [resumedSessionData, isM31aClientInitialized, loadHistoryForResume]);
+
+  return { loadHistoryForResume, isResuming };
+}

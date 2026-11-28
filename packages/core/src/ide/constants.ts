@@ -1,0 +1,11 @@
+/**
+ * @license
+ * Copyright 2025 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+export const M31A_COMPANION_EXTENSION_NAME = 'M31A Companion';
+export const IDE_MAX_OPEN_FILES = 10;
+export const IDE_MAX_SELECTED_TEXT_LENGTH = 16384; // 16 KiB limit
+export const IDE_REQUEST_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+export const IDE_CLOSE_DIFF_TIMEOUT_MS = 5000; // 5 seconds

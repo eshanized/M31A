@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="71" viewBox="0 0 920 71">
+  <style>
+    text { font-family: Consolas, "Courier New", monospace; font-size: 14px; dominant-baseline: text-before-edge; white-space: pre; }
+  </style>
+  <rect width="920" height="71" fill="#000000" />
+  <g transform="translate(10, 10)">
+    <text x="0" y="2" fill="#333333" textLength="720" lengthAdjust="spacingAndGlyphs">╭──────────────────────────────────────────────────────────────────────────────╮</text>
+    <text x="0" y="19" fill="#333333" textLength="9" lengthAdjust="spacingAndGlyphs">│</text>
+    <text x="18" y="19" fill="#8ccf7e" textLength="9" lengthAdjust="spacingAndGlyphs">I</text>
+    <text x="27" y="19" fill="#86cc8b" textLength="9" lengthAdjust="spacingAndGlyphs">n</text>
+    <text x="36" y="19" fill="#7fc998" textLength="9" lengthAdjust="spacingAndGlyphs">f</text>
+    <text x="45" y="19" fill="#79c5a5" textLength="9" lengthAdjust="spacingAndGlyphs">o</text>
+    <text x="63" y="19" fill="#6cbfbf" textLength="9" lengthAdjust="spacingAndGlyphs">M</text>
+    <text x="72" y="19" fill="#6bbdc6" textLength="9" lengthAdjust="spacingAndGlyphs">e</text>
+    <text x="81" y="19" fill="#6abacd" textLength="9" lengthAdjust="spacingAndGlyphs">s</text>
+    <text x="90" y="19" fill="#6ab8d4" textLength="9" lengthAdjust="spacingAndGlyphs">s</text>
+    <text x="99" y="19" fill="#69b5da" textLength="9" lengthAdjust="spacingAndGlyphs">a</text>
+    <text x="108" y="19" fill="#68b3e1" textLength="9" lengthAdjust="spacingAndGlyphs">g</text>
+    <text x="117" y="19" fill="#67b0e8" textLength="9" lengthAdjust="spacingAndGlyphs">e</text>
+    <text x="711" y="19" fill="#333333" textLength="9" lengthAdjust="spacingAndGlyphs">│</text>
+    <text x="0" y="36" fill="#333333" textLength="720" lengthAdjust="spacingAndGlyphs">╰──────────────────────────────────────────────────────────────────────────────╯</text>
+  </g>
+</svg>

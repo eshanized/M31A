@@ -1,0 +1,421 @@
+/**
+ * @license
+ * Copyright 2025 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
+import { isNodeError } from '../utils/errors.js';
+import { withPathLock } from '../utils/pathMutex.js';
+import { isSubpath, resolveToRealPath } from '../utils/paths.js';
+import { spawnAsync } from '../utils/shell-utils.js';
+import {
+  simpleGit,
+  CheckRepoActions,
+  type SimpleGit,
+  type SimpleGitOptions,
+} from 'simple-git';
+import type { Storage } from '../config/storage.js';
+import { debugLogger } from '../utils/debugLogger.js';
+import {
+  sanitizeEnvironment,
+  getSecureSanitizationConfig,
+} from './environmentSanitization.js';
+import { getSafeGitEnv } from '../utils/gitUtils.js';
+
+export const SHADOW_REPO_AUTHOR_NAME = 'M31A';
+export const SHADOW_REPO_AUTHOR_EMAIL = 'm31a@users.noreply.github.com';
+
+const SHADOW_REPO_UNSAFE_OPTIONS = {
+  allowUnsafeAlias: true,
+  allowUnsafeAskPass: true,
+  allowUnsafeConfigEnvCount: true,
+  allowUnsafeConfigPaths: true,
+  allowUnsafeCredentialHelper: true,
+  allowUnsafeCustomBinary: true,
+  allowUnsafeDiffExternal: true,
+  allowUnsafeDiffTextConv: true,
+  allowUnsafeEditor: true,
+  allowUnsafeFilter: true,
+  allowUnsafeFsMonitor: true,
+  allowUnsafeGitProxy: true,
+  allowUnsafeGpgProgram: true,
+  allowUnsafeHooksPath: true,
+  allowUnsafeMergeDriver: true,
+  allowUnsafePack: true,
+  allowUnsafePager: true,
+  allowUnsafeProtocolOverride: true,
+  allowUnsafeSshCommand: true,
+  allowUnsafeTemplateDir: true,
+} satisfies NonNullable<SimpleGitOptions['unsafe']> &
+  Record<`allowUnsafe${string}`, boolean>;
+
+/**
+ * Common configuration for the shadow Git repository used for checkpointing.
+ *
+ * We enable all "unsafe" options because the shadow repository is an internal,
+ * isolated state management tool, and we want to ensure it works reliably
+ * regardless of the user's local environment (e.g., PAGER, EDITOR, or SSH settings).
+ */
+const SHADOW_REPO_GIT_OPTIONS: Partial<SimpleGitOptions> = {
+  unsafe: SHADOW_REPO_UNSAFE_OPTIONS,
+};
+
+export class GitService {
+  private projectRoot: string;
+  private storage: Storage;
+
+  constructor(projectRoot: string, storage: Storage) {
+    this.projectRoot = path.resolve(projectRoot);
+    this.storage = storage;
+  }
+
+  private getHistoryDir(): string {
+    return this.storage.getHistoryDir();
+  }
+
+  async initialize(): Promise<void> {
+    const gitAvailable = await GitService.verifyGitAvailability();
+    if (!gitAvailable) {
+      throw new Error(
+        'Checkpointing is enabled, but Git is not installed. Please install Git or disable checkpointing to continue.',
+      );
+    }
+    await this.storage.initialize();
+    try {
+      await this.setupShadowGitRepository();
+    } catch (error) {
+      throw new Error(
+        `Failed to initialize checkpointing: ${error instanceof Error ? error.message : 'Unknown error'}. Please check that Git is working properly or disable checkpointing.`,
+      );
+    }
+  }
+
+  static async verifyGitAvailability(): Promise<boolean> {
+    try {
+      await spawnAsync('git', ['--version'], { env: getSafeGitEnv() });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private getShadowRepoEnv(repoDir: string) {
+    const gitConfigPath = path.join(repoDir, '.gitconfig');
+    const systemConfigPath = path.join(repoDir, '.gitconfig_system_empty');
+    return {
+      ...getSafeGitEnv(
+        sanitizeEnvironment(
+          process.env,
+          getSecureSanitizationConfig({
+            enableEnvironmentVariableRedaction: true,
+          }),
+        ),
+      ),
+      // Prevent git from using the user's global git config.
+      GIT_CONFIG_GLOBAL: gitConfigPath,
+      GIT_CONFIG_SYSTEM: systemConfigPath,
+      // Ensure we don't inherit isolation-breaking variables from the user environment.
+      GIT_DIR: undefined,
+      GIT_WORK_TREE: undefined,
+      // Explicitly provide identity to prevent "Author identity unknown" errors
+      // inside sandboxed environments like Docker where the gitconfig might not
+      // be picked up properly.
+      GIT_AUTHOR_NAME: SHADOW_REPO_AUTHOR_NAME,
+      GIT_AUTHOR_EMAIL: SHADOW_REPO_AUTHOR_EMAIL,
+      GIT_COMMITTER_NAME: SHADOW_REPO_AUTHOR_NAME,
+      GIT_COMMITTER_EMAIL: SHADOW_REPO_AUTHOR_EMAIL,
+    };
+  }
+
+  /**
+   * Creates a hidden git repository in the project root.
+   * The Git repository is used to support checkpointing.
+   */
+  async setupShadowGitRepository() {
+    const repoDir = this.getHistoryDir();
+    const gitConfigPath = path.join(repoDir, '.gitconfig');
+
+    await fs.mkdir(repoDir, { recursive: true });
+
+    let coreExcludesPath: string | undefined;
+    try {
+      const { stdout } = await spawnAsync(
+        'git',
+        ['config', '--global', '--path', '--get', 'core.excludesFile'],
+        { env: getSafeGitEnv() },
+      );
+      const trimmed = stdout.trim();
+      if (
+        trimmed &&
+        !trimmed.includes('\0') &&
+        !trimmed.includes('\n') &&
+        !trimmed.includes('\r')
+      ) {
+        coreExcludesPath = trimmed;
+      }
+    } catch {
+      // core.excludesFile is not set or failed to read.
+    }
+
+    // We don't want to inherit the user's name, email, or gpg signing
+    // preferences for the shadow repository, so we create a dedicated gitconfig.
+    let gitConfigContent = `[user]\n  name = ${SHADOW_REPO_AUTHOR_NAME}\n  email = ${SHADOW_REPO_AUTHOR_EMAIL}\n[commit]\n  gpgsign = false\n`;
+    if (coreExcludesPath) {
+      const sanitizedPath = coreExcludesPath
+        .replace(/\\/g, '\\\\')
+        .replace(/"/g, '\\"');
+      gitConfigContent += `[core]\n  excludesFile = "${sanitizedPath}"\n`;
+    }
+    await fs.writeFile(gitConfigPath, gitConfigContent);
+
+    const shadowRepoEnv = this.getShadowRepoEnv(repoDir);
+    await fs.writeFile(shadowRepoEnv.GIT_CONFIG_SYSTEM, '');
+    const repo = simpleGit(repoDir, {
+      ...SHADOW_REPO_GIT_OPTIONS,
+      allowEnvironment: Object.keys(shadowRepoEnv),
+    }).env(shadowRepoEnv);
+    let isRepoDefined = false;
+    try {
+      isRepoDefined = await repo.checkIsRepo(CheckRepoActions.IS_REPO_ROOT);
+    } catch (error) {
+      // If checkIsRepo fails (e.g., on certain Git versions like macOS 2.39.5),
+      // log the error and assume repo is not defined, then proceed with initialization
+      debugLogger.debug(
+        `checkIsRepo failed, will initialize repository: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+
+    if (!isRepoDefined) {
+      await repo.init(false, {
+        '--initial-branch': 'main',
+      });
+
+      await repo.commit('Initial commit', { '--allow-empty': null });
+    }
+
+    let realProjectRoot = this.projectRoot;
+    try {
+      realProjectRoot = resolveToRealPath(this.projectRoot);
+    } catch {
+      // Keep unresolved if resolve fails
+    }
+
+    const safeResolve = (p: string) => {
+      try {
+        return resolveToRealPath(p);
+      } catch {
+        return path.resolve(p);
+      }
+    };
+
+    let gitCommonDir: string | undefined;
+    let gitDir: string | undefined;
+    try {
+      const { stdout } = await spawnAsync(
+        'git',
+        ['rev-parse', '--path-format=absolute', '--git-common-dir'],
+        { cwd: realProjectRoot, env: getSafeGitEnv() },
+      );
+      const trimmed = stdout.trim();
+      if (
+        trimmed &&
+        !trimmed.includes('\0') &&
+        !trimmed.includes('\n') &&
+        !trimmed.includes('\r')
+      ) {
+        gitCommonDir = safeResolve(path.resolve(realProjectRoot, trimmed));
+      }
+    } catch {
+      try {
+        const { stdout } = await spawnAsync(
+          'git',
+          ['rev-parse', '--git-common-dir'],
+          { cwd: realProjectRoot, env: getSafeGitEnv() },
+        );
+        const trimmed = stdout.trim();
+        if (
+          trimmed &&
+          !trimmed.includes('\0') &&
+          !trimmed.includes('\n') &&
+          !trimmed.includes('\r')
+        ) {
+          gitCommonDir = safeResolve(path.resolve(realProjectRoot, trimmed));
+        }
+      } catch {
+        // rev-parse might fail if not a git repository
+      }
+    }
+
+    try {
+      const { stdout } = await spawnAsync(
+        'git',
+        ['rev-parse', '--absolute-git-dir'],
+        { cwd: realProjectRoot, env: getSafeGitEnv() },
+      );
+      const trimmed = stdout.trim();
+      if (
+        trimmed &&
+        !trimmed.includes('\0') &&
+        !trimmed.includes('\n') &&
+        !trimmed.includes('\r')
+      ) {
+        gitDir = safeResolve(path.resolve(realProjectRoot, trimmed));
+      }
+    } catch {
+      // rev-parse might fail if not a git repository
+    }
+
+    const isSafeGitSubpath = (candidatePath: string) =>
+      (gitCommonDir && isSubpath(gitCommonDir, candidatePath)) ||
+      (gitDir && isSubpath(gitDir, candidatePath)) ||
+      isSubpath(realProjectRoot, candidatePath);
+
+    let projectInfoExcludePath: string | undefined;
+    try {
+      const { stdout } = await spawnAsync(
+        'git',
+        ['rev-parse', '--path-format=absolute', '--git-path', 'info/exclude'],
+        { cwd: realProjectRoot, env: getSafeGitEnv() },
+      );
+      const trimmed = stdout.trim();
+      if (
+        trimmed &&
+        !trimmed.includes('\0') &&
+        !trimmed.includes('\n') &&
+        !trimmed.includes('\r')
+      ) {
+        const resolved = safeResolve(path.resolve(realProjectRoot, trimmed));
+        if (isSafeGitSubpath(resolved)) {
+          projectInfoExcludePath = resolved;
+        }
+      }
+    } catch {
+      try {
+        const { stdout } = await spawnAsync(
+          'git',
+          ['rev-parse', '--git-path', 'info/exclude'],
+          { cwd: realProjectRoot, env: getSafeGitEnv() },
+        );
+        const trimmed = stdout.trim();
+        if (
+          trimmed &&
+          !trimmed.includes('\0') &&
+          !trimmed.includes('\n') &&
+          !trimmed.includes('\r')
+        ) {
+          const resolved = safeResolve(path.resolve(realProjectRoot, trimmed));
+          if (isSafeGitSubpath(resolved)) {
+            projectInfoExcludePath = resolved;
+          }
+        }
+      } catch {
+        // Fallback handled below
+      }
+    }
+
+    if (!projectInfoExcludePath) {
+      const fallbackPath = path.resolve(
+        this.projectRoot,
+        '.git',
+        'info',
+        'exclude',
+      );
+      const resolved = safeResolve(fallbackPath);
+      if (isSafeGitSubpath(resolved)) {
+        projectInfoExcludePath = resolved;
+      }
+    }
+
+    let userExcludeContent = '';
+    if (projectInfoExcludePath) {
+      try {
+        userExcludeContent = await fs.readFile(projectInfoExcludePath, 'utf-8');
+      } catch (error) {
+        if (
+          isNodeError(error) &&
+          error.code !== 'ENOENT' &&
+          error.code !== 'ENOTDIR'
+        ) {
+          throw error;
+        }
+      }
+    }
+
+    const shadowInfoDir = path.join(repoDir, '.git', 'info');
+    await fs.mkdir(shadowInfoDir, { recursive: true });
+    const shadowInfoExcludePath = path.join(shadowInfoDir, 'exclude');
+    await fs.writeFile(shadowInfoExcludePath, userExcludeContent);
+
+    const userGitIgnorePath = path.join(this.projectRoot, '.gitignore');
+    const shadowGitIgnorePath = path.join(repoDir, '.gitignore');
+
+    let userGitIgnoreContent = '';
+    try {
+      userGitIgnoreContent = await fs.readFile(userGitIgnorePath, 'utf-8');
+    } catch (error) {
+      if (isNodeError(error) && error.code !== 'ENOENT') {
+        throw error;
+      }
+    }
+
+    await fs.writeFile(shadowGitIgnorePath, userGitIgnoreContent);
+  }
+
+  private get shadowGitRepository(): SimpleGit {
+    const repoDir = this.getHistoryDir();
+    const env = {
+      ...this.getShadowRepoEnv(repoDir),
+      GIT_DIR: path.join(repoDir, '.git'),
+      GIT_WORK_TREE: this.projectRoot,
+    };
+    return simpleGit(this.projectRoot, {
+      ...SHADOW_REPO_GIT_OPTIONS,
+      allowEnvironment: Object.keys(env),
+    }).env(env);
+  }
+
+  async getCurrentCommitHash(): Promise<string> {
+    const hash = await this.shadowGitRepository.raw('rev-parse', 'HEAD');
+    return hash.trim();
+  }
+
+  async createFileSnapshot(message: string): Promise<string> {
+    // `add('.')` stages the entire working tree, so two snapshots running at
+    // once fold each other's files into whichever commit lands first. Serialize
+    // stage -> status -> commit per shadow repository.
+    let realProjectRoot = this.projectRoot;
+    try {
+      realProjectRoot = resolveToRealPath(this.projectRoot);
+    } catch {
+      // Keep unresolved
+    }
+    return withPathLock(`git-snapshot:${realProjectRoot}`, async () => {
+      try {
+        const repo = this.shadowGitRepository;
+        await repo.add('.');
+        const status = await repo.status();
+        if (status.isClean()) {
+          // If no changes are staged, return the current HEAD commit hash
+          return await this.getCurrentCommitHash();
+        }
+        const commitResult = await repo.commit(message, {
+          '--no-verify': null,
+        });
+        return commitResult.commit;
+      } catch (error) {
+        throw new Error(
+          `Failed to create checkpoint snapshot: ${error instanceof Error ? error.message : 'Unknown error'}. Checkpointing may not be working properly.`,
+        );
+      }
+    });
+  }
+
+  async restoreProjectFromSnapshot(commitHash: string): Promise<void> {
+    const repo = this.shadowGitRepository;
+    await repo.raw(['restore', '--source', commitHash, '.']);
+    // Removes any untracked files that were introduced post snapshot.
+    await repo.clean('f', ['-d']);
+  }
+}

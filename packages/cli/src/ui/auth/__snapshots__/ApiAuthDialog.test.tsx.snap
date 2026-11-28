@@ -1,0 +1,20 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`ApiAuthDialog > renders correctly 1`] = `
+"╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                                                                  │
+│ Enter NVIDIA NIM API Key                                                                         │
+│                                                                                                  │
+│ Please enter your NVIDIA NIM API key (NVIDIA_API_KEY). It will be securely stored in your system │
+│ keychain.                                                                                        │
+│ You can get an API key from https://build.nvidia.com/                                            │
+│                                                                                                  │
+│ ╭──────────────────────────────────────────────────────────────────────────────────────────────╮ │
+│ │ Paste your API key here                                                                      │ │
+│ ╰──────────────────────────────────────────────────────────────────────────────────────────────╯ │
+│                                                                                                  │
+│ (Press Enter to submit, Esc to cancel, Ctrl+C to clear stored key)                               │
+│                                                                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+"
+`;

@@ -1,0 +1,191 @@
+/**
+ * @license
+ * Copyright 2025 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import type { ThoughtSummary } from '@m31a/core';
+import React from 'react';
+import { Box, Text } from 'ink';
+import { theme } from '../semantic-colors.js';
+import { useStreamingContext } from '../contexts/StreamingContext.js';
+import { StreamingState } from '../types.js';
+import { M31aRespondingSpinner } from './M31aRespondingSpinner.js';
+import { formatDuration } from '../utils/formatters.js';
+import { useTerminalSize } from '../hooks/useTerminalSize.js';
+import { isNarrowWidth } from '../utils/isNarrowWidth.js';
+import { INTERACTIVE_SHELL_WAITING_PHRASE } from '../hooks/usePhraseCycler.js';
+
+interface LoadingIndicatorProps {
+  currentLoadingPhrase?: string;
+  statusPhrase?: string;
+  wittyPhrase?: string;
+  showWit?: boolean;
+  showTips?: boolean;
+  errorVerbosity?: 'low' | 'full';
+  elapsedTime: number;
+  inline?: boolean;
+  rightContent?: React.ReactNode;
+  thought?: ThoughtSummary | null;
+  thoughtLabel?: string;
+  showCancelAndTimer?: boolean;
+  forceRealStatusOnly?: boolean;
+  spinnerIcon?: string;
+  isHookActive?: boolean;
+  terminalWidth?: number;
+}
+
+export const LoadingIndicator: React.FC<LoadingIndicatorProps> = React.memo(
+  ({
+    currentLoadingPhrase,
+    statusPhrase,
+    wittyPhrase,
+    showWit = false,
+    elapsedTime,
+    inline = false,
+    rightContent,
+    thought,
+    thoughtLabel,
+    showCancelAndTimer = true,
+    forceRealStatusOnly = false,
+    spinnerIcon,
+    isHookActive = false,
+    terminalWidth: propTerminalWidth,
+  }: LoadingIndicatorProps) => {
+    const streamingState = useStreamingContext();
+    const { columns: hookTerminalWidth } = useTerminalSize();
+    const isNarrow = isNarrowWidth(propTerminalWidth ?? hookTerminalWidth);
+
+    if (
+      streamingState === StreamingState.Idle &&
+      !currentLoadingPhrase &&
+      !statusPhrase &&
+      !thought
+    ) {
+      return null;
+    }
+
+    // Prioritize active operational status (e.g. retries) or interactive shell waiting
+    // over thought subject, while keeping cosmetic tips/witty phrases subordinate to thoughts.
+    const primaryText =
+      statusPhrase ??
+      (currentLoadingPhrase === INTERACTIVE_SHELL_WAITING_PHRASE
+        ? currentLoadingPhrase
+        : thought?.subject
+          ? (thoughtLabel ?? thought.subject)
+          : forceRealStatusOnly
+            ? streamingState === StreamingState.Responding
+              ? 'Thinking...'
+              : undefined
+            : currentLoadingPhrase ||
+              (streamingState === StreamingState.Responding
+                ? 'Thinking...'
+                : undefined));
+
+    const cancelAndTimerContent =
+      showCancelAndTimer && streamingState === StreamingState.Responding
+        ? `(esc to cancel, ${elapsedTime < 60 ? `${elapsedTime}s` : formatDuration(elapsedTime * 1000)})`
+        : null;
+
+    const wittyPhraseNode =
+      !forceRealStatusOnly &&
+      showWit &&
+      wittyPhrase &&
+      primaryText === 'Thinking...' ? (
+        <Box marginLeft={1}>
+          <Text color={theme.ui.comment} italic>
+            {wittyPhrase}
+          </Text>
+        </Box>
+      ) : null;
+
+    const statusGlyphNode = (
+      <Box marginRight={1}>
+        <M31aRespondingSpinner
+          nonRespondingDisplay={
+            spinnerIcon ??
+            (streamingState === StreamingState.WaitingForConfirmation
+              ? '⠏'
+              : '')
+          }
+          isHookActive={isHookActive}
+        />
+      </Box>
+    );
+
+    if (inline) {
+      return (
+        <Box>
+          {statusGlyphNode}
+          {primaryText && (
+            <Box flexShrink={1}>
+              <Text color={theme.text.primary} italic wrap="truncate-end">
+                {primaryText}
+              </Text>
+              {primaryText === INTERACTIVE_SHELL_WAITING_PHRASE && (
+                <Text color={theme.ui.active} italic>
+                  {' '}
+                  (press tab to focus)
+                </Text>
+              )}
+            </Box>
+          )}
+          {cancelAndTimerContent && (
+            <>
+              <Box flexShrink={0} width={1} />
+              <Text color={theme.text.secondary}>{cancelAndTimerContent}</Text>
+            </>
+          )}
+          {wittyPhraseNode}
+        </Box>
+      );
+    }
+
+    return (
+      <Box paddingLeft={0} flexDirection="column">
+        {/* Main loading line */}
+        <Box
+          width="100%"
+          flexDirection={isNarrow ? 'column' : 'row'}
+          alignItems={isNarrow ? 'flex-start' : 'center'}
+        >
+          <Box>
+            {statusGlyphNode}
+            {primaryText && (
+              <Box flexShrink={1}>
+                <Text color={theme.text.primary} italic wrap="truncate-end">
+                  {primaryText}
+                </Text>
+                {primaryText === INTERACTIVE_SHELL_WAITING_PHRASE && (
+                  <Text color={theme.ui.active} italic>
+                    {' '}
+                    (press tab to focus)
+                  </Text>
+                )}
+              </Box>
+            )}
+            {!isNarrow && cancelAndTimerContent && (
+              <>
+                <Box flexShrink={0} width={1} />
+                <Text color={theme.text.secondary}>
+                  {cancelAndTimerContent}
+                </Text>
+              </>
+            )}
+            {!isNarrow && wittyPhraseNode}
+          </Box>
+          {!isNarrow && <Box flexGrow={1}>{/* Spacer */}</Box>}
+          {!isNarrow && rightContent && <Box>{rightContent}</Box>}
+        </Box>
+        {isNarrow && cancelAndTimerContent && (
+          <Box>
+            <Text color={theme.text.secondary}>{cancelAndTimerContent}</Text>
+          </Box>
+        )}
+        {isNarrow && wittyPhraseNode}
+        {isNarrow && rightContent && <Box>{rightContent}</Box>}
+      </Box>
+    );
+  },
+);
+LoadingIndicator.displayName = 'LoadingIndicator';

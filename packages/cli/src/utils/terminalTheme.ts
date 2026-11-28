@@ -1,0 +1,83 @@
+/**
+ * @license
+ * Copyright 2025 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import {
+  type TerminalBackgroundColor,
+  terminalCapabilityManager,
+} from '../ui/utils/terminalCapabilityManager.js';
+import { themeManager, DEFAULT_THEME } from '../ui/themes/theme-manager.js';
+import { pickDefaultThemeName } from '../ui/themes/theme.js';
+import { getThemeTypeFromBackgroundColor } from '../ui/themes/color-utils.js';
+import { setAmbiguousCharactersWide } from '../ui/utils/textUtils.js';
+import type { LoadedSettings } from '../config/settings.js';
+import { type Config, coreEvents, debugLogger } from '@m31a/core';
+
+/**
+ * Detects terminal capabilities, loads themes, and sets the active theme.
+ * @param config The application config.
+ * @param settings The loaded settings.
+ * @returns The detected terminal background color.
+ */
+export async function setupTerminalAndTheme(
+  config: Config,
+  settings: LoadedSettings,
+): Promise<TerminalBackgroundColor> {
+  let terminalBackground: TerminalBackgroundColor = undefined;
+  if (config.isInteractive() && process.stdin.isTTY) {
+    // Detect terminal capabilities (Kitty protocol, background color,
+    // ambiguous-width rendering) in parallel.
+    await terminalCapabilityManager.detectCapabilities();
+    terminalBackground = terminalCapabilityManager.getTerminalBackgroundColor();
+    // Keep layout measurements in sync with how this terminal actually
+    // renders box-drawing and other ambiguous-width characters.
+    setAmbiguousCharactersWide(
+      terminalCapabilityManager.areAmbiguousCharactersWide(),
+    );
+  }
+
+  // Load custom themes from standalone theme.json files and settings
+  themeManager.loadUserThemes?.();
+  themeManager.loadCustomThemes(settings.merged.ui.customThemes);
+
+  if (settings.merged.ui.theme) {
+    if (!themeManager.setActiveTheme(settings.merged.ui.theme)) {
+      // If the theme is not found during initial load, log a warning and continue.
+      // The useThemeCommand hook in AppContainer.tsx will handle opening the dialog.
+      debugLogger.warn(
+        `Warning: Theme "${settings.merged.ui.theme}" not found.`,
+      );
+    }
+  } else {
+    // If no theme is set, check terminal background color
+    const themeName = pickDefaultThemeName(
+      terminalBackground,
+      themeManager.getAllThemes(),
+      DEFAULT_THEME.name,
+      'Default Light',
+    );
+    themeManager.setActiveTheme(themeName);
+  }
+
+  config.setTerminalBackground(terminalBackground);
+  themeManager.setTerminalBackground(terminalBackground);
+
+  if (
+    terminalBackground !== undefined &&
+    (settings.merged.ui.autoThemeSwitching ?? true)
+  ) {
+    const currentTheme = themeManager.getActiveTheme();
+    if (!themeManager.isThemeCompatible(currentTheme, terminalBackground)) {
+      const backgroundType =
+        getThemeTypeFromBackgroundColor(terminalBackground);
+      coreEvents.emitFeedback(
+        'warning',
+        `Theme '${currentTheme.name}' (${currentTheme.type}) might look incorrect on your ${backgroundType} terminal background. Type /theme to change theme.`,
+      );
+    }
+  }
+
+  return terminalBackground;
+}

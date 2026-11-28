@@ -1,0 +1,390 @@
+/**
+ * @license
+ * Copyright 2025 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import stripAnsi from 'strip-ansi';
+
+/**
+ * Safely replaces text with literal strings, avoiding ECMAScript GetSubstitution issues.
+ * Escapes $ characters to prevent template interpretation.
+ */
+export function safeLiteralReplace(
+  str: string,
+  oldString: string,
+  newString: string,
+): string {
+  if (oldString === '' || !str.includes(oldString)) {
+    return str;
+  }
+
+  if (!newString.includes('$')) {
+    return str.replaceAll(oldString, newString);
+  }
+
+  const escapedNewString = newString.replaceAll('$', '$$$$');
+  return str.replaceAll(oldString, escapedNewString);
+}
+
+/**
+ * Strips ANSI/VT escape sequences from a raw byte buffer.
+ * Uses latin1 encoding to preserve every byte's value exactly (0-255)
+ * while allowing string-based removal of escape sequences.
+ */
+export function stripAnsiFromBuffer(data: Buffer): Buffer {
+  const stripped = stripAnsi(data.toString('latin1'));
+  return Buffer.from(stripped, 'latin1');
+}
+
+/**
+ * Checks if a Buffer is likely binary by testing for the presence of a NULL byte.
+ * The presence of a NULL byte is a strong indicator that the data is not plain text.
+ * @param data The Buffer to check.
+ * @param sampleSize The number of bytes from the start of the buffer to test.
+ * @param isPtyOutput When true, ANSI escape sequences are stripped before
+ *   checking and a null-byte ratio threshold is used instead of failing on
+ *   a single null byte.  This prevents false positives caused by node-pty
+ *   on Windows emitting VT control sequences that contain null bytes.
+ * @returns True if the data is likely binary, false otherwise.
+ */
+export function isBinary(
+  data: Buffer | null | undefined,
+  sampleSize = 512,
+  isPtyOutput = false,
+): boolean {
+  if (!data) {
+    return false;
+  }
+
+  let sample = data.length > sampleSize ? data.subarray(0, sampleSize) : data;
+
+  if (isPtyOutput) {
+    sample = stripAnsiFromBuffer(sample);
+    if (sample.length === 0) {
+      return false;
+    }
+    let nullCount = 0;
+    for (const byte of sample) {
+      if (byte === 0) {
+        nullCount++;
+      }
+    }
+    return nullCount / sample.length > 0.1;
+  }
+
+  for (const byte of sample) {
+    // The presence of a NULL byte (0x00) is one of the most reliable
+    // indicators of a binary file. Text files should not contain them.
+    if (byte === 0) {
+      return true;
+    }
+  }
+
+  // If no NULL bytes were found in the sample, we assume it's text.
+  return false;
+}
+
+/**
+ * Detects the line ending style of a string.
+ * @param content The string content to analyze.
+ * @returns '\r\n' for Windows-style, '\n' for Unix-style.
+ */
+export function detectLineEnding(content: string): '\r\n' | '\n' {
+  // If a Carriage Return is found, assume Windows-style endings.
+  // This is a simple but effective heuristic.
+  return content.includes('\r\n') ? '\r\n' : '\n';
+}
+
+const graphemeSegmenter = new Intl.Segmenter(undefined, {
+  granularity: 'grapheme',
+});
+
+/**
+ * Truncates a string to a maximum length, appending a suffix if truncated.
+ * @param str The string to truncate.
+ * @param maxLength The maximum length of the string.
+ * @param suffix The suffix to append if truncated (default: '...[TRUNCATED]').
+ * @returns The truncated string.
+ */
+export function truncateString(
+  str: string,
+  maxLength: number,
+  suffix = '...[TRUNCATED]',
+): string {
+  if (str.length <= maxLength) {
+    return str;
+  }
+
+  if (maxLength <= 0) {
+    return suffix;
+  }
+
+  // Find the grapheme cluster containing code-unit index `maxLength`.
+  // Its start `index` is the largest grapheme cluster boundary <= maxLength.
+  const boundary = graphemeSegmenter.segment(str).containing(maxLength);
+  let truncatedStr = str.slice(0, boundary ? boundary.index : maxLength);
+
+  // Final safety check for dangling high surrogates
+  if (truncatedStr.length > 0) {
+    const lastCode = truncatedStr.charCodeAt(truncatedStr.length - 1);
+    if (lastCode >= 0xd800 && lastCode <= 0xdbff) {
+      truncatedStr = truncatedStr.slice(0, -1);
+    }
+  }
+
+  return truncatedStr + suffix;
+}
+
+/**
+ * Safely replaces placeholders in a template string with values from a replacements object.
+ * This performs a single-pass replacement to prevent double-interpolation attacks.
+ *
+ * @param template The template string containing {{key}} placeholders.
+ * @param replacements A record of keys to their replacement values.
+ * @returns The resulting string with placeholders replaced.
+ */
+export function safeTemplateReplace(
+  template: string,
+  replacements: Record<string, string>,
+): string {
+  // Regex to match {{key}} in the template string. The regex enforces string naming rules.
+  const placeHolderRegex = /\{\{(\w+)\}\}/g;
+  return template.replace(placeHolderRegex, (match, key) =>
+    Object.prototype.hasOwnProperty.call(replacements, key)
+      ? replacements[key]
+      : match,
+  );
+}
+
+/**
+ * Sanitizes output for injection into the model conversation.
+ * Wraps output in a secure <output> tag and handles potential injection vectors
+ * (like closing tags or template patterns) within the data.
+ * @param output The raw output to sanitize.
+ * @returns The sanitized string ready for injection.
+ */
+export function sanitizeOutput(output: string): string {
+  const trimmed = output.trim();
+  if (trimmed.length === 0) {
+    return '';
+  }
+
+  // Prevent direct closing tag injection.
+  const escaped = trimmed.replaceAll('</output>', '&lt;/output&gt;');
+  return `<output>\n${escaped}\n</output>`;
+}
+
+/**
+ * Wraps text in <untrusted_context> tags to mitigate prompt injection.
+ * When provided, `source` is recorded as a `source` attribute on the tag.
+ */
+export function wrapUntrusted(text: string, source?: string): string {
+  const escaped = text.replaceAll(
+    '</untrusted_context>',
+    '&lt;/untrusted_context&gt;',
+  );
+  const normalizedSource = source ? source.replace(/[^\w-]/g, '') : '';
+  const attributes = normalizedSource ? ` source="${normalizedSource}"` : '';
+  return `<untrusted_context${attributes}>\n${escaped}\n</untrusted_context>`;
+}
+
+const NON_CODE_ESCAPED_NEWLINE_REGEX =
+  /("(?:\\r\\n|\\n)"|'(?:\\r\\n|\\n)'|\\\\)|\\r\\n|\\n/g;
+
+function isWindowsDrivePathSegment(
+  segment: string,
+  offset: number,
+  matchLen: number,
+): boolean {
+  if (offset < 2 || offset + matchLen >= segment.length) {
+    return false;
+  }
+  const nextCode = segment.charCodeAt(offset + matchLen);
+  const isAlphaOrDigitOrPathPunct =
+    (nextCode >= 65 && nextCode <= 90) ||
+    (nextCode >= 97 && nextCode <= 122) ||
+    (nextCode >= 48 && nextCode <= 57) ||
+    nextCode === 95 ||
+    nextCode === 46 ||
+    nextCode === 45;
+  if (!isAlphaOrDigitOrPathPunct) {
+    return false;
+  }
+  if (
+    nextCode >= 65 &&
+    nextCode <= 90 &&
+    segment.charCodeAt(offset - 1) !== 58 /* : */
+  ) {
+    let q = offset + matchLen + 1;
+    while (q < segment.length) {
+      const ch = segment.charCodeAt(q);
+      const isWordChar =
+        (ch >= 65 && ch <= 90) ||
+        (ch >= 97 && ch <= 122) ||
+        (ch >= 48 && ch <= 57) ||
+        ch === 95 ||
+        ch === 45;
+      if (!isWordChar) {
+        break;
+      }
+      q++;
+    }
+    const following = q < segment.length ? segment.charCodeAt(q) : -1;
+    if (following !== 92 /* \ */ && following !== 46 /* . */) {
+      return false;
+    }
+  }
+  let p = offset;
+  while (p > 0) {
+    const c = segment.charCodeAt(p - 1);
+    if (
+      c === 92 /* \ */ &&
+      p + 1 === offset &&
+      segment.charCodeAt(p) === 110 /* n */
+    ) {
+      return false;
+    }
+    const isPathChar =
+      (c >= 65 && c <= 90) ||
+      (c >= 97 && c <= 122) ||
+      (c >= 48 && c <= 57) ||
+      c === 95 ||
+      c === 46 ||
+      c === 45 ||
+      c === 92;
+    if (!isPathChar) {
+      break;
+    }
+    p--;
+  }
+  if (p < 2 || segment.charCodeAt(p - 1) !== 58 /* : */) {
+    return false;
+  }
+  const drive = segment.charCodeAt(p - 2);
+  if (!((drive >= 65 && drive <= 90) || (drive >= 97 && drive <= 122))) {
+    return false;
+  }
+  if (p >= 3) {
+    const beforeDrive = segment.charCodeAt(p - 3);
+    const isWordOrPathPrefix =
+      (beforeDrive >= 65 && beforeDrive <= 90) ||
+      (beforeDrive >= 97 && beforeDrive <= 122) ||
+      (beforeDrive >= 48 && beforeDrive <= 57) ||
+      beforeDrive === 95 ||
+      beforeDrive === 46 ||
+      beforeDrive === 45 ||
+      beforeDrive === 92 ||
+      beforeDrive === 47 ||
+      beforeDrive === 58;
+    if (isWordOrPathPrefix) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function normalizeNonCodeSegment(segment: string): string {
+  return segment.replace(
+    NON_CODE_ESCAPED_NEWLINE_REGEX,
+    (match, preserved: string | undefined, offset: number) => {
+      if (preserved !== undefined) {
+        return preserved;
+      }
+      if (isWindowsDrivePathSegment(segment, offset, match.length)) {
+        return match;
+      }
+      return '\n';
+    },
+  );
+}
+
+interface BacktickRun {
+  start: number;
+  end: number;
+  len: number;
+  escaped: boolean;
+}
+
+/**
+ * Normalizes unescaped newline sequences (e.g., "\\n", "\\r\\n") into actual
+ * newline characters while preserving escaped backslashes ("\\\\n"), Windows
+ * drive paths (e.g., "C:\\new_folder", "D:\\notes"), inline/fenced code blocks
+ * (e.g., "`\\n`"), and standalone quoted escape tokens (e.g., '"\\n"').
+ */
+export function normalizeEscapedNewlines(value: string): string {
+  if (!value.includes('\\n')) {
+    return value;
+  }
+  if (!value.includes('`')) {
+    return normalizeNonCodeSegment(value);
+  }
+
+  const runs: BacktickRun[] = [];
+  let i = 0;
+
+  while (i < value.length) {
+    if (value.charCodeAt(i) === 96 /* ` */) {
+      let end = i + 1;
+      while (end < value.length && value.charCodeAt(end) === 96) {
+        end++;
+      }
+      let backslashes = 0;
+      while (
+        i - 1 - backslashes >= 0 &&
+        value.charCodeAt(i - 1 - backslashes) === 92 /* \ */
+      ) {
+        backslashes++;
+      }
+      const len = end - i;
+      const escaped = backslashes % 2 === 1;
+      runs.push({ start: i, end, len, escaped });
+      i = end;
+      continue;
+    }
+    i++;
+  }
+
+  const isIgnoredSingleTick = (run: BacktickRun): boolean =>
+    run.len === 1 && run.escaped;
+
+  const maxRunIndexByLen = new Map<number, number>();
+  for (let idx = 0; idx < runs.length; idx++) {
+    if (!isIgnoredSingleTick(runs[idx])) {
+      maxRunIndexByLen.set(runs[idx].len, idx);
+    }
+  }
+
+  let lastIndex = 0;
+  let result = '';
+  let r = 0;
+
+  while (r < runs.length) {
+    const openRun = runs[r];
+    if (
+      isIgnoredSingleTick(openRun) ||
+      (maxRunIndexByLen.get(openRun.len) ?? -1) <= r
+    ) {
+      r++;
+      continue;
+    }
+
+    let closeIdx = r + 1;
+    while (
+      closeIdx < runs.length &&
+      (runs[closeIdx].len !== openRun.len ||
+        isIgnoredSingleTick(runs[closeIdx]))
+    ) {
+      closeIdx++;
+    }
+
+    const closeRun = runs[closeIdx];
+    result += normalizeNonCodeSegment(value.slice(lastIndex, openRun.start));
+    result += value.slice(openRun.start, closeRun.end);
+    lastIndex = closeRun.end;
+    r = closeIdx + 1;
+  }
+
+  result += normalizeNonCodeSegment(value.slice(lastIndex));
+  return result;
+}

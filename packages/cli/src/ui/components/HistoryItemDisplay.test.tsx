@@ -1,0 +1,539 @@
+/**
+ * @license
+ * Copyright 2025 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import * as path from 'node:path';
+import { describe, it, expect, vi } from 'vitest';
+import { HistoryItemDisplay } from './HistoryItemDisplay.js';
+import { MessageType, type HistoryItem } from '../types.js';
+import { SessionStatsProvider } from '../contexts/SessionContext.js';
+import {
+  CoreToolCallStatus,
+  type Config,
+  type ToolExecuteConfirmationDetails,
+} from '@m31a/core';
+import { ToolGroupMessage } from './messages/ToolGroupMessage.js';
+import { renderWithProviders } from '../../test-utils/render.js';
+import { createMockSettings } from '../../test-utils/settings.js';
+import { makeFakeConfig } from '@m31a/core';
+
+// Mock child components
+vi.mock('./messages/ToolGroupMessage.js', () => ({
+  ToolGroupMessage: vi.fn(() => <div />),
+}));
+
+describe('<HistoryItemDisplay />', () => {
+  const mockConfig = {} as unknown as Config;
+  const baseItem = {
+    id: 1,
+    timestamp: 12345,
+    isPending: false,
+    terminalWidth: 80,
+    config: mockConfig,
+  };
+
+  it('renders UserMessage for "user" type', async () => {
+    const item: HistoryItem = {
+      ...baseItem,
+      type: MessageType.USER,
+      text: 'Hello',
+    };
+    const { lastFrame, unmount } = await renderWithProviders(
+      <HistoryItemDisplay {...baseItem} item={item} />,
+    );
+    expect(lastFrame()).toContain('Hello');
+    unmount();
+  });
+
+  it('renders HintMessage for "hint" type', async () => {
+    const item: HistoryItem = {
+      ...baseItem,
+      type: 'hint',
+      text: 'Try using ripgrep first',
+    };
+    const { lastFrame, unmount } = await renderWithProviders(
+      <HistoryItemDisplay {...baseItem} item={item} />,
+    );
+    expect(lastFrame()).toContain('Try using ripgrep first');
+    unmount();
+  });
+
+  it('renders UserMessage for "user" type with slash command', async () => {
+    const item: HistoryItem = {
+      ...baseItem,
+      type: MessageType.USER,
+      text: '/theme',
+    };
+    const { lastFrame, unmount } = await renderWithProviders(
+      <HistoryItemDisplay {...baseItem} item={item} />,
+    );
+    expect(lastFrame()).toContain('/theme');
+    unmount();
+  });
+
+  it.each([true, false])(
+    'renders InfoMessage for "info" type with multi-line text (alternateBuffer=%s)',
+    async (useAlternateBuffer) => {
+      const item: HistoryItem = {
+        ...baseItem,
+        type: MessageType.INFO,
+        text: '⚡ Line 1\n⚡ Line 2\n⚡ Line 3',
+      };
+      const { lastFrame, unmount } = await renderWithProviders(
+        <HistoryItemDisplay {...baseItem} item={item} />,
+        {
+          config: makeFakeConfig({ useAlternateBuffer }),
+          settings: createMockSettings({ ui: { useAlternateBuffer } }),
+        },
+      );
+      expect(lastFrame()).toMatchSnapshot();
+      unmount();
+    },
+  );
+
+  it('renders AgentsStatus for "agents_list" type', async () => {
+    const item: HistoryItem = {
+      ...baseItem,
+      type: MessageType.AGENTS_LIST,
+      agents: [
+        {
+          name: 'local_agent',
+          displayName: 'Local Agent',
+          description: '  Local agent description.\n    Second line.',
+          kind: 'local',
+        },
+        {
+          name: 'remote_agent',
+          description: 'Remote agent description.',
+          kind: 'remote',
+        },
+      ],
+    };
+    const { lastFrame, unmount } = await renderWithProviders(
+      <HistoryItemDisplay {...baseItem} item={item} />,
+    );
+    expect(lastFrame()).toMatchSnapshot();
+    unmount();
+  });
+
+  it('renders StatsDisplay for "stats" type', async () => {
+    const item: HistoryItem = {
+      ...baseItem,
+      type: MessageType.STATS,
+      duration: '1s',
+    };
+    const { lastFrame, unmount } = await renderWithProviders(
+      <SessionStatsProvider sessionId="test-session-id">
+        <HistoryItemDisplay {...baseItem} item={item} />
+      </SessionStatsProvider>,
+    );
+    expect(lastFrame()).toContain('Stats');
+    unmount();
+  });
+
+  it('renders AboutBox for "about" type', async () => {
+    const item: HistoryItem = {
+      ...baseItem,
+      type: MessageType.ABOUT,
+      cliVersion: '1.0.0',
+      osVersion: 'test-os',
+      sandboxEnv: 'test-env',
+      modelVersion: 'test-model',
+      selectedAuthType: 'test-auth',
+      ideClient: 'test-ide',
+    };
+    const { lastFrame, unmount } = await renderWithProviders(
+      <HistoryItemDisplay {...baseItem} item={item} />,
+    );
+    expect(lastFrame()).toContain('About M31A');
+    unmount();
+  });
+
+  it('renders ModelStatsDisplay for "model_stats" type', async () => {
+    const item: HistoryItem = {
+      ...baseItem,
+      type: 'model_stats',
+    };
+    const { lastFrame, unmount } = await renderWithProviders(
+      <SessionStatsProvider sessionId="test-session-id">
+        <HistoryItemDisplay {...baseItem} item={item} />
+      </SessionStatsProvider>,
+    );
+    expect(lastFrame()).toContain(
+      'No API calls have been made in this session.',
+    );
+    unmount();
+  });
+
+  it('renders ToolStatsDisplay for "tool_stats" type', async () => {
+    const item: HistoryItem = {
+      ...baseItem,
+      type: 'tool_stats',
+    };
+    const { lastFrame, unmount } = await renderWithProviders(
+      <SessionStatsProvider sessionId="test-session-id">
+        <HistoryItemDisplay {...baseItem} item={item} />
+      </SessionStatsProvider>,
+    );
+    expect(lastFrame()).toContain(
+      'No tool calls have been made in this session.',
+    );
+    unmount();
+  });
+
+  it('renders HeatmapComponent for "heatmap_stats" type', async () => {
+    const item: HistoryItem = {
+      ...baseItem,
+      type: 'heatmap_stats',
+      dailyUsage: {
+        '2026-11-03': {
+          date: '2026-11-03',
+          totalTokens: 450,
+          inputTokens: 300,
+          outputTokens: 150,
+          cachedTokens: 50,
+          turns: 2,
+          sessions: 1,
+          modelBreakdown: { 'gemini-2.5-pro': 450 },
+        },
+      },
+      totalWindowTokens: 450,
+      totalWindowSessions: 1,
+      totalWindowTurns: 2,
+      currentStreak: 1,
+      longestStreak: 1,
+      today: '2026-11-03',
+      selectedDate: '2026-11-03',
+    };
+    const { lastFrame, unmount } = await renderWithProviders(
+      <HistoryItemDisplay {...baseItem} item={item} />,
+    );
+    expect(lastFrame()).toContain('Token Usage Heatmap');
+    expect(lastFrame()).toContain('Summary (last 28 weeks / 196 days)');
+    expect(lastFrame()).toContain('Total Tokens: 450 · 1 session · 2 turns');
+    expect(lastFrame()).toContain('Breakdown for 2026-11-03');
+    unmount();
+  });
+
+  it('renders SessionSummaryDisplay for "quit" type', async () => {
+    const item: HistoryItem = {
+      ...baseItem,
+      type: 'quit',
+      duration: '1s',
+    };
+    const { lastFrame, unmount } = await renderWithProviders(
+      <SessionStatsProvider sessionId="test-session-id">
+        <HistoryItemDisplay {...baseItem} item={item} />
+      </SessionStatsProvider>,
+    );
+    expect(lastFrame()).toContain('Agent powering down. Goodbye!');
+    unmount();
+  });
+
+  it('renders ExportSessionMessage for "export_session" type', async () => {
+    const testPath = path.join(path.sep, 'test', 'path.json');
+    const item: HistoryItem = {
+      ...baseItem,
+      type: 'export_session',
+      exportSession: {
+        isPending: false,
+        targetPath: testPath,
+      },
+    };
+    const { lastFrame, unmount } = await renderWithProviders(
+      <HistoryItemDisplay {...baseItem} item={item} />,
+    );
+    expect(lastFrame()).toContain(
+      `Successfully exported session to ${testPath}`,
+    );
+    unmount();
+  });
+
+  it('should escape ANSI codes in text content', async () => {
+    const historyItem: HistoryItem = {
+      id: 1,
+      type: 'user',
+      text: 'Hello, \u001b[31mred\u001b[0m world!',
+    };
+
+    const { lastFrame, unmount } = await renderWithProviders(
+      <HistoryItemDisplay
+        item={historyItem}
+        terminalWidth={80}
+        isPending={false}
+      />,
+    );
+
+    // The ANSI codes should be escaped for display.
+    expect(lastFrame()).toContain('Hello, \\u001b[31mred\\u001b[0m world!');
+    // The raw ANSI codes should not be present.
+    expect(lastFrame()).not.toContain('Hello, \u001b[31mred\u001b[0m world!');
+    unmount();
+  });
+
+  it('should escape ANSI codes in tool confirmation details', async () => {
+    const historyItem: HistoryItem = {
+      id: 1,
+      type: 'tool_group',
+      tools: [
+        {
+          callId: '123',
+          name: 'run_shell_command',
+          description: 'Run a shell command',
+          resultDisplay: 'blank',
+          status: CoreToolCallStatus.AwaitingApproval,
+          confirmationDetails: {
+            type: 'exec',
+            title: 'Run Shell Command',
+            command: 'echo "\u001b[31mhello\u001b[0m"',
+            rootCommand: 'echo',
+            rootCommands: ['echo'],
+          },
+        },
+      ],
+    };
+
+    const { unmount } = await renderWithProviders(
+      <HistoryItemDisplay
+        item={historyItem}
+        terminalWidth={80}
+        isPending={false}
+      />,
+    );
+
+    const passedProps = vi.mocked(ToolGroupMessage).mock.calls[0][0];
+    const confirmationDetails = passedProps.toolCalls[0]
+      .confirmationDetails as ToolExecuteConfirmationDetails;
+
+    expect(confirmationDetails.command).toBe(
+      'echo "\\u001b[31mhello\\u001b[0m"',
+    );
+    unmount();
+  });
+
+  it('subtracts top margin from availableTerminalHeight when isToolGroupBoundary is true', async () => {
+    vi.mocked(ToolGroupMessage).mockClear();
+    const historyItem: HistoryItem = {
+      id: 1,
+      type: 'tool_group',
+      tools: [
+        {
+          callId: '123',
+          name: 'run_shell_command',
+          description: 'Run a shell command',
+          resultDisplay: 'output',
+          status: CoreToolCallStatus.Executing,
+          confirmationDetails: undefined,
+        },
+      ],
+    };
+
+    const { unmount } = await renderWithProviders(
+      <HistoryItemDisplay
+        item={historyItem}
+        terminalWidth={80}
+        availableTerminalHeight={10}
+        isPending={true}
+        isToolGroupBoundary={true}
+      />,
+    );
+
+    const passedProps = vi.mocked(ToolGroupMessage).mock.calls[0][0];
+    expect(passedProps.availableTerminalHeight).toBe(9);
+    unmount();
+  });
+
+  describe('thinking items', () => {
+    it('renders thinking item when enabled', async () => {
+      const item: HistoryItem = {
+        ...baseItem,
+        type: 'thinking',
+        thought: { subject: 'Thinking', description: 'test' },
+      };
+      const { lastFrame, unmount } = await renderWithProviders(
+        <HistoryItemDisplay {...baseItem} item={item} />,
+        {
+          settings: createMockSettings({ ui: { inlineThinkingMode: 'full' } }),
+        },
+      );
+
+      expect(lastFrame()).toMatchSnapshot();
+      unmount();
+    });
+
+    it('renders "Thinking..." header when isFirstThinking is true', async () => {
+      const item: HistoryItem = {
+        ...baseItem,
+        type: 'thinking',
+        thought: { subject: 'Thinking', description: 'test' },
+      };
+      const { lastFrame, unmount } = await renderWithProviders(
+        <HistoryItemDisplay {...baseItem} item={item} isFirstThinking={true} />,
+        {
+          settings: createMockSettings({ ui: { inlineThinkingMode: 'full' } }),
+        },
+      );
+
+      expect(lastFrame()).toContain(' Thinking...');
+      expect(lastFrame()).toMatchSnapshot();
+      unmount();
+    });
+    it('renders token count in header when inlineThinkingMode is full', async () => {
+      const item: HistoryItem = {
+        ...baseItem,
+        type: 'thinking',
+        thought: { subject: 'Planning', description: 'test' },
+        tokenCount: 256,
+      };
+      const { lastFrame, unmount } = await renderWithProviders(
+        <HistoryItemDisplay {...baseItem} item={item} isFirstThinking={true} />,
+        {
+          settings: createMockSettings({ ui: { inlineThinkingMode: 'full' } }),
+        },
+      );
+
+      expect(lastFrame()).toContain('Thinking... (256 tokens)');
+      unmount();
+    });
+
+    it('renders compact thinking line with token count when inlineThinkingMode is off', async () => {
+      const item: HistoryItem = {
+        ...baseItem,
+        type: 'thinking',
+        thought: { subject: 'Planning', description: 'secret reasoning' },
+        tokenCount: 142,
+      };
+      const { lastFrame, unmount } = await renderWithProviders(
+        <HistoryItemDisplay {...baseItem} item={item} isFirstThinking={true} />,
+        {
+          settings: createMockSettings({ ui: { inlineThinkingMode: 'off' } }),
+        },
+      );
+
+      const frame = lastFrame();
+      expect(frame).toContain('◇ Thinking: Planning (142 tokens)');
+      expect(frame).not.toContain('secret reasoning');
+      unmount();
+    });
+
+    it('does not render non-first thinking item when inlineThinkingMode is off', async () => {
+      const item: HistoryItem = {
+        ...baseItem,
+        type: 'thinking',
+        thought: { subject: 'Thinking', description: 'test' },
+      };
+      const { lastFrame, unmount } = await renderWithProviders(
+        <HistoryItemDisplay {...baseItem} item={item} />,
+        {
+          settings: createMockSettings({ ui: { inlineThinkingMode: 'off' } }),
+        },
+      );
+
+      expect(lastFrame({ allowEmpty: true })).toBe('');
+      unmount();
+    });
+  });
+
+  describe.each([true, false])(
+    'gemini items (alternateBuffer=%s)',
+    (useAlternateBuffer) => {
+      const longCode =
+        '# Example code block:\n' +
+        '```python\n' +
+        Array.from({ length: 50 }, (_, i) => `Line ${i + 1}`).join('\n') +
+        '\n```';
+
+      it('should render a truncated gemini item', async () => {
+        const item: HistoryItem = {
+          id: 1,
+          type: 'gemini',
+          text: longCode,
+        };
+        const { lastFrame, unmount } = await renderWithProviders(
+          <HistoryItemDisplay
+            item={item}
+            isPending={false}
+            terminalWidth={80}
+            availableTerminalHeight={10}
+          />,
+          {
+            config: makeFakeConfig({ useAlternateBuffer }),
+            settings: createMockSettings({ ui: { useAlternateBuffer } }),
+          },
+        );
+        expect(lastFrame()).toMatchSnapshot();
+        unmount();
+      });
+
+      it('should render a full gemini item when using availableTerminalHeightM31a', async () => {
+        const item: HistoryItem = {
+          id: 1,
+          type: 'gemini',
+          text: longCode,
+        };
+        const { lastFrame, unmount } = await renderWithProviders(
+          <HistoryItemDisplay
+            item={item}
+            isPending={false}
+            terminalWidth={80}
+            availableTerminalHeight={10}
+            availableTerminalHeightM31a={Number.MAX_SAFE_INTEGER}
+          />,
+          {
+            config: makeFakeConfig({ useAlternateBuffer }),
+            settings: createMockSettings({ ui: { useAlternateBuffer } }),
+          },
+        );
+        expect(lastFrame()).toMatchSnapshot();
+        unmount();
+      });
+
+      it('should render a truncated gemini_content item', async () => {
+        const item: HistoryItem = {
+          id: 1,
+          type: 'gemini_content',
+          text: longCode,
+        };
+        const { lastFrame, unmount } = await renderWithProviders(
+          <HistoryItemDisplay
+            item={item}
+            isPending={false}
+            terminalWidth={80}
+            availableTerminalHeight={10}
+          />,
+          {
+            config: makeFakeConfig({ useAlternateBuffer }),
+            settings: createMockSettings({ ui: { useAlternateBuffer } }),
+          },
+        );
+        expect(lastFrame()).toMatchSnapshot();
+        unmount();
+      });
+
+      it('should render a full gemini_content item when using availableTerminalHeightM31a', async () => {
+        const item: HistoryItem = {
+          id: 1,
+          type: 'gemini_content',
+          text: longCode,
+        };
+        const { lastFrame, unmount } = await renderWithProviders(
+          <HistoryItemDisplay
+            item={item}
+            isPending={false}
+            terminalWidth={80}
+            availableTerminalHeight={10}
+            availableTerminalHeightM31a={Number.MAX_SAFE_INTEGER}
+          />,
+          {
+            config: makeFakeConfig({ useAlternateBuffer }),
+            settings: createMockSettings({ ui: { useAlternateBuffer } }),
+          },
+        );
+        expect(lastFrame()).toMatchSnapshot();
+        unmount();
+      });
+    },
+  );
+});

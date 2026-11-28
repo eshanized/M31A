@@ -1,0 +1,292 @@
+/**
+ * @license
+ * Copyright 2025 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import type { CommandModule } from 'yargs';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { debugLogger, getErrorMessage } from '@m31a/core';
+import { loadSettings, SettingScope } from '../../config/settings.js';
+import { exitCli } from '../utils.js';
+import stripJsonComments from 'strip-json-comments';
+
+interface MigrateArgs {
+  fromClaude: boolean;
+}
+
+/**
+ * Mapping from Claude Code event names to Gemini event names
+ */
+const EVENT_MAPPING: Record<string, string> = {
+  PreToolUse: 'BeforeTool',
+  PostToolUse: 'AfterTool',
+  UserPromptSubmit: 'BeforeAgent',
+  Stop: 'AfterAgent',
+  SubagentStop: 'AfterAgent', // Gemini doesn't have sub-agents, map to AfterAgent
+  SubAgentStop: 'AfterAgent', // Fallback for alternate casing
+  SessionStart: 'SessionStart',
+  SessionEnd: 'SessionEnd',
+  PreCompact: 'PreCompress',
+  Notification: 'Notification',
+};
+
+/**
+ * Mapping from Claude Code tool names to Gemini tool names
+ */
+const TOOL_NAME_MAPPING: Record<string, string> = {
+  Edit: 'replace',
+  Bash: 'run_shell_command',
+  Read: 'read_file',
+  Write: 'write_file',
+  Glob: 'glob',
+  Grep: 'grep',
+  LS: 'ls',
+};
+
+/**
+ * Transform a matcher regex to update tool names from Claude to Gemini
+ */
+function transformMatcher(matcher: string | undefined): string | undefined {
+  if (!matcher) return matcher;
+
+  let transformed = matcher;
+  for (const [claudeName, geminiName] of Object.entries(TOOL_NAME_MAPPING)) {
+    // Replace exact matches and matches within regex alternations
+    transformed = transformed.replace(
+      new RegExp(`\\b${claudeName}\\b`, 'g'),
+      geminiName,
+    );
+  }
+
+  return transformed;
+}
+
+const MS_PER_SECOND = 1000;
+const MAX_TIMEOUT_MS = 2147483647; // Max 32-bit signed integer for Node.js setTimeout
+
+/**
+ * Migrate a Claude Code hook configuration to Gemini format
+ */
+function migrateClaudeHook(claudeHook: unknown): unknown {
+  if (!claudeHook || typeof claudeHook !== 'object') {
+    return claudeHook;
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+  const hook = claudeHook as Record<string, unknown>;
+  const migrated: Record<string, unknown> = {};
+
+  // Map command field
+  if ('command' in hook) {
+    migrated['command'] = hook['command'];
+
+    // Replace CLAUDE_PROJECT_DIR with M31A_PROJECT_DIR in command
+    // eslint-disable-next-line no-restricted-syntax
+    if (typeof migrated['command'] === 'string') {
+      migrated['command'] = migrated['command'].replace(
+        /\$CLAUDE_PROJECT_DIR/g,
+        '$M31A_PROJECT_DIR',
+      );
+    }
+  }
+
+  // Map type field
+  if ('type' in hook && hook['type'] === 'command') {
+    migrated['type'] = 'command';
+  }
+
+  // Map timeout field (Claude uses seconds, Gemini uses milliseconds)
+  const timeout = hook['timeout'];
+  if (typeof timeout === 'number' && Number.isFinite(timeout) && timeout > 0) {
+    const ms = Math.round(timeout * MS_PER_SECOND);
+    if (ms > 0) {
+      migrated['timeout'] = Math.min(ms, MAX_TIMEOUT_MS);
+    }
+  }
+
+  return migrated;
+}
+
+/**
+ * Migrate Claude Code hooks configuration to Gemini format
+ */
+function migrateClaudeHooks(claudeConfig: unknown): Record<string, unknown> {
+  if (!claudeConfig || typeof claudeConfig !== 'object') {
+    return {};
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+  const config = claudeConfig as Record<string, unknown>;
+  const geminiHooks: Record<string, unknown[]> = {};
+
+  // Check if there's a hooks section
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+  const hooksSection = config['hooks'] as Record<string, unknown> | undefined;
+  if (!hooksSection || typeof hooksSection !== 'object') {
+    return {};
+  }
+
+  for (const [eventName, eventConfig] of Object.entries(hooksSection)) {
+    // Map event name
+    const geminiEventName = EVENT_MAPPING[eventName] || eventName;
+
+    if (!Array.isArray(eventConfig)) {
+      continue;
+    }
+
+    // Migrate each hook definition
+    const migratedDefinitions = eventConfig.map((def: unknown) => {
+      if (!def || typeof def !== 'object') {
+        return def;
+      }
+
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+      const definition = def as Record<string, unknown>;
+      const migratedDef: Record<string, unknown> = {};
+
+      // Transform matcher
+      if (
+        'matcher' in definition &&
+        // eslint-disable-next-line no-restricted-syntax
+        typeof definition['matcher'] === 'string'
+      ) {
+        migratedDef['matcher'] = transformMatcher(definition['matcher']);
+      }
+
+      // Copy sequential flag
+      if ('sequential' in definition) {
+        migratedDef['sequential'] = definition['sequential'];
+      }
+
+      // Migrate hooks array
+      if ('hooks' in definition && Array.isArray(definition['hooks'])) {
+        migratedDef['hooks'] = definition['hooks'].map(migrateClaudeHook);
+      }
+
+      return migratedDef;
+    });
+
+    geminiHooks[geminiEventName] = [
+      ...(geminiHooks[geminiEventName] || []),
+      ...migratedDefinitions,
+    ];
+  }
+
+  return geminiHooks;
+}
+
+/**
+ * Handle migration from Claude Code
+ */
+export async function handleMigrateFromClaude() {
+  const workingDir = process.cwd();
+
+  // Look for Claude settings in .claude directory
+  const claudeDir = path.join(workingDir, '.claude');
+  const claudeSettingsPath = path.join(claudeDir, 'settings.json');
+  const claudeLocalSettingsPath = path.join(claudeDir, 'settings.local.json');
+
+  let claudeSettings: Record<string, unknown> | null = null;
+  let sourceFile = '';
+
+  // Try to read settings.local.json first, then settings.json
+  if (fs.existsSync(claudeLocalSettingsPath)) {
+    sourceFile = claudeLocalSettingsPath;
+    try {
+      const content = fs.readFileSync(claudeLocalSettingsPath, 'utf-8');
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+      claudeSettings = JSON.parse(stripJsonComments(content)) as Record<
+        string,
+        unknown
+      >;
+    } catch (error) {
+      debugLogger.error(
+        `Error reading ${claudeLocalSettingsPath}: ${getErrorMessage(error)}`,
+      );
+    }
+  } else if (fs.existsSync(claudeSettingsPath)) {
+    sourceFile = claudeSettingsPath;
+    try {
+      const content = fs.readFileSync(claudeSettingsPath, 'utf-8');
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+      claudeSettings = JSON.parse(stripJsonComments(content)) as Record<
+        string,
+        unknown
+      >;
+    } catch (error) {
+      debugLogger.error(
+        `Error reading ${claudeSettingsPath}: ${getErrorMessage(error)}`,
+      );
+    }
+  } else {
+    debugLogger.error(
+      'No Claude Code settings found in .claude directory. Expected settings.json or settings.local.json',
+    );
+    return;
+  }
+
+  if (!claudeSettings) {
+    return;
+  }
+
+  debugLogger.log(`Found Claude Code settings in: ${sourceFile}`);
+
+  // Migrate hooks
+  const migratedHooks = migrateClaudeHooks(claudeSettings);
+
+  if (Object.keys(migratedHooks).length === 0) {
+    debugLogger.log('No hooks found in Claude Code settings to migrate.');
+    return;
+  }
+
+  debugLogger.log(
+    `Migrating ${Object.keys(migratedHooks).length} hook event(s)...`,
+  );
+
+  // Load current Gemini settings
+  const settings = loadSettings(workingDir);
+
+  // Merge migrated hooks with existing hooks
+  const existingHooks = (settings.merged?.hooks || {}) as Record<
+    string,
+    unknown
+  >;
+  const mergedHooks = { ...existingHooks, ...migratedHooks };
+
+  // Update settings (setValue automatically saves)
+  try {
+    settings.setValue(SettingScope.Workspace, 'hooks', mergedHooks);
+
+    debugLogger.log('✓ Hooks successfully migrated to .m31a/settings.json');
+    debugLogger.log(
+      '\nMigration complete! Please review the migrated hooks in .m31a/settings.json',
+    );
+  } catch (error) {
+    debugLogger.error(`Error saving migrated hooks: ${getErrorMessage(error)}`);
+  }
+}
+
+export const migrateCommand: CommandModule = {
+  command: 'migrate',
+  describe: 'Migrate hooks from Claude Code to M31A',
+  builder: (yargs) =>
+    yargs.option('from-claude', {
+      describe: 'Migrate from Claude Code hooks',
+      type: 'boolean',
+      default: false,
+    }),
+  handler: async (argv) => {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+    const args = argv as unknown as MigrateArgs;
+    if (args.fromClaude) {
+      await handleMigrateFromClaude();
+    } else {
+      debugLogger.log(
+        'Usage: m31a hooks migrate --from-claude\n\nMigrate hooks from Claude Code to M31A format.',
+      );
+    }
+    await exitCli();
+  },
+};

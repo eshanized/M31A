@@ -1,0 +1,208 @@
+#!/usr/bin/env node
+
+/**
+ * @license
+ * Copyright 2025 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { spawn } from 'node:child_process';
+import { realpath } from 'node:fs/promises';
+import os from 'node:os';
+import { isAbsolute, resolve } from 'node:path';
+import v8 from 'node:v8';
+import {
+  RELAUNCH_EXIT_CODE,
+  getSpawnConfig,
+  getScriptArgs,
+  isSeaEnvironment,
+  setupSignalForwarding,
+  handleChildProcessClose,
+} from './src/utils/processUtils.js';
+
+// --- Global Entry Point ---
+
+async function getMemoryNodeArgs(): Promise<string[]> {
+  let autoConfigureMemory = true;
+  try {
+    const { readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    // Respect M31A_HOME environment variable, falling back to os.homedir()
+    const baseDir =
+      process.env['M31A_HOME'] || join(os.homedir(), '.m31a');
+    const settingsPath = join(baseDir, 'settings.json');
+    const rawSettings = readFileSync(settingsPath, 'utf8');
+    const settings = JSON.parse(rawSettings);
+    if (settings?.advanced?.autoConfigureMemory === false) {
+      autoConfigureMemory = false;
+    }
+  } catch {
+    // ignore
+  }
+
+  if (autoConfigureMemory) {
+    const totalMemoryMB = os.totalmem() / (1024 * 1024);
+    const heapStats = v8.getHeapStatistics();
+    const currentMaxOldSpaceSizeMb = Math.floor(
+      heapStats.heap_size_limit / 1024 / 1024,
+    );
+    const targetMaxOldSpaceSizeInMB = Math.floor(totalMemoryMB * 0.5);
+
+    if (targetMaxOldSpaceSizeInMB > currentMaxOldSpaceSizeMb) {
+      return [`--max-old-space-size=${targetMaxOldSpaceSizeInMB}`];
+    }
+  }
+
+  return [];
+}
+
+async function run() {
+  if (!process.env['M31A_NO_RELAUNCH'] && !process.env['SANDBOX']) {
+    // --- Lightweight Parent Process / Daemon ---
+    // We avoid importing heavy dependencies here to save ~1.5s of startup time.
+
+    if (
+      !isSeaEnvironment() &&
+      process.argv[1] &&
+      !isAbsolute(process.argv[1])
+    ) {
+      process.argv[1] = resolve(process.argv[1]);
+    }
+
+    const scriptArgs = getScriptArgs();
+    const memoryArgs = await getMemoryNodeArgs();
+    const { spawnArgs, env: newEnv } = getSpawnConfig(memoryArgs, scriptArgs);
+
+    let latestAdminSettings: unknown = undefined;
+    let selectedWorktreePath: string | undefined = undefined;
+
+    const runner = () => {
+      process.stdin.pause();
+
+      const child = spawn(process.execPath, spawnArgs, {
+        stdio: ['inherit', 'inherit', 'inherit', 'ipc'],
+        env: newEnv,
+        ...(selectedWorktreePath ? { cwd: selectedWorktreePath } : {}),
+      });
+
+      // Clear one-time auth override from supervisor environment after passing to child
+      delete process.env['M31A_AUTH_OVERRIDE'];
+      delete newEnv['M31A_AUTH_OVERRIDE'];
+
+      if (latestAdminSettings) {
+        child.send({ type: 'admin-settings', settings: latestAdminSettings });
+      }
+
+      child.on(
+        'message',
+        async (msg: {
+          type?: string;
+          settings?: unknown;
+          authType?: string;
+          path?: string;
+        }) => {
+          if (msg?.type === 'admin-settings-update' && msg.settings) {
+            latestAdminSettings = msg.settings;
+          }
+          if (msg?.type === 'auth-selected-type' && msg.authType) {
+            process.env['M31A_AUTH_OVERRIDE'] = msg.authType;
+            newEnv['M31A_AUTH_OVERRIDE'] = msg.authType;
+          }
+          if (
+            msg?.type === 'worktree-selected' &&
+            typeof msg.path === 'string' &&
+            msg.path.length > 0
+          ) {
+            try {
+              const resolvedWorktreePath = await realpath(resolve(msg.path));
+              process.chdir(resolvedWorktreePath);
+              selectedWorktreePath = resolvedWorktreePath;
+              process.env['M31A_WORKTREE_HANDLED'] = '1';
+              newEnv['M31A_WORKTREE_HANDLED'] = '1';
+            } catch {
+              // Ignore chdir or path validation errors if path is inaccessible
+            }
+          }
+        },
+      );
+
+      const removeForwarders = setupSignalForwarding(child);
+
+      return new Promise<number>((resolve) => {
+        child.on('error', (err) => {
+          removeForwarders();
+          process.stderr.write(
+            'Error: Failed to start child process: ' + err.message + '\n',
+          );
+          resolve(1);
+        });
+        child.on('close', (code, signal) => {
+          handleChildProcessClose(code, signal, removeForwarders, resolve);
+        });
+      });
+    };
+
+    while (true) {
+      try {
+        const exitCode = await runner();
+        if (process.platform === 'android' || exitCode !== RELAUNCH_EXIT_CODE) {
+          process.exit(exitCode);
+        }
+      } catch (error: unknown) {
+        process.stdin.resume();
+        process.stderr.write(
+          `Fatal error: Failed to relaunch the CLI process.\n${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`,
+        );
+        process.exit(1);
+      }
+    }
+  } else {
+    // --- Heavy Child Process ---
+    // Now we can safely import everything.
+    const { main } = await import('./src/m31a.js');
+    const { FatalError, writeToStderr } = await import(
+      '@m31a/core'
+    );
+    const { runExitCleanup } = await import('./src/utils/cleanup.js');
+    const { formatCliError, isCliDebugEnabled } = await import(
+      './src/utils/formatError.js'
+    );
+
+    main().catch(async (error: unknown) => {
+      // Set a timeout to force exit if cleanup hangs
+      const cleanupTimeout = setTimeout(() => {
+        writeToStderr('Cleanup timed out, forcing exit...\n');
+        process.exit(1);
+      }, 5000);
+
+      try {
+        await runExitCleanup();
+      } catch (cleanupError: unknown) {
+        writeToStderr(
+          `Error during final cleanup: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}\n`,
+        );
+      } finally {
+        clearTimeout(cleanupTimeout);
+      }
+
+      if (error instanceof FatalError) {
+        let errorMessage = error.message;
+        if (!process.env['NO_COLOR']) {
+          errorMessage = `\x1b[31m${errorMessage}\x1b[0m`;
+        }
+        writeToStderr(errorMessage + '\n');
+        process.exit(error.exitCode);
+      }
+
+      writeToStderr(
+        formatCliError(error, {
+          debug: isCliDebugEnabled(),
+          prefix: 'An unexpected critical error occurred: ',
+        }) + '\n',
+      );
+      process.exit(1);
+    });
+  }
+}
+
+run();
