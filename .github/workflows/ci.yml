@@ -27,8 +27,6 @@ jobs:
   lint:
     name: 'Lint & Typecheck'
     runs-on: 'ubuntu-latest'
-    env:
-      M31A_LINT_TEMP_DIR: '${{ github.workspace }}/.m31a-linters'
     steps:
       - name: 'Checkout'
         uses: 'actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8' # ratchet:actions/checkout@v5
