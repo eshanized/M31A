@@ -1,0 +1,22 @@
+{
+  "name": "@m31a/genai",
+  "version": "0.2.0",
+  "description": "M31A own genai types (no Google @google/genai; not derived from Google types)",
+  "author": "Eshan Roy",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/eshanized/M31A.git"
+  },
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {}
+}

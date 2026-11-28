@@ -1,0 +1,26 @@
+{
+  "name": "@m31a/test-utils",
+  "version": "0.2.0",
+  "private": true,
+  "main": "src/index.ts",
+  "author": "Eshan Roy",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build": "node ../../scripts/build_package.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@m31a/core": "file:../core",
+    "@lydell/node-pty": "1.1.0",
+    "asciichart": "1.5.25",
+    "strip-ansi": "7.1.2",
+    "vitest": "3.2.4"
+  },
+  "devDependencies": {
+    "typescript": "5.8.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
