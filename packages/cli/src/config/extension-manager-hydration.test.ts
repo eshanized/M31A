@@ -9,11 +9,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { ExtensionManager } from './extension-manager.js';
-import {
-  debugLogger,
-  coreEvents,
-  type CommandHookConfig,
-} from '@m31a/core';
+import { debugLogger, coreEvents, type CommandHookConfig } from '@m31a/core';
 import { createTestMergedSettings } from './settings.js';
 import { createExtension } from '../test-utils/createExtension.js';
 import { EXTENSIONS_DIRECTORY_NAME } from './extensions/variables.js';
@@ -30,8 +26,7 @@ vi.mock('node:os', async (importOriginal) => {
 
 // Mock @m31a/core
 vi.mock('@m31a/core', async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import('@m31a/core')>();
+  const actual = await importOriginal<typeof import('@m31a/core')>();
   return {
     ...actual,
     homedir: mockHomedir,

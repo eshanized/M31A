@@ -38,8 +38,7 @@ describe('ExtensionStorage', () => {
     vi.mocked(Storage).mockImplementation(
       () =>
         ({
-          getExtensionsDir: () =>
-            path.join(mockHomeDir, '.m31a', 'extensions'),
+          getExtensionsDir: () => path.join(mockHomeDir, '.m31a', 'extensions'),
         }) as any, // eslint-disable-line @typescript-eslint/no-explicit-any
     );
     storage = new ExtensionStorage(extensionName);

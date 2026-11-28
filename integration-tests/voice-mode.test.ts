@@ -6,10 +6,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { TestRig } from './test-helper.js';
-import {
-  WhisperModelManager,
-  WhisperTranscriptionProvider,
-} from '@m31a/core';
+import { WhisperModelManager, WhisperTranscriptionProvider } from '@m31a/core';
 import * as fs from 'node:fs';
 import commandExists from 'command-exists';
 

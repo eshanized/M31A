@@ -31,8 +31,7 @@ async function main() {
       demandOption: true,
     })
     .option('cli-package-name', {
-      description:
-        'fully qualified package name with scope (e.g @m31a/cli)',
+      description: 'fully qualified package name with scope (e.g @m31a/cli)',
       string: true,
       default: '@m31a/cli',
     })

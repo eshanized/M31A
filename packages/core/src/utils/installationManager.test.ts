@@ -61,9 +61,7 @@ describe('InstallationManager', () => {
     path.join(tempHomeDir, M31A_DIR, 'installation_id');
 
   beforeEach(() => {
-    tempHomeDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'm31a-test-home-'),
-    );
+    tempHomeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'm31a-test-home-'));
     (pathsHomedir as Mock).mockReturnValue(tempHomeDir);
     (os.homedir as Mock).mockReturnValue(tempHomeDir);
     installationManager = new InstallationManager();

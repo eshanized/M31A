@@ -208,9 +208,7 @@ describe('commandSafety', () => {
   });
 
   describe('workspace path boundary validation in isKnownSafeCommand', () => {
-    const tempDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'm31a-test-safety-'),
-    );
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'm31a-test-safety-'));
     const workspaceDir = path.join(tempDir, 'workspace');
     const outsideDir = path.join(tempDir, 'outside');
 

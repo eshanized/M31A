@@ -478,9 +478,7 @@ describe('isDangerousExecutionEnvironmentVariable', () => {
   it('should identify safe environment variables as not dangerous', () => {
     expect(isDangerousExecutionEnvironmentVariable('PATH')).toBe(false);
     expect(isDangerousExecutionEnvironmentVariable('SAFE_VAR')).toBe(false);
-    expect(isDangerousExecutionEnvironmentVariable('M31A_KEY')).toBe(
-      false,
-    );
+    expect(isDangerousExecutionEnvironmentVariable('M31A_KEY')).toBe(false);
   });
 
   it('should contain all recommended dangerous variables in BLOCKED_EXECUTION_ENVS', () => {

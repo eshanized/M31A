@@ -43,8 +43,7 @@ vi.mock('os', async (importOriginal) => {
 });
 
 vi.mock('@m31a/core', async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import('@m31a/core')>();
+  const actual = await importOriginal<typeof import('@m31a/core')>();
   return {
     ...actual,
     homedir: () => os.homedir(),
@@ -73,9 +72,7 @@ describe('useExtensionUpdates', () => {
       errors: [],
     });
     vi.mocked(loadSkillsFromDir).mockResolvedValue([]);
-    tempHomeDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'm31a-test-home-'),
-    );
+    tempHomeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'm31a-test-home-'));
     vi.mocked(os.homedir).mockReturnValue(tempHomeDir);
     tempWorkspaceDir = fs.mkdtempSync(
       path.join(tempHomeDir, 'm31a-test-workspace-'),

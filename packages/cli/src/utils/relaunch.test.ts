@@ -24,8 +24,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@m31a/core', async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import('@m31a/core')>();
+  const actual = await importOriginal<typeof import('@m31a/core')>();
   return {
     ...actual,
     writeToStderr: mocks.writeToStderr,
@@ -462,9 +461,7 @@ describe('relaunchAppInChildProcess', () => {
         // Child #3 (after Auth Restart #2): stays in worktree with M31A_WORKTREE_HANDLED=1, one-time auth override cleared, admin settings preserved
         expect(capturedSpawns[2]?.cwd).toBe(selectedPath);
         expect(capturedSpawns[2]?.env['M31A_WORKTREE_HANDLED']).toBe('1');
-        expect(
-          capturedSpawns[2]?.env['M31A_AUTH_OVERRIDE'],
-        ).toBeUndefined();
+        expect(capturedSpawns[2]?.env['M31A_AUTH_OVERRIDE']).toBeUndefined();
         const thirdChild = mockedSpawn.mock.results[2]?.value as ChildProcess;
         expect(thirdChild.send).toHaveBeenCalledWith({
           type: 'admin-settings',
@@ -518,9 +515,7 @@ describe('relaunchAppInChildProcess', () => {
         expect(spawnCount).toBe(2);
         expect(chdirSpy).toHaveBeenCalledWith(invalidPath);
         expect(capturedSpawns[1]?.cwd).toBeUndefined();
-        expect(
-          capturedSpawns[1]?.env['M31A_WORKTREE_HANDLED'],
-        ).toBeFalsy();
+        expect(capturedSpawns[1]?.env['M31A_WORKTREE_HANDLED']).toBeFalsy();
       } finally {
         chdirSpy.mockRestore();
       }

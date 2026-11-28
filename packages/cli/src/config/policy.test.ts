@@ -19,8 +19,7 @@ import { writeToStderr } from '@m31a/core';
 
 // Mock debugLogger to avoid noise in test output
 vi.mock('@m31a/core', async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import('@m31a/core')>();
+  const actual = await importOriginal<typeof import('@m31a/core')>();
   return {
     ...actual,
     debugLogger: {
@@ -224,10 +223,7 @@ describe('resolveWorkspacePolicyState', () => {
     fs.writeFileSync(path.join(policiesDir, 'policy.toml'), 'rules = []');
 
     // Create a symlink to the home directory
-    const symlinkDir = path.join(
-      os.tmpdir(),
-      `m31a-symlink-${Date.now()}`,
-    );
+    const symlinkDir = path.join(os.tmpdir(), `m31a-symlink-${Date.now()}`);
     fs.symlinkSync(tempDir, symlinkDir, 'dir');
 
     try {

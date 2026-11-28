@@ -10,11 +10,7 @@ import {
   type ShellToolMessageProps,
 } from './ShellToolMessage.js';
 import { StreamingState } from '../../types.js';
-import {
-  type Config,
-  SHELL_TOOL_NAME,
-  CoreToolCallStatus,
-} from '@m31a/core';
+import { type Config, SHELL_TOOL_NAME, CoreToolCallStatus } from '@m31a/core';
 import { renderWithProviders } from '../../../test-utils/render.js';
 import { createMockSettings } from '../../../test-utils/settings.js';
 import { makeFakeConfig } from '@m31a/core';

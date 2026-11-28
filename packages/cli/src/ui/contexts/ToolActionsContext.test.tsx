@@ -20,8 +20,7 @@ import { type IndividualToolCallDisplay } from '../types.js';
 
 // Mock IdeClient
 vi.mock('@m31a/core', async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import('@m31a/core')>();
+  const actual = await importOriginal<typeof import('@m31a/core')>();
   return {
     ...actual,
     IdeClient: {

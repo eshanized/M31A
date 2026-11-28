@@ -4,10 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  normalizeError,
-  safeSerializeErrorValue,
-} from '@m31a/core';
+import { normalizeError, safeSerializeErrorValue } from '@m31a/core';
 
 export interface FormatErrorOptions {
   debug?: boolean;

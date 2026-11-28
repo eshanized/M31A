@@ -4,10 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  CoreToolCallStatus,
-  belongsInConfirmationQueue,
-} from '@m31a/core';
+import { CoreToolCallStatus, belongsInConfirmationQueue } from '@m31a/core';
 import {
   type HistoryItemWithoutId,
   type IndividualToolCallDisplay,

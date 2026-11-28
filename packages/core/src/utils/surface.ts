@@ -21,8 +21,7 @@ export const SURFACE_NOT_SET = 'terminal';
  */
 export function determineSurface(): string {
   // Priority 1 & 2: Explicit overrides from environment variables.
-  const customSurface =
-    process.env['M31A_SURFACE'] || process.env['SURFACE'];
+  const customSurface = process.env['M31A_SURFACE'] || process.env['SURFACE'];
   if (customSurface) {
     return customSurface;
   }

@@ -4,11 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  debugLogger,
-  startMemoryService,
-  type Config,
-} from '@m31a/core';
+import { debugLogger, startMemoryService, type Config } from '@m31a/core';
 
 export function startAutoMemoryIfEnabled(config: Config): void {
   if (!config.isAutoMemoryEnabled()) {

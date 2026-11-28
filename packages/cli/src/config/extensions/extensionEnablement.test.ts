@@ -14,11 +14,7 @@ import { ExtensionStorage } from './storage.js';
 
 vi.mock('./storage.js');
 
-import {
-  coreEvents,
-  M31A_DIR,
-  type M31AExtension,
-} from '@m31a/core';
+import { coreEvents, M31A_DIR, type M31AExtension } from '@m31a/core';
 
 vi.mock('node:os', () => ({
   homedir: vi.fn().mockReturnValue('/virtual-home'),
@@ -319,16 +315,12 @@ describe('ExtensionEnablementManager', () => {
     manager.disable('ext-test', true, '/Users/chrstn');
     manager.enable('ext-test', true, '/Users/chrstn/m31a');
 
-    expect(manager.isEnabled('ext-test', '/Users/chrstn/m31a')).toBe(
-      true,
-    );
+    expect(manager.isEnabled('ext-test', '/Users/chrstn/m31a')).toBe(true);
   });
 
   it('should not disable subdirectories if includeSubdirs is false', () => {
     manager.disable('ext-test', false, '/Users/chrstn');
-    expect(manager.isEnabled('ext-test', '/Users/chrstn/m31a')).toBe(
-      true,
-    );
+    expect(manager.isEnabled('ext-test', '/Users/chrstn/m31a')).toBe(true);
   });
 
   describe('extension overrides (-e <name>)', () => {

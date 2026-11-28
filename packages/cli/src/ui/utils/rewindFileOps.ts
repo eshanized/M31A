@@ -4,10 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type {
-  ConversationRecord,
-  MessageRecord,
-} from '@m31a/core';
+import type { ConversationRecord, MessageRecord } from '@m31a/core';
 import fs from 'node:fs/promises';
 import * as Diff from 'diff';
 import {

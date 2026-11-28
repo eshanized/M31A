@@ -2,8 +2,8 @@
 
 ## Overview
 
-This directory contains performance/CPU integration tests for the M31A.
-These tests measure wall-clock time, CPU usage, and event loop responsiveness to
+This directory contains performance/CPU integration tests for the M31A. These
+tests measure wall-clock time, CPU usage, and event loop responsiveness to
 detect regressions across key scenarios.
 
 CPU performance is inherently noisy, especially in CI. The harness addresses

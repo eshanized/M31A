@@ -6,10 +6,7 @@
 
 import path from 'node:path';
 import * as ts from 'typescript';
-import {
-  ALL_BUILTIN_TOOL_NAMES,
-  isValidToolName,
-} from '@m31a/core';
+import { ALL_BUILTIN_TOOL_NAMES, isValidToolName } from '@m31a/core';
 import { buildToolRegistry } from './tool-registry.js';
 
 export const BASE_EVAL_HELPERS = [

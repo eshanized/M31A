@@ -5,10 +5,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type {
-  DailyUsageSummary,
-  HeatmapDataset,
-} from '@m31a/core';
+import type { DailyUsageSummary, HeatmapDataset } from '@m31a/core';
 import { renderWithProviders } from '../../test-utils/render.js';
 import { theme } from '../semantic-colors.js';
 import {

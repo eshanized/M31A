@@ -43,10 +43,7 @@ export const WORKSPACE_SETTINGS_FILE = path.join(
 );
 
 export function getJson(url) {
-  const tmpFile = path.join(
-    os.tmpdir(),
-    `m31a-releases-${Date.now()}.json`,
-  );
+  const tmpFile = path.join(os.tmpdir(), `m31a-releases-${Date.now()}.json`);
   try {
     const result = spawnSync(
       'curl',
@@ -254,9 +251,7 @@ export async function ensureBinary(
   }
 
   const downloadUrl = asset.browser_download_url;
-  const tmpDir = fs.mkdtempSync(
-    path.join(os.tmpdir(), 'm31a-telemetry-'),
-  );
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'm31a-telemetry-'));
   const archivePath = path.join(tmpDir, asset.name);
 
   try {

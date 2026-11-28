@@ -15,9 +15,8 @@ import { FileCommandLoader } from '../../services/FileCommandLoader.js';
 vi.mock('../../services/FileCommandLoader.js');
 
 vi.mock('@m31a/core', async () => {
-  const actual = await vi.importActual<
-    typeof import('@m31a/core')
-  >('@m31a/core');
+  const actual =
+    await vi.importActual<typeof import('@m31a/core')>('@m31a/core');
   return {
     ...actual,
     Storage: class extends actual.Storage {

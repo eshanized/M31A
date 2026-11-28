@@ -47,8 +47,7 @@ vi.mock('@m31a/core', async (importOriginal) => {
   const { mockCoreDebugLogger } = await import(
     '../../test-utils/mockDebugLogger.js'
   );
-  const actual =
-    await importOriginal<typeof import('@m31a/core')>();
+  const actual = await importOriginal<typeof import('@m31a/core')>();
   const mocked = mockCoreDebugLogger(actual, { stripAnsi: true });
   return { ...mocked, getErrorMessage: vi.fn() };
 });

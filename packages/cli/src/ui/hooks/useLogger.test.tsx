@@ -14,8 +14,7 @@ let deferredInit: { resolve: (val?: unknown) => void };
 
 // Mock Logger
 vi.mock('@m31a/core', async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import('@m31a/core')>();
+  const actual = await importOriginal<typeof import('@m31a/core')>();
   return {
     ...actual,
     Logger: vi.fn().mockImplementation((id: string) => ({

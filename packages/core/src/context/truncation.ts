@@ -134,7 +134,7 @@ export function normalizeFunctionResponse(
     functionResponse: {
       // This spread should be safe as we mostly care about the function
       // response properties.
-       
+
       ...fr,
       response: newResponse,
     },

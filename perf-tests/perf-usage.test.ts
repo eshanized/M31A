@@ -5,11 +5,7 @@
  */
 
 import { describe, it, beforeAll, afterAll } from 'vitest';
-import {
-  TestRig,
-  PerfTestHarness,
-  type PerfSnapshot,
-} from '@m31a/test-utils';
+import { TestRig, PerfTestHarness, type PerfSnapshot } from '@m31a/test-utils';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {

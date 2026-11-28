@@ -37,9 +37,8 @@ const mockedCwd = vi.hoisted(() => vi.fn().mockReturnValue('/mock/cwd'));
 const mockedExit = vi.hoisted(() => vi.fn());
 
 vi.mock('@m31a/core', async () => {
-  const actual = await vi.importActual<
-    typeof import('@m31a/core')
-  >('@m31a/core');
+  const actual =
+    await vi.importActual<typeof import('@m31a/core')>('@m31a/core');
   return {
     ...actual,
     isHeadlessMode: vi.fn().mockReturnValue(false),

@@ -4,11 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {
-  getErrorMessage,
-  getMCPServerPrompts,
-  type Config,
-} from '@m31a/core';
+import { getErrorMessage, getMCPServerPrompts, type Config } from '@m31a/core';
 import {
   CommandKind,
   type CommandContext,

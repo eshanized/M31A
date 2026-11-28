@@ -5,11 +5,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import {
-  spawnAsync,
-  getAbsoluteGitDir,
-  debugLogger,
-} from '@m31a/core';
+import { spawnAsync, getAbsoluteGitDir, debugLogger } from '@m31a/core';
 import fs from 'node:fs';
 import fsPromises from 'node:fs/promises';
 

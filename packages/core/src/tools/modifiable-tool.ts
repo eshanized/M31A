@@ -64,9 +64,7 @@ function createTempFilesForModify(
   proposedContent: string,
   file_path: string,
 ): { oldPath: string; newPath: string; dirPath: string } {
-  const diffDir = fs.mkdtempSync(
-    path.join(os.tmpdir(), 'm31a-tool-modify-'),
-  );
+  const diffDir = fs.mkdtempSync(path.join(os.tmpdir(), 'm31a-tool-modify-'));
 
   try {
     fs.chmodSync(diffDir, 0o700);

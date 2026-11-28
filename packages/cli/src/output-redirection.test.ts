@@ -10,8 +10,7 @@ import { coreEvents, CoreEvent, type Config } from '@m31a/core';
 
 // Mock core dependencies
 vi.mock('@m31a/core', async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import('@m31a/core')>();
+  const actual = await importOriginal<typeof import('@m31a/core')>();
   return {
     ...actual,
     writeToStdout: vi.fn(),

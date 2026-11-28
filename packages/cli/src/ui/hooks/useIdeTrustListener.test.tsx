@@ -20,8 +20,7 @@ import type { LoadedSettings } from '../../config/settings.js';
 
 // Mock dependencies
 vi.mock('@m31a/core', async (importOriginal) => {
-  const original =
-    await importOriginal<typeof import('@m31a/core')>();
+  const original = await importOriginal<typeof import('@m31a/core')>();
   const ideClientInstance = {
     addTrustChangeListener: vi.fn(),
     removeTrustChangeListener: vi.fn(),

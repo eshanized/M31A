@@ -12,8 +12,7 @@ import * as childProcess from 'node:child_process';
 import { isGitRepository, debugLogger } from '@m31a/core';
 
 vi.mock('@m31a/core', async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import('@m31a/core')>();
+  const actual = await importOriginal<typeof import('@m31a/core')>();
   return {
     ...actual,
     isGitRepository: vi.fn(),
@@ -236,9 +235,7 @@ describe('getInstallationInfo', () => {
     const outsideDir = 'C:\\Users\\dev\\other-project';
     vi.spyOn(process, 'cwd').mockReturnValue(outsideDir);
     process.argv[1] = 'C:\\Users\\dev\\m31a\\bundle\\m31a.js';
-    mockedRealPathSync.mockReturnValue(
-      'C:\\Users\\dev\\m31a\\bundle\\m31a.js',
-    );
+    mockedRealPathSync.mockReturnValue('C:\\Users\\dev\\m31a\\bundle\\m31a.js');
     mockedIsGitRepository.mockImplementation((dir) =>
       dir.replace(/\\/g, '/').startsWith('C:/Users/dev/m31a'),
     );
@@ -306,10 +303,7 @@ describe('getInstallationInfo', () => {
       process.argv[1] = cliPath;
       mockedIsGitRepository.mockReturnValue(true);
       mockedExecSync.mockImplementation((cmd) => {
-        if (
-          typeof cmd === 'string' &&
-          cmd.includes('brew --prefix m31a')
-        ) {
+        if (typeof cmd === 'string' && cmd.includes('brew --prefix m31a')) {
           return '/opt/homebrew/opt/m31a';
         }
         throw new Error(`Command failed: ${cmd}`);
@@ -512,9 +506,7 @@ describe('getInstallationInfo', () => {
     const info = getInstallationInfo(projectRoot, true);
     expect(info.packageManager).toBe(PackageManager.YARN);
     expect(info.isGlobal).toBe(true);
-    expect(info.updateCommand).toBe(
-      'yarn global add @m31a/cli@latest',
-    );
+    expect(info.updateCommand).toBe('yarn global add @m31a/cli@latest');
     expect(info.updateMessage).toContain('Attempting to automatically update');
 
     // isAutoUpdateEnabled = false -> "Please run..."
@@ -658,8 +650,7 @@ describe('getInstallationInfo', () => {
       value: 'darwin',
     });
     // Path looks like standard global NPM
-    const cliPath =
-      '/usr/local/lib/node_modules/@m31a/cli/dist/index.js';
+    const cliPath = '/usr/local/lib/node_modules/@m31a/cli/dist/index.js';
     process.argv[1] = cliPath;
 
     // Setup mocks

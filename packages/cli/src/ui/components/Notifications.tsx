@@ -15,12 +15,7 @@ import { persistentState } from '../../utils/persistentState.js';
 import { useKeypress } from '../hooks/useKeypress.js';
 import { KeypressPriority } from '../contexts/KeypressContext.js';
 
-import {
-  M31A_DIR,
-  Storage,
-  homedir,
-  WarningPriority,
-} from '@m31a/core';
+import { M31A_DIR, Storage, homedir, WarningPriority } from '@m31a/core';
 
 import * as fs from 'node:fs/promises';
 import path from 'node:path';

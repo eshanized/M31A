@@ -13,8 +13,7 @@ import { waitFor } from '../../test-utils/async.js';
 import { debugLogger } from '@m31a/core';
 
 vi.mock('@m31a/core', async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import('@m31a/core')>();
+  const actual = await importOriginal<typeof import('@m31a/core')>();
   return {
     ...actual,
     isEditorAvailable: () => true, // Mock to behave predictably in CI

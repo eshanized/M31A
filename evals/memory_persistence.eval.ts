@@ -7,10 +7,7 @@
 import { describe, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
-import {
-  loadConversationRecord,
-  SESSION_FILE_PREFIX,
-} from '@m31a/core';
+import { loadConversationRecord, SESSION_FILE_PREFIX } from '@m31a/core';
 import { evalTest, assertModelHasOutput } from './test-helper.js';
 
 function findDir(base: string, name: string): string | null {
@@ -286,8 +283,7 @@ describe('memory persistence', () => {
       const leakedToGlobal = writeCalls.some((log) => {
         const args = log.toolRequest.args;
         return (
-          /\.m31a\/GEMINI\.md/i.test(args) &&
-          !/tmp\/[^/]+\/memory/i.test(args)
+          /\.m31a\/GEMINI\.md/i.test(args) && !/tmp\/[^/]+\/memory/i.test(args)
         );
       });
       expect(

@@ -5,10 +5,7 @@
  */
 
 import { useState, useCallback } from 'react';
-import type {
-  ConversationRecord,
-  MessageRecord,
-} from '@m31a/core';
+import type { ConversationRecord, MessageRecord } from '@m31a/core';
 import {
   calculateTurnStats,
   calculateRewindImpact,

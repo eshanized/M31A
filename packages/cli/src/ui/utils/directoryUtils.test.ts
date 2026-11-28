@@ -12,8 +12,7 @@ import * as fs from 'node:fs';
 import * as fsPromises from 'node:fs/promises';
 
 vi.mock('@m31a/core', async (importOriginal) => {
-  const original =
-    await importOriginal<typeof import('@m31a/core')>();
+  const original = await importOriginal<typeof import('@m31a/core')>();
   return {
     ...original,
     homedir: () => mockHomeDir,

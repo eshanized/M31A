@@ -5,11 +5,7 @@
  */
 
 import { useState, useEffect } from 'react';
-import {
-  ApprovalMode,
-  type Config,
-  getAdminErrorMessage,
-} from '@m31a/core';
+import { ApprovalMode, type Config, getAdminErrorMessage } from '@m31a/core';
 import { useKeypress } from './useKeypress.js';
 import { Command } from '../key/keyMatchers.js';
 import { useKeyMatchers } from './useKeyMatchers.js';

@@ -258,8 +258,7 @@ export async function moveInboxSkill(
   // Remove from inbox after successful copy
   await fs.rm(sourcePath, { recursive: true, force: true });
 
-  const label =
-    destination === 'global' ? '~/.m31a/skills' : '.m31a/skills';
+  const label = destination === 'global' ? '~/.m31a/skills' : '.m31a/skills';
   return {
     success: true,
     message: `Moved "${dirName}" to ${label}.`,

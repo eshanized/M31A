@@ -30,8 +30,7 @@ vi.mock('node:os', async (importOriginal) => {
 
 // Mock @m31a/core
 vi.mock('@m31a/core', async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import('@m31a/core')>();
+  const actual = await importOriginal<typeof import('@m31a/core')>();
   return {
     ...actual,
     homedir: mockHomedir,
@@ -41,9 +40,8 @@ vi.mock('@m31a/core', async (importOriginal) => {
     loadAgentsFromDirectory: vi
       .fn()
       .mockImplementation(async () => ({ agents: [], errors: [] })),
-    loadSkillsFromDir: (
-      await importOriginal<typeof import('@m31a/core')>()
-    ).loadSkillsFromDir,
+    loadSkillsFromDir: (await importOriginal<typeof import('@m31a/core')>())
+      .loadSkillsFromDir,
   };
 });
 

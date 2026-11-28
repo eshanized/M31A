@@ -6,10 +6,7 @@
 
 import { type ReactElement } from 'react';
 
-import type {
-  ExtensionLoader,
-  M31AExtension,
-} from '@m31a/core';
+import type { ExtensionLoader, M31AExtension } from '@m31a/core';
 import { createMockCommandContext } from '../../test-utils/mockCommandContext.js';
 import { MessageType } from '../types.js';
 import {

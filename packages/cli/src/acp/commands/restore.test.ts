@@ -18,8 +18,7 @@ import type { Mock } from 'vitest';
 
 vi.mock('node:fs/promises');
 vi.mock('@m31a/core', async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import('@m31a/core')>();
+  const actual = await importOriginal<typeof import('@m31a/core')>();
   return {
     ...actual,
     getCheckpointInfoList: vi.fn(),

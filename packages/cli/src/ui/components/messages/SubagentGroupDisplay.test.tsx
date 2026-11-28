@@ -6,11 +6,7 @@
 import { waitFor } from '../../../test-utils/async.js';
 import { renderWithProviders } from '../../../test-utils/render.js';
 import { SubagentGroupDisplay } from './SubagentGroupDisplay.js';
-import {
-  Kind,
-  CoreToolCallStatus,
-  SubagentState,
-} from '@m31a/core';
+import { Kind, CoreToolCallStatus, SubagentState } from '@m31a/core';
 import type { IndividualToolCallDisplay } from '../../types.js';
 import { describe, it, expect, vi } from 'vitest';
 import { Text } from 'ink';

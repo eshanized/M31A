@@ -2396,10 +2396,7 @@ console.log(JSON.stringify({
             hookOutput,
           )}));`;
 
-          const scriptPath = join(
-            os.tmpdir(),
-            'm31a-tests-ask-cancel-hook.js',
-          );
+          const scriptPath = join(os.tmpdir(), 'm31a-tests-ask-cancel-hook.js');
           writeFileSync(scriptPath, hookScript);
 
           rig.setup(testName, {

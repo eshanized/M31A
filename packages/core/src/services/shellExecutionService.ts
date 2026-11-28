@@ -602,8 +602,7 @@ export class ShellExecutionService {
 
     const baseEnv: Record<string, string | undefined> = {
       ...sanitizedEnv,
-      [M31A_IDENTIFICATION_ENV_VAR]:
-        M31A_IDENTIFICATION_ENV_VAR_VALUE,
+      [M31A_IDENTIFICATION_ENV_VAR]: M31A_IDENTIFICATION_ENV_VAR_VALUE,
       [M31A_IN_SHELL_ENV_VAR]: M31A_IN_SHELL_ENV_VAR_VALUE,
       TERM: 'xterm-256color',
       PAGER: shellExecutionConfig.pager ?? 'cat',

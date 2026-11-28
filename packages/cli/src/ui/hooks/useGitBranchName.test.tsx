@@ -21,9 +21,8 @@ import {
 
 // Mock @m31a/core
 vi.mock('@m31a/core', async () => {
-  const original = await vi.importActual<
-    typeof import('@m31a/core')
-  >('@m31a/core');
+  const original =
+    await vi.importActual<typeof import('@m31a/core')>('@m31a/core');
   return {
     ...original,
     spawnAsync: vi.fn(),

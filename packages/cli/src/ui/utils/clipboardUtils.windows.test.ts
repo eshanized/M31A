@@ -11,8 +11,7 @@ import { saveClipboardImage } from './clipboardUtils.js';
 // Mock dependencies
 vi.mock('node:fs/promises');
 vi.mock('@m31a/core', async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import('@m31a/core')>();
+  const actual = await importOriginal<typeof import('@m31a/core')>();
   return {
     ...actual,
     spawnAsync: vi.fn(),

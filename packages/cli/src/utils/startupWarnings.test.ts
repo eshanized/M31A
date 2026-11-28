@@ -11,8 +11,7 @@ import { getErrorMessage } from '@m31a/core';
 
 vi.mock('node:fs/promises', { spy: true });
 vi.mock('@m31a/core', async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import('@m31a/core')>();
+  const actual = await importOriginal<typeof import('@m31a/core')>();
   return {
     ...actual,
     getErrorMessage: vi.fn(),

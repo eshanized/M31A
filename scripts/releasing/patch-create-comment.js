@@ -81,8 +81,7 @@ async function main() {
   const commit = argv.commit || process.env.COMMIT;
   const channel = argv.channel || process.env.CHANNEL;
   const environment = argv.environment;
-  const repository =
-    argv.repository || process.env.REPOSITORY || 'm31a/M31A';
+  const repository = argv.repository || process.env.REPOSITORY || 'm31a/M31A';
   const runId = argv.runId || process.env.GITHUB_RUN_ID || '0';
 
   // Validate required parameters

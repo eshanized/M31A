@@ -21,9 +21,7 @@ const mockCheckIntegrity = vi.fn();
 const mockAcceptIntegrity = vi.fn();
 
 vi.mock('@m31a/core', async () => {
-  const actual = await vi.importActual<typeof ServerConfig>(
-    '@m31a/core',
-  );
+  const actual = await vi.importActual<typeof ServerConfig>('@m31a/core');
   return {
     ...actual,
     createPolicyEngineConfig: vi.fn().mockResolvedValue({

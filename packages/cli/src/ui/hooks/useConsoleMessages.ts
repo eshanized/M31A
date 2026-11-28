@@ -6,11 +6,7 @@
 
 import { useCallback, useSyncExternalStore } from 'react';
 import type { ConsoleMessageItem } from '../types.js';
-import {
-  coreEvents,
-  CoreEvent,
-  type ConsoleLogPayload,
-} from '@m31a/core';
+import { coreEvents, CoreEvent, type ConsoleLogPayload } from '@m31a/core';
 
 export interface UseErrorCountReturn {
   errorCount: number;

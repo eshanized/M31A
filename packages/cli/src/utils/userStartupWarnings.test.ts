@@ -13,10 +13,7 @@ import {
   isFolderTrustEnabled,
   isWorkspaceTrusted,
 } from '../config/trustedFolders.js';
-import {
-  getCompatibilityWarnings,
-  WarningPriority,
-} from '@m31a/core';
+import { getCompatibilityWarnings, WarningPriority } from '@m31a/core';
 
 // Mock os.homedir to control the home directory in tests
 vi.mock('node:os', async (importOriginal) => {
@@ -28,8 +25,7 @@ vi.mock('node:os', async (importOriginal) => {
 });
 
 vi.mock('@m31a/core', async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import('@m31a/core')>();
+  const actual = await importOriginal<typeof import('@m31a/core')>();
   return {
     ...actual,
     getCompatibilityWarnings: vi.fn().mockReturnValue([]),

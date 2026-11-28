@@ -22,8 +22,7 @@ import type { ClientRequest, IncomingMessage } from 'node:http';
 
 vi.mock('node:https');
 vi.mock('@m31a/core', async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import('@m31a/core')>();
+  const actual = await importOriginal<typeof import('@m31a/core')>();
   return {
     ...actual,
     validateUrlDestination: vi.fn(),

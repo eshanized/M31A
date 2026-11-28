@@ -24,10 +24,7 @@ export default defineConfig({
     environment: 'node',
     globals: true,
     alias: {
-      '@m31a/core': path.resolve(
-        __dirname,
-        '../packages/core/index.ts',
-      ),
+      '@m31a/core': path.resolve(__dirname, '../packages/core/index.ts'),
     },
     setupFiles: [path.resolve(__dirname, '../packages/cli/test-setup.ts')],
     server: {

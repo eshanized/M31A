@@ -11,10 +11,7 @@ import type {
   OpenCustomDialogActionReturn,
 } from './types.js';
 import { CommandKind } from './types.js';
-import type {
-  HookRegistryEntry,
-  MessageActionReturn,
-} from '@m31a/core';
+import type { HookRegistryEntry, MessageActionReturn } from '@m31a/core';
 import { getErrorMessage } from '@m31a/core';
 import { SettingScope, isLoadableSettingScope } from '../../config/settings.js';
 import { enableHook, disableHook } from '../../utils/hookSettings.js';

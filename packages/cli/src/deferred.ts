@@ -4,11 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { ArgumentsCamelCase, CommandModule } from 'yargs';
-import {
-  coreEvents,
-  ExitCodes,
-  getAdminErrorMessage,
-} from '@m31a/core';
+import { coreEvents, ExitCodes, getAdminErrorMessage } from '@m31a/core';
 import { runExitCleanup } from './utils/cleanup.js';
 import type { MergedSettings } from './config/settings.js';
 import process from 'node:process';

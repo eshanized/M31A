@@ -146,8 +146,7 @@ export class IdeClient {
       connectionConfig?.authToken ?? process.env['M31A_IDE_AUTH_TOKEN'];
 
     const workspacePath =
-      connectionConfig?.workspacePath ??
-      process.env['M31A_IDE_WORKSPACE_PATH'];
+      connectionConfig?.workspacePath ?? process.env['M31A_IDE_WORKSPACE_PATH'];
 
     const { isValid, error } = validateWorkspacePath(
       workspacePath,

@@ -35,8 +35,7 @@ vi.mock('./cleanup.js', () => ({
 
 // Mock the core modules
 vi.mock('@m31a/core', async (importOriginal) => {
-  const original =
-    await importOriginal<typeof import('@m31a/core')>();
+  const original = await importOriginal<typeof import('@m31a/core')>();
 
   return {
     ...original,

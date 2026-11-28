@@ -104,7 +104,6 @@ export function updatePart(part: Part, updates: Partial<Part>): Part {
 export function cloneFunctionResponse(
   resp: NonNullable<Part['functionResponse']>,
 ): NonNullable<Part['functionResponse']> {
-   
   return { ...resp };
 }
 

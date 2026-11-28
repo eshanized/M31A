@@ -28,8 +28,7 @@ async function getMemoryNodeArgs(): Promise<string[]> {
     const { readFileSync } = await import('node:fs');
     const { join } = await import('node:path');
     // Respect M31A_HOME environment variable, falling back to os.homedir()
-    const baseDir =
-      process.env['M31A_HOME'] || join(os.homedir(), '.m31a');
+    const baseDir = process.env['M31A_HOME'] || join(os.homedir(), '.m31a');
     const settingsPath = join(baseDir, 'settings.json');
     const rawSettings = readFileSync(settingsPath, 'utf8');
     const settings = JSON.parse(rawSettings);
@@ -160,9 +159,7 @@ async function run() {
     // --- Heavy Child Process ---
     // Now we can safely import everything.
     const { main } = await import('./src/m31a.js');
-    const { FatalError, writeToStderr } = await import(
-      '@m31a/core'
-    );
+    const { FatalError, writeToStderr } = await import('@m31a/core');
     const { runExitCleanup } = await import('./src/utils/cleanup.js');
     const { formatCliError, isCliDebugEnabled } = await import(
       './src/utils/formatError.js'

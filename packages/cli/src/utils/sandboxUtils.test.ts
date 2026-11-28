@@ -599,9 +599,7 @@ describe('sandboxUtils', () => {
         isCredentialOrSensitivePath('/home/user/.m31a/google_accounts.json'),
       ).toBe(true);
       expect(
-        isCredentialOrSensitivePath(
-          '/home/user/.m31a/gemini-credentials.json',
-        ),
+        isCredentialOrSensitivePath('/home/user/.m31a/gemini-credentials.json'),
       ).toBe(true);
       expect(
         isCredentialOrSensitivePath('/home/user/.m31a/mcp-oauth-tokens.json'),
@@ -630,9 +628,9 @@ describe('sandboxUtils', () => {
       expect(isCredentialOrSensitivePath('/home/user/.m31a/token.json')).toBe(
         true,
       );
-      expect(
-        isCredentialOrSensitivePath('/home/user/.m31a/github-token'),
-      ).toBe(true);
+      expect(isCredentialOrSensitivePath('/home/user/.m31a/github-token')).toBe(
+        true,
+      );
       expect(
         isCredentialOrSensitivePath('/home/user/.m31a/api.credentials'),
       ).toBe(true);
@@ -643,9 +641,9 @@ describe('sandboxUtils', () => {
         isCredentialOrSensitivePath('/home/user/.m31a/user_cred.json'),
       ).toBe(true);
       expect(isCredentialOrSensitivePath('/home/user/.m31a/.env')).toBe(true);
-      expect(
-        isCredentialOrSensitivePath('/home/user/.m31a/private.key'),
-      ).toBe(true);
+      expect(isCredentialOrSensitivePath('/home/user/.m31a/private.key')).toBe(
+        true,
+      );
       expect(isCredentialOrSensitivePath('/home/user/.m31a/cert.pem')).toBe(
         true,
       );
@@ -699,12 +697,12 @@ describe('sandboxUtils', () => {
     });
 
     it('should not false-positive on words sharing sensitive substrings without separators', () => {
-      expect(
-        isCredentialOrSensitivePath('/home/user/.m31a/monkey.json'),
-      ).toBe(false);
-      expect(
-        isCredentialOrSensitivePath('/home/user/.m31a/sacred.json'),
-      ).toBe(false);
+      expect(isCredentialOrSensitivePath('/home/user/.m31a/monkey.json')).toBe(
+        false,
+      );
+      expect(isCredentialOrSensitivePath('/home/user/.m31a/sacred.json')).toBe(
+        false,
+      );
       expect(
         isCredentialOrSensitivePath('/home/user/.m31a/commands/tokenized.js'),
       ).toBe(false);

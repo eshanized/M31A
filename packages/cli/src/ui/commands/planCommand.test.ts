@@ -19,8 +19,7 @@ import {
 import { copyToClipboard } from '../utils/commandUtils.js';
 
 vi.mock('@m31a/core', async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import('@m31a/core')>();
+  const actual = await importOriginal<typeof import('@m31a/core')>();
   return {
     ...actual,
     coreEvents: {

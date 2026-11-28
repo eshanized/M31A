@@ -9,12 +9,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { quote } from 'shell-quote';
-import {
-  debugLogger,
-  M31A_DIR,
-  homedir,
-  resolveToRealPath,
-} from '@m31a/core';
+import { debugLogger, M31A_DIR, homedir, resolveToRealPath } from '@m31a/core';
 
 export const LOCAL_DEV_SANDBOX_IMAGE_NAME = 'm31a-sandbox';
 export const SANDBOX_NETWORK_NAME = 'm31a-sandbox';

@@ -15,8 +15,7 @@ import { ExtensionManager } from '../../config/extension-manager.js';
 const mockGetErrorMessage = vi.hoisted(() => vi.fn());
 
 vi.mock('@m31a/core', async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import('@m31a/core')>();
+  const actual = await importOriginal<typeof import('@m31a/core')>();
   return {
     ...actual,
     getErrorMessage: mockGetErrorMessage,

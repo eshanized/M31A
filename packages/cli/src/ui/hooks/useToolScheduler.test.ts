@@ -27,8 +27,7 @@ import { createMockMessageBus } from '@m31a/core/src/test-utils/mock-message-bus
 
 // Mock Core Scheduler
 vi.mock('@m31a/core', async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import('@m31a/core')>();
+  const actual = await importOriginal<typeof import('@m31a/core')>();
   return {
     ...actual,
     Scheduler: vi.fn().mockImplementation(() => ({

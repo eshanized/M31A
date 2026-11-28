@@ -6,10 +6,7 @@
 
 import { describe, it, expect, beforeAll } from 'vitest';
 import { ToolConfirmationMessage } from './ToolConfirmationMessage.js';
-import type {
-  SerializableConfirmationDetails,
-  Config,
-} from '@m31a/core';
+import type { SerializableConfirmationDetails, Config } from '@m31a/core';
 import { initializeShellParsers } from '@m31a/core';
 import { renderWithProviders } from '../../../test-utils/render.js';
 

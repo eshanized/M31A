@@ -9,10 +9,7 @@ import { act } from 'react';
 import { renderWithProviders } from '../../test-utils/render.js';
 import { RewindViewer } from './RewindViewer.js';
 import { waitFor } from '../../test-utils/async.js';
-import type {
-  ConversationRecord,
-  MessageRecord,
-} from '@m31a/core';
+import type { ConversationRecord, MessageRecord } from '@m31a/core';
 
 vi.mock('ink', async () => {
   const actual = await vi.importActual<typeof import('ink')>('ink');
@@ -33,8 +30,7 @@ vi.mock('../utils/formatters.js', async (importOriginal) => {
 });
 
 vi.mock('@m31a/core', async (importOriginal) => {
-  const original =
-    await importOriginal<typeof import('@m31a/core')>();
+  const original = await importOriginal<typeof import('@m31a/core')>();
 
   const partToStringRecursive = (part: unknown): string => {
     if (!part) {

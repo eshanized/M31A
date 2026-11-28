@@ -8,10 +8,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { renderWithProviders } from '../../../test-utils/render.js';
 import { createMockSettings } from '../../../test-utils/settings.js';
 import { ToolGroupDisplay } from './ToolGroupDisplay.js';
-import {
-  CoreToolCallStatus,
-  UPDATE_TOPIC_DISPLAY_NAME,
-} from '@m31a/core';
+import { CoreToolCallStatus, UPDATE_TOPIC_DISPLAY_NAME } from '@m31a/core';
 import type {
   HistoryItemToolDisplayGroup,
   ToolDisplayItem,

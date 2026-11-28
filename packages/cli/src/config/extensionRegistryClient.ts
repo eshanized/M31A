@@ -5,11 +5,7 @@
  */
 
 import * as fs from 'node:fs/promises';
-import {
-  fetchWithTimeout,
-  resolveToRealPath,
-  isPrivateIp,
-} from '@m31a/core';
+import { fetchWithTimeout, resolveToRealPath, isPrivateIp } from '@m31a/core';
 import { AsyncFzf } from 'fzf';
 
 export interface RegistryExtension {

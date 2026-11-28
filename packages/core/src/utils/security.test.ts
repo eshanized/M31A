@@ -693,10 +693,7 @@ describe('isPathSecureSync', () => {
       isSymbolicLink: () => false,
     } as unknown as Stats);
 
-    const result = isPathSecureSync(
-      '/etc/m31a/system-defaults.json',
-      'file',
-    );
+    const result = isPathSecureSync('/etc/m31a/system-defaults.json', 'file');
     expect(result.secure).toBe(false);
     expect(result.reason).toContain('is not owned by root (uid 0)');
   });
@@ -714,10 +711,7 @@ describe('isPathSecureSync', () => {
       isSymbolicLink: () => false,
     } as unknown as Stats);
 
-    const result = isPathSecureSync(
-      '/etc/m31a/system-defaults.json',
-      'file',
-    );
+    const result = isPathSecureSync('/etc/m31a/system-defaults.json', 'file');
     expect(result.secure).toBe(false);
     expect(result.reason).toContain('is writable by group or others');
   });
@@ -739,10 +733,7 @@ describe('isPathSecureSync', () => {
       mode: 0o777,
     } as unknown as Stats);
 
-    const result = isPathSecureSync(
-      '/etc/m31a/system-defaults.json',
-      'file',
-    );
+    const result = isPathSecureSync('/etc/m31a/system-defaults.json', 'file');
     expect(result.secure).toBe(true);
   });
 
@@ -762,10 +753,7 @@ describe('isPathSecureSync', () => {
       mode: 0o777,
     } as unknown as Stats);
 
-    const result = isPathSecureSync(
-      '/etc/m31a/system-defaults.json',
-      'file',
-    );
+    const result = isPathSecureSync('/etc/m31a/system-defaults.json', 'file');
     expect(result.secure).toBe(false);
     expect(result.reason).toContain(
       "Symlink '/etc/m31a/system-defaults.json' is not owned by root (uid 0)",
@@ -838,9 +826,7 @@ describe('isFileAndDirectorySecureSync', () => {
       '/etc/m31a/system-defaults.json',
     );
     expect(result.secure).toBe(false);
-    expect(result.reason).toContain(
-      "Parent directory '/etc/m31a' is insecure",
-    );
+    expect(result.reason).toContain("Parent directory '/etc/m31a' is insecure");
   });
 
   it.skip('returns secure=false if ancestor directory of normalized path is insecure', () => {
@@ -1500,9 +1486,7 @@ describe('isFileAndDirectorySecureSync', () => {
     // Verify cache has the stripped and normalised lowercased paths (without \\?\UNC\ or UNC\)
     expect(cache.has(normalizedFile)).toBe(true);
     expect(cache.has(parentDir)).toBe(true);
-    expect(cache.has('unc\\server\\share\\m31a\\settings.json')).toBe(
-      false,
-    );
+    expect(cache.has('unc\\server\\share\\m31a\\settings.json')).toBe(false);
 
     // Verify spawnSync was called and received the standard UNC paths
     const spawnCall = vi.mocked(spawnSync).mock.calls[0];

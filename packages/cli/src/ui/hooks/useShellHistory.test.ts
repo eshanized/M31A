@@ -36,8 +36,7 @@ vi.mock('node:fs', async (importOriginal) => {
   };
 });
 vi.mock('@m31a/core', async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import('@m31a/core')>();
+  const actual = await importOriginal<typeof import('@m31a/core')>();
   const path = await import('node:path');
   class Storage {
     static getGlobalSettingsPath(): string {

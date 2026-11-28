@@ -5,11 +5,7 @@
  */
 
 import type { CommandModule } from 'yargs';
-import {
-  debugLogger,
-  type SkillDefinition,
-  getErrorMessage,
-} from '@m31a/core';
+import { debugLogger, type SkillDefinition, getErrorMessage } from '@m31a/core';
 import { exitCli } from '../utils.js';
 import { installSkill } from '../../utils/skillUtils.js';
 import chalk from 'chalk';

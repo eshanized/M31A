@@ -10,8 +10,7 @@ import { AppHeader } from './AppHeader.js';
 
 // We mock the entire module to control the isAppleTerminal export
 vi.mock('@m31a/core', async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import('@m31a/core')>();
+  const actual = await importOriginal<typeof import('@m31a/core')>();
   return {
     ...actual,
     isAppleTerminal: vi.fn(),
