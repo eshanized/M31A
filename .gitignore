@@ -1,33 +1,73 @@
-/target
-*.db
-*.db-wal
-*.db-shm
-.DS_Store
-*.log
+# API keys and secrets
 .env
-.env.*
-*.key
-*.pem
-__pycache__/
-node_modules/
-dist/
+.env~
 
-/codex/
-.m31a-vault/
-.m31a/
+# m31a settings
+# We want to keep the .m31a in the root of the repo and ignore any .m31a
+# in subdirectories. In our root .m31a we want to allow for version control
+# for subcommands.
+**/.m31a/
+!/.m31a/
+.m31a/*
+!.m31a/config.yaml
+!.m31a/commands/
+!.m31a/skills/
+!.m31a/settings.json
 
-# Benchmark & test runtime outputs
-benchmark_results.json
-benchmark*.json
-*.profraw
-*.profdata
+# Note: .geminipboard/ is NOT in gitignore so Gemini can access pasted images
 
-# Python cache & bytecode
-*.pyc
-*.pyo
-.pytest_cache/
+# Dependency directory
+node_modules
+bower_components
 
-.agents/
+# Editors
+.idea
+*.iml
+
+# OS metadata
+.DS_Store
+Thumbs.db
+
+# TypeScript build info files
+*.tsbuildinfo
+
+# Ignore built ts files
+dist
+
+# Docker folder to help skip auth refreshes
+.docker
+
+bundle
+
+# Test report files
+junit.xml
+packages/*/coverage/
+
+# Generated files
+packages/cli/src/generated/
+packages/core/src/generated/
+packages/devtools/src/_client-assets.ts
+.integration-tests/
+.perf-tests/
+packages/vscode-ide-companion/*.vsix
+packages/cli/download-ripgrep*/
+
+# GHA credentials
+gha-creds-*.json
+
+# Log files
+patch_output.log
+gemini-debug.log
+
+.genkit
+.geminipboard/
+.eslintcache
+evals/logs/
+
+temp_agents/
+
+# conductor extension and planning directories
+conductor/
+.vscode-test/
+.agents
 skills-lock.json
-.gravitas
-*.deb
